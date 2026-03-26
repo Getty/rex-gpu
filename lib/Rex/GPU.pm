@@ -5,8 +5,6 @@ package Rex::GPU;
 use v5.14.4;
 use warnings;
 
-our $VERSION = '0.001';
-
 use Rex::GPU::Detect;
 use Rex::GPU::NVIDIA;
 
@@ -112,6 +110,6 @@ It handles the complete stack needed to make GPUs available in Kubernetes:
 
 =head1 SEE ALSO
 
-L<Rex>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>
+L<Rex>, L<Rex::Rancher>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>
 
 =cut
