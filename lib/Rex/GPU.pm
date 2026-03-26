@@ -110,6 +110,6 @@ It handles the complete stack needed to make GPUs available in Kubernetes:
 
 =head1 SEE ALSO
 
-L<Rex>, L<Rex::Rancher>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>
+L<Rex>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>
 
 =cut

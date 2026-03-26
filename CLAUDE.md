@@ -1,50 +1,39 @@
-# Rex::Rancher
+# Rex::GPU
 
-Rancher Kubernetes (RKE2/K3s) deployment automation for Rex, with GPU support.
+GPU detection and driver management for Rex. Distribution-agnostic — works with
+any Kubernetes setup (RKE2, K3s, kubeadm, standalone containerd).
 
 ## Module Structure
 
 ```
-Rex::Rancher               — Main module, rancher_deploy_server/agent one-stop functions
-Rex::Rancher::Node          — Node preparation (hostname, NTP, sysctl, swap, kernel modules)
-Rex::Rancher::Server        — Control plane installation (RKE2 + K3s)
-Rex::Rancher::Agent         — Worker node join (RKE2 + K3s)
-Rex::Rancher::Cilium        — Cilium CNI installation and upgrades
-Rex::GPU                    — GPU detection + full setup orchestration
-Rex::GPU::Detect            — PCI-based GPU hardware detection
-Rex::GPU::NVIDIA            — NVIDIA driver, container toolkit, containerd config
+Rex::GPU              — gpu_detect(), gpu_setup() orchestration
+Rex::GPU::Detect      — PCI-based GPU hardware detection (NVIDIA, AMD)
+Rex::GPU::NVIDIA      — NVIDIA driver, container toolkit, containerd config
 ```
 
 ## Usage
 
-All modules support `distribution => 'rke2'` (default) or `distribution => 'k3s'`.
-
 ```perl
-use Rex -feature => ['1.4'];
-use Rex::Rancher;
+use Rex::GPU;
 
-task "deploy_cp", sub {
-  rancher_deploy_server(
-    distribution => 'rke2',
-    hostname     => 'cp-01',
-    domain       => 'k8s.example.com',
-    token        => 'my-token',
-    tls_san      => 'k8s.example.com',
-  );
-};
+# Just detect
+my $gpus = gpu_detect();
+
+# Full setup: drivers + toolkit + containerd config
+gpu_setup(containerd_config => 'rke2');  # or 'k3s', 'containerd', 'none'
 ```
 
 ## Used By
 
-`kubernetes-ocp` — the OCP Rexfile can be simplified to use these modules instead of inline logic.
+- `Rex::Rancher` — optional GPU support via `gpu => 1`
+- `kubernetes-ocp` — OCP cluster deployment
 
 ## Testing
 
 ```bash
-prove -l t/          # Unit tests
+prove -l t/
 ```
 
 ## Build
 
 Uses `[@Author::GETTY]` Dist::Zilla plugin bundle.
-Distribution name: `Rex-Rancher`.
