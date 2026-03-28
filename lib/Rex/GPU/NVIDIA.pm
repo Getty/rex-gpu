@@ -200,8 +200,9 @@ sub _install_driver_debian {
     push @packages, ($latest || "nvidia-driver-570-server"), "nvidia-smi";
   }
   else {
-    # Debian: arch-specific headers meta + driver meta + smi (separate package on Debian)
-    push @packages, "linux-headers-$arch";
+    # Debian: just the running kernel's headers (sufficient for DKMS) + driver
+    # Do NOT install linux-headers-$arch meta-package — it pulls in a new kernel
+    # image whose post-install scripts (grub, initramfs) can return non-zero
     push @packages, "nvidia-driver", "nvidia-smi";
   }
 
