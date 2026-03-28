@@ -273,43 +273,42 @@ sub _install_driver_suse {
   my $version = operating_system_version();
   my $major = int($version);
 
-  # Add NVIDIA repos (use direct baseurls — zypper cannot parse yum .repo files)
+  # Remove any stale NVIDIA packages first — avoids kmp/userspace version mismatch
+  # caused by libnvidia-ml/libnvidia-cfg from the standard OSS non-free repo lagging
+  # behind the NVIDIA GFX repo packages.
+  Rex::Logger::info("  Removing any existing NVIDIA packages...");
+  run q{rpm -e $(rpm -qa | grep -E '^(nvidia|libnvidia)' | grep -v 'container') 2>/dev/null || true},
+    auto_die => 0;
+
+  # Add NVIDIA GFX repo (use direct baseurls — zypper cannot parse yum .repo files)
   if ($major >= 16) {
-    Rex::Logger::info("  Adding NVIDIA repos (suse16)...");
-    run "zypper rr nvidia-gfx cuda 2>/dev/null || true", auto_die => 0;
+    Rex::Logger::info("  Adding NVIDIA GFX repo (suse16)...");
+    run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
     run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null",
-      auto_die => 0;
-    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/suse16/x86_64 cuda 2>/dev/null",
       auto_die => 0;
   }
   else {
     my $leap_version = sprintf("%.1f", $version / 10);  # 156 -> 15.6
-    Rex::Logger::info("  Adding NVIDIA repos (opensuse15, Leap $leap_version)...");
-    run "zypper rr nvidia-gfx cuda 2>/dev/null || true", auto_die => 0;
+    Rex::Logger::info("  Adding NVIDIA GFX repo (opensuse15, Leap $leap_version)...");
+    run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
     run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/$leap_version/ nvidia-gfx 2>/dev/null",
       auto_die => 0;
-    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/opensuse15/x86_64 cuda 2>/dev/null",
-      auto_die => 0;
   }
-  run "zypper --gpg-auto-import-keys refresh 2>/dev/null", auto_die => 0;
+  run "zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null", auto_die => 0;
 
-  # Kernel devel
-  my $kernel_version = $running_kernel;
-  $kernel_version =~ s/-default$//;
-  my @packages = ("kernel-default-devel=$kernel_version", "kernel-syms");
+  # Use the meta package — it co-installs kmp-default + userspace at the same version,
+  # preventing the split that causes "Driver/library version mismatch" with nvidia-smi.
+  # Pre-signed kmp packages don't need kernel-devel/headers.
+  my $meta_pkg = $major >= 16
+    ? "nvidia-open-driver-G07-signed-kmp-meta"
+    : "nvidia-open-driver-G06-signed-kmp-meta";
 
-  # Driver packages — G07 for 16.x, G06 for 15.x
-  if ($major >= 16) {
-    push @packages, "nvidia-open-driver-G07-signed-kmp-default",
-                    "nvidia-video-G07", "nvidia-compute-utils-G07";
-  }
-  else {
-    push @packages, "nvidia-open-driver-G06-signed-kmp-default",
-                    "nvidia-video-G06", "nvidia-compute-utils-G06";
-  }
+  Rex::Logger::info("  Installing $meta_pkg...");
+  run "zypper install -y $meta_pkg", auto_die => 0;
 
-  Rex::Logger::info("  Installing: " . join(", ", @packages));
-  run "zypper install -y " . join(" ", @packages), auto_die => 0;
+  # Lock the OSS non-free standalone packages so future zypper updates don't
+  # pull in a stale libnvidia-ml / libnvidia-cfg and cause a mismatch again.
+  run "zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true", auto_die => 0;
 }
 
 # ============================================================
