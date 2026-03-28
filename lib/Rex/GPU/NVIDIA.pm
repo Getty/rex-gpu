@@ -279,13 +279,14 @@ sub _install_driver_debian {
   }
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
-  # apt-get update returns non-zero on warnings (snap repos, apt-daily, GPG) —
-  # use auto_die => 0 to avoid Rex::Pkg::Base aborting before the actual install.
-  run "apt-get update -q", auto_die => 0;
+  # DPkg::Lock::Timeout=120: wait up to 2 min for any apt/dpkg lock held by
+  # the system's initial setup (unattended-upgrades, cloud-init, Hetzner init)
+  # that may be active right after first boot. Returns non-zero on repo warnings
+  # (snap repos, expired GPG keys) — use auto_die => 0 throughout.
+  run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
 
   # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
   # post-install scripts (DKMS build, grub update, initramfs). Verify via dpkg -l.
-  # DPkg::Lock::Timeout=120: wait up to 2 min for apt-daily.timer lock after reboot.
   my $pkg_str = join(" ", @packages);
   run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y $pkg_str", auto_die => 0;
 
@@ -455,7 +456,7 @@ sub _install_toolkit_debian {
   file "/etc/apt/sources.list.d/nvidia-container-toolkit.list",
     content => 'deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
 
-  run "apt-get update -q", auto_die => 0;
+  run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
   # DPkg::Lock::Timeout=120: wait for apt-daily.timer lock that fires after reboot.
   run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y nvidia-container-toolkit", auto_die => 0;
   my $check = run "dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'", auto_die => 0;
