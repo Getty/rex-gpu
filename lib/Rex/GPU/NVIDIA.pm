@@ -26,16 +26,34 @@ use vars qw(@EXPORT);
 
 =method install_driver
 
-Install NVIDIA GPU drivers appropriate for the detected OS.
+Install NVIDIA GPU drivers appropriate for the detected OS using DKMS.
+Blacklists the C<nouveau> driver and rebuilds the initramfs so the blacklist
+takes effect on next boot.
 
-Supported: Debian 11-13, Ubuntu 22.04/24.04, RHEL/Rocky/Alma 8-10,
-CentOS Stream 9-10, openSUSE Leap 15.6/16.0.
+After installation (and after reboot, if C<reboot =E<gt> 1>), calls
+L</verify_nvidia> to confirm the kernel module loaded correctly.
+
+Dies if the detected OS is not supported.
 
 Options:
 
-  install_driver(reboot => 1);   # reboot after install, wait for host to
-                                 # come back, then verify. Required when
-                                 # nouveau was previously loaded.
+=over
+
+=item C<reboot>
+
+If true, the host is rebooted immediately after driver installation.
+The function waits up to 5 minutes for the host to come back (polling
+every 5 seconds via SSH reconnect), then continues with verification.
+Default: C<0>.
+
+Rebooting is required on the first deployment when the C<nouveau>
+open-source driver was previously loaded, because nouveau must be
+unloaded before the NVIDIA kernel module can bind to the device.
+
+=back
+
+  install_driver();              # install only, load module without reboot
+  install_driver(reboot => 1);   # install, reboot, verify
 
 =cut
 
@@ -77,7 +95,17 @@ sub install_driver {
 
 =method install_container_toolkit
 
-Install the NVIDIA Container Toolkit.
+Install the NVIDIA Container Toolkit (C<nvidia-container-toolkit> package)
+from the official NVIDIA package repository at
+L<https://nvidia.github.io/libnvidia-container/>.
+
+The repository GPG key is imported and the package repository is registered
+before installing. On Debian/Ubuntu the signed APT source list is written;
+on RHEL the C<.repo> file is fetched via C<curl>; on openSUSE Leap the
+base repository URL is added directly (zypper cannot parse RPM C<.repo>
+files directly).
+
+Dies if the OS is not supported or if installation fails.
 
 =cut
 
@@ -104,8 +132,33 @@ sub install_container_toolkit {
 
 =method configure_containerd($runtime)
 
-Configure the containerd runtime for NVIDIA GPU access.
-C<$runtime>: C<rke2>, C<k3s>, or C<containerd>.
+Configure the containerd runtime to use the NVIDIA container runtime.
+The C<nvidia-container-runtime> binary must already be installed
+(L</install_container_toolkit> provides it); if it is not present this
+function returns immediately without error.
+
+C<$runtime> selects how containerd is configured:
+
+=over
+
+=item C<rke2> or C<k3s> (default: C<rke2>)
+
+Creates C</var/lib/rancher/rke2/agent/etc/containerd/> and writes a
+C<config.toml.tmpl> that imports snippets from C</etc/containerd/conf.d/>.
+Then writes C</etc/containerd/conf.d/99-nvidia.toml> which registers the
+NVIDIA runtime as C<io.containerd.runc.v2> with
+C<BinaryName=/usr/bin/nvidia-container-runtime>.
+
+This approach is used by both RKE2 and K3s because they share the same
+containerd include mechanism.
+
+=item C<containerd>
+
+Calls C<nvidia-ctk runtime configure --runtime=containerd> and restarts
+the C<containerd> systemd service. Suitable for standalone (non-Rancher)
+containerd installations.
+
+=back
 
 =cut
 
@@ -132,7 +185,22 @@ sub configure_containerd {
 
 =method verify_nvidia
 
-Verify the NVIDIA installation. Returns 1 if all checks pass.
+Verify the current NVIDIA installation by checking three things:
+
+=over
+
+=item 1. C<nvidia> kernel module is loaded (C<lsmod | grep nvidia>)
+
+=item 2. C<nvidia-smi -L> reports at least one GPU
+
+=item 3. C<nvidia-ctk> binary is available (Container Toolkit present)
+
+=back
+
+Returns C<1> if all checks pass, C<0> if any check fails. A warning is
+logged for each failure; the function does not die. A partial installation
+(e.g. driver installed but host not yet rebooted) emits a summary warning
+noting that features may not work until reboot.
 
 =cut
 
@@ -193,11 +261,15 @@ sub _install_driver_debian {
 
   if ($os eq 'Ubuntu') {
     push @packages, "linux-headers-generic";
-    # Ubuntu: use server variant for K8s, auto-detect latest
+    # Ubuntu: use server variant for K8s, auto-detect latest available version.
+    # Do NOT add nvidia-smi: on Ubuntu 24.04 it is a virtual package with no
+    # installation candidate — it is pulled in automatically by the driver metapackage.
     my $latest = run "apt-cache search '^nvidia-driver-[0-9].*-server\$' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
       auto_die => 0;
     chomp $latest if $latest;
-    push @packages, ($latest || "nvidia-driver-570-server"), "nvidia-smi";
+    # Filter out *-open variants from auto-detect (use regular server driver)
+    $latest = undef if $latest && $latest =~ /-open$/;
+    push @packages, ($latest || "nvidia-driver-570-server");
   }
   else {
     # Debian: just the running kernel's headers (sufficient for DKMS) + driver
@@ -207,15 +279,21 @@ sub _install_driver_debian {
   }
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
-  update_package_db;
+  # apt-get update returns non-zero on warnings (snap repos, apt-daily, GPG) —
+  # use auto_die => 0 to avoid Rex::Pkg::Base aborting before the actual install.
+  run "apt-get update -q", auto_die => 0;
 
   # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
   # post-install scripts (DKMS build, grub update, initramfs). Verify via dpkg -l.
+  # DPkg::Lock::Timeout=120: wait up to 2 min for apt-daily.timer lock after reboot.
   my $pkg_str = join(" ", @packages);
-  run "DEBIAN_FRONTEND=noninteractive apt-get install -y $pkg_str", auto_die => 0;
+  run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y $pkg_str", auto_die => 0;
 
-  my $check = run "dpkg -l nvidia-driver 2>/dev/null | grep -q '^ii'", auto_die => 0;
-  die "nvidia-driver not installed after apt-get install — check apt output\n"
+  # On Ubuntu the driver package is e.g. nvidia-driver-590-server; on Debian it is
+  # nvidia-driver. Check whichever name we actually installed.
+  my $driver_pkg = ($os eq 'Ubuntu') ? $packages[-1] : 'nvidia-driver';
+  my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
+  die "$driver_pkg not installed after apt-get install — check apt output\n"
     if $? != 0;
 }
 
@@ -277,7 +355,6 @@ sub _install_driver_redhat {
   }
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
-  update_package_db;
 
   # Use run() directly: Rex::Pkg::Dnf fails when dnf exits non-zero due to
   # DKMS post-install scripts (kernel module build). Verify via rpm -q instead.
@@ -378,8 +455,9 @@ sub _install_toolkit_debian {
   file "/etc/apt/sources.list.d/nvidia-container-toolkit.list",
     content => 'deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
 
-  update_package_db;
-  run "DEBIAN_FRONTEND=noninteractive apt-get install -y nvidia-container-toolkit", auto_die => 0;
+  run "apt-get update -q", auto_die => 0;
+  # DPkg::Lock::Timeout=120: wait for apt-daily.timer lock that fires after reboot.
+  run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y nvidia-container-toolkit", auto_die => 0;
   my $check = run "dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'", auto_die => 0;
   die "nvidia-container-toolkit not installed\n" if $? != 0;
 }
@@ -454,10 +532,16 @@ TOML
 =method generate_cdi_specs
 
 Generate CDI (Container Device Interface) specifications for all detected
-NVIDIA GPUs. Required for the Kubernetes device plugin to enumerate GPU
-resources without needing privileged pod access.
+NVIDIA GPUs by running C<nvidia-ctk cdi generate>. CDI allows the Kubernetes
+NVIDIA device plugin to enumerate GPU resources without requiring a privileged
+container.
 
-Writes to C</etc/cdi/nvidia.yaml>.
+Writes output to C</etc/cdi/nvidia.yaml>. The C</etc/cdi/> directory is
+created if it does not exist.
+
+This step must be run after L</install_container_toolkit> (which provides
+C<nvidia-ctk>) and, on first deploy, after the reboot that activates the
+NVIDIA kernel module (so the tool can enumerate physical devices).
 
 =cut
 
@@ -509,39 +593,87 @@ sub _reboot_and_wait {
 
   use Rex::GPU::NVIDIA;
 
-  # Install driver, toolkit, and configure containerd for RKE2
-  install_driver();
+  # Step 1: Install driver (with reboot on first deploy)
+  install_driver(reboot => 1);
+
+  # Step 2: Install NVIDIA Container Toolkit
   install_container_toolkit();
+
+  # Step 3: Generate CDI specs for the device plugin
+  generate_cdi_specs();
+
+  # Step 4: Configure containerd for Kubernetes
   configure_containerd('rke2');   # 'rke2', 'k3s', or 'containerd'
 
-  # Or just verify what's installed
+  # Verify the current installation status
   my $ok = verify_nvidia();
 
 =head1 DESCRIPTION
 
-L<Rex::GPU::NVIDIA> manages NVIDIA GPU driver installation, container toolkit
-setup, and containerd runtime configuration across all major Linux distributions.
+L<Rex::GPU::NVIDIA> manages the full NVIDIA software stack needed to run
+GPU-accelerated workloads in Kubernetes: driver installation, the Container
+Toolkit, CDI spec generation, and containerd runtime configuration.
 
-Supported distributions for driver installation:
+Each step is OS-aware and handles Debian/Ubuntu, RHEL/Rocky/CentOS, and
+openSUSE Leap without further configuration.
+
+=head2 Driver installation
+
+Drivers are installed via DKMS, so they survive kernel upgrades without
+needing reinstallation. The C<nouveau> open-source driver is blacklisted
+and the initramfs is regenerated to prevent it from loading at boot.
+
+On Debian, C<contrib>, C<non-free>, and C<non-free-firmware> components
+are added to C</etc/apt/sources.list> automatically if not already present.
+
+On RHEL/Rocky/AlmaLinux/CentOS Stream, the NVIDIA CUDA repository is added
+and the open-kernel DKMS variant is used. For RHEL 10+ the module streams
+approach is not available; C<kmod-nvidia-open-dkms> is installed directly.
+
+On openSUSE Leap, the signed kmp-meta package (C<nvidia-open-driver-G06-signed-kmp-meta>
+for Leap 15.x, C<nvidia-open-driver-G07-signed-kmp-meta> for Leap 16.x) is
+used to ensure the kernel module and userspace libraries are always at the
+same version. Stale OSS non-free packages are removed before installation
+and locked afterwards to prevent C<nvidia-smi> from reporting a
+C<Driver/library version mismatch>.
+
+=head2 Container Toolkit
+
+C<nvidia-container-toolkit> is installed from the official NVIDIA GitHub
+package repository (L<https://nvidia.github.io/libnvidia-container/>).
+
+=head2 CDI specs
+
+Container Device Interface specifications are written to C</etc/cdi/nvidia.yaml>
+by C<nvidia-ctk cdi generate>. CDI lets the Kubernetes device plugin
+enumerate GPU resources without requiring privileged container access.
+
+=head2 Containerd configuration
+
+For RKE2 and K3s, the NVIDIA runtime is registered via a drop-in snippet at
+C</etc/containerd/conf.d/99-nvidia.toml>, imported via the distribution's
+C<config.toml.tmpl> mechanism. For standalone containerd,
+C<nvidia-ctk runtime configure> is used.
+
+Supported distributions:
 
 =over
 
-=item * Debian 11–13
+=item * Debian 11 (bullseye), 12 (bookworm), 13 (trixie)
 
-=item * Ubuntu 22.04 / 24.04
+=item * Ubuntu 22.04 (jammy), 24.04 (noble)
 
-=item * RHEL / Rocky Linux / AlmaLinux 8–10, CentOS Stream 9–10
+=item * RHEL / Rocky Linux / AlmaLinux 8, 9, 10 — CentOS Stream 9, 10
 
-=item * openSUSE Leap 15.6 / 16.0
+=item * openSUSE Leap 15.6, 16.0
 
 =back
 
-On openSUSE the signed kmp-meta package is used to ensure the kernel module
-and userspace libraries are always installed at the same version, avoiding
-the C<Driver/library version mismatch> error from C<nvidia-smi>.
+Tested on Hetzner dedicated servers with NVIDIA RTX 4000 SFF Ada Generation.
 
 =head1 SEE ALSO
 
-L<Rex::GPU>, L<Rex::GPU::Detect>
+L<Rex::GPU>, L<Rex::GPU::Detect>,
+L<https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/>
 
 =cut

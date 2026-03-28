@@ -24,14 +24,34 @@ use vars qw(@EXPORT);
 
 =method gpu_detect
 
-Detect GPUs on the current host. Returns a hashref with detected GPU
-information:
+Detect GPU hardware on the remote host by scanning PCI devices. Installs
+C<pciutils> if not already present, then parses C<lspci -nn> output.
+
+Returns a hashref with detected GPUs grouped by vendor:
 
   my $gpus = gpu_detect();
   # {
-  #   nvidia => [ { name => "RTX 4090", pci_class => "0302", compute => 1 } ],
-  #   amd    => [ { name => "Radeon RX 7900" } ],
+  #   nvidia => [
+  #     {
+  #       name      => "NVIDIA RTX 4000 SFF Ada Generation",
+  #       vendor    => "nvidia",
+  #       pci_class => "0302",   # 0300 = VGA, 0302 = 3D/compute
+  #       compute   => 1,        # 1 if CUDA-capable
+  #     }
+  #   ],
+  #   amd => [
+  #     {
+  #       name      => "Radeon RX 7900 XTX",
+  #       vendor    => "amd",
+  #       pci_class => "0300",
+  #       compute   => 0,        # always 0 (AMD not yet supported)
+  #     }
+  #   ],
   # }
+
+Virtual GPUs (virtio, QEMU, VMware, VirtualBox) are detected and silently
+skipped — both arrays will be empty. See L<Rex::GPU::Detect> for details on
+the classification logic.
 
 =cut
 
@@ -41,19 +61,59 @@ sub gpu_detect {
 
 =method gpu_setup
 
-Detect GPUs and install appropriate drivers, container toolkit, and
-configure the container runtime. One-stop function for making GPUs
-available to Kubernetes.
+Detect GPUs and run the full installation pipeline: NVIDIA driver, Container
+Toolkit, CDI spec generation, and containerd runtime configuration. This is
+the single call needed to make a node GPU-ready for Kubernetes.
+
+AMD GPUs are detected and logged but not yet supported (a warning is emitted).
+
+  gpu_setup(
+    containerd_config => 'rke2',  # containerd integration target
+    reboot            => 1,       # reboot after driver install
+  );
 
 Options:
 
-  gpu_setup(
-    containerd_config => 'rke2',  # 'rke2', 'k3s', 'containerd', or 'none'
-    reboot            => 1,       # reboot after driver install, wait for host
-                                  # to come back, then continue with toolkit
-                                  # and containerd config. Needed on first
-                                  # deploy when nouveau was previously loaded.
-  );
+=over
+
+=item C<containerd_config>
+
+Which containerd configuration variant to write. Controls where the NVIDIA
+runtime snippet is placed:
+
+=over
+
+=item C<rke2> (default) — writes to
+C</var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl> and drops a
+snippet in C</etc/containerd/conf.d/99-nvidia.toml>
+
+=item C<k3s> — same as C<rke2>; K3s and RKE2 share the same containerd
+config include mechanism
+
+=item C<containerd> — runs C<nvidia-ctk runtime configure --runtime=containerd>
+for a standalone containerd installation
+
+=item C<none> — skip containerd configuration entirely (driver and toolkit are
+still installed)
+
+=back
+
+=item C<reboot>
+
+If true, the host is rebooted after driver installation and the function
+waits (up to 5 minutes, polling every 5 seconds) for it to come back before
+continuing with toolkit installation and containerd configuration. Default: C<0>.
+
+Rebooting is required on the first deployment if the C<nouveau> open-source
+driver was previously loaded, because nouveau must be unloaded before the
+NVIDIA driver can bind to the GPU.
+
+=back
+
+Returns the result of L<Rex::GPU::Detect/detect> — a hashref with C<nvidia>
+and C<amd> array keys.
+
+Dies if the connection backend is neither LibSSH nor SFTP-capable.
 
 =cut
 
@@ -108,31 +168,79 @@ sub gpu_setup {
 
   use Rex::GPU;
 
-  # Just detect
+  # Detect GPUs only — returns a hashref
   my $gpus = gpu_detect();
+  if (@{ $gpus->{nvidia} }) {
+    say "NVIDIA GPU: ", $gpus->{nvidia}[0]{name};
+  }
 
-  # Full setup (detect + install + configure)
-  gpu_setup(containerd_config => 'rke2');
+  # Full GPU setup for an RKE2 cluster (detect + drivers + toolkit + containerd)
+  gpu_setup(
+    containerd_config => 'rke2',   # 'rke2', 'k3s', 'containerd', or 'none'
+    reboot            => 1,        # reboot after driver install (first deploy)
+  );
+
+  # For a K3s cluster
+  gpu_setup(containerd_config => 'k3s');
+
+  # Just drivers + toolkit, no containerd config
+  gpu_setup(containerd_config => 'none');
 
 =head1 DESCRIPTION
 
-L<Rex::GPU> provides GPU detection and driver management for L<Rex>.
-It handles the complete stack needed to make GPUs available in Kubernetes:
+L<Rex::GPU> provides GPU detection and driver management for L<Rex>. It
+automates the complete software stack needed to make NVIDIA GPUs available
+to workloads running in a Kubernetes cluster.
+
+The full pipeline, as executed by L</gpu_setup>:
 
 =over
 
-=item 1. GPU hardware detection via PCI class codes
+=item 1. B<GPU detection> — PCI class code scan via C<lspci -nn> to identify
+NVIDIA and AMD hardware, filtering out virtual GPUs (virtio, QEMU, VMware).
+Only CUDA-capable NVIDIA GPUs (RTX, Quadro, Tesla, PCI class C<0302>) trigger
+driver installation.
 
-=item 2. NVIDIA driver installation (Debian/Ubuntu, RHEL/Rocky, openSUSE)
+=item 2. B<NVIDIA driver installation> — Distribution-appropriate packages
+via DKMS for kernel-version independence. Nouveau is blacklisted and the
+initramfs is regenerated.
 
-=item 3. NVIDIA Container Toolkit installation
+=item 3. B<NVIDIA Container Toolkit> — Installs C<nvidia-container-toolkit>
+from the official NVIDIA repository for all supported distributions.
 
-=item 4. Containerd runtime configuration (RKE2, K3s, standalone)
+=item 4. B<CDI spec generation> — Writes C</etc/cdi/nvidia.yaml> so the
+Kubernetes device plugin can enumerate GPU resources without privileged
+container access.
+
+=item 5. B<Containerd runtime configuration> — Injects the NVIDIA runtime
+into the containerd config for the target Kubernetes distribution.
 
 =back
 
+Tested on Hetzner dedicated servers (bare metal) running:
+
+=over
+
+=item * Debian 11 (bullseye), 12 (bookworm), 13 (trixie)
+
+=item * Ubuntu 22.04 (jammy), 24.04 (noble)
+
+=item * RHEL / Rocky Linux / AlmaLinux 8, 9, 10 — CentOS Stream 9, 10
+
+=item * openSUSE Leap 15.6, 16.0
+
+=back
+
+GPUs tested include the NVIDIA RTX 4000 SFF Ada Generation (PCI class
+C<0302>, datacenter compute profile).
+
+This module requires L<Rex::LibSSH> (or SFTP) on the connection backend.
+Hetzner servers do not enable the SFTP subsystem by default; use
+C<set connection =E<gt> "LibSSH"> in your Rexfile.
+
 =head1 SEE ALSO
 
-L<Rex>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>
+L<Rex>, L<Rex::LibSSH>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>,
+L<Rex::Rancher>
 
 =cut
