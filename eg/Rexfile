@@ -52,7 +52,10 @@ task 'detect', sub {
 desc 'Detect and install NVIDIA drivers + container toolkit';
 task 'setup', sub {
     my ($params) = @_;
-    Rex::GPU::gpu_setup(containerd_config => ($params->{runtime} // 'rke2'));
+    Rex::GPU::gpu_setup(
+        containerd_config => ($params->{runtime} // 'rke2'),
+        reboot            => ($params->{reboot}  // 0),
+    );
 };
 
 desc 'Prepare a Linux node for Kubernetes';

@@ -49,6 +49,10 @@ Options:
 
   gpu_setup(
     containerd_config => 'rke2',  # 'rke2', 'k3s', 'containerd', or 'none'
+    reboot            => 1,       # reboot after driver install, wait for host
+                                  # to come back, then continue with toolkit
+                                  # and containerd config. Needed on first
+                                  # deploy when nouveau was previously loaded.
   );
 
 =cut
@@ -80,7 +84,7 @@ sub gpu_setup {
     my @compute = grep { $_->{compute} } @{$gpus->{nvidia}};
     if (@compute) {
       Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $compute[0]->{name});
-      Rex::GPU::NVIDIA::install_driver();
+      Rex::GPU::NVIDIA::install_driver(reboot => ($opts{reboot} ? 1 : 0));
       Rex::GPU::NVIDIA::install_container_toolkit();
 
       my $runtime = $opts{containerd_config} // 'rke2';

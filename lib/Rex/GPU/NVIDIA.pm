@@ -30,9 +30,17 @@ Install NVIDIA GPU drivers appropriate for the detected OS.
 Supported: Debian 11-13, Ubuntu 22.04/24.04, RHEL/Rocky/Alma 8-10,
 CentOS Stream 9-10, openSUSE Leap 15.6/16.0.
 
+Options:
+
+  install_driver(reboot => 1);   # reboot after install, wait for host to
+                                 # come back, then verify. Required when
+                                 # nouveau was previously loaded.
+
 =cut
 
 sub install_driver {
+  my (%opts) = @_;
+
   my $os = operating_system();
   my $running_kernel = run "uname -r";
   chomp $running_kernel;
@@ -54,7 +62,12 @@ sub install_driver {
 
   _blacklist_nouveau();
 
-  run "modprobe nvidia", auto_die => 0;
+  if ($opts{reboot}) {
+    _reboot_and_wait();
+  }
+  else {
+    run "modprobe nvidia", auto_die => 0;
+  }
 
   verify_nvidia();
 
@@ -183,12 +196,12 @@ sub _install_driver_debian {
     my $latest = run "apt-cache search '^nvidia-driver-[0-9].*-server\$' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
       auto_die => 0;
     chomp $latest if $latest;
-    push @packages, ($latest || "nvidia-driver-570-server");
+    push @packages, ($latest || "nvidia-driver-570-server"), "nvidia-smi";
   }
   else {
-    # Debian: arch-specific headers meta + driver meta
+    # Debian: arch-specific headers meta + driver meta + smi (separate package on Debian)
     push @packages, "linux-headers-$arch";
-    push @packages, "nvidia-driver";
+    push @packages, "nvidia-driver", "nvidia-smi";
   }
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
@@ -406,6 +419,41 @@ version = 2
           [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
             BinaryName = "/usr/bin/nvidia-container-runtime"
 TOML
+}
+
+# ============================================================
+#  Reboot
+# ============================================================
+
+sub _reboot_and_wait {
+  Rex::Logger::info("Rebooting host to activate NVIDIA driver (replacing nouveau)...");
+
+  # Schedule reboot 2 s from now so the run() call can return cleanly
+  run "nohup sh -c 'sleep 2 && shutdown -r now' >/dev/null 2>&1 &", auto_die => 0;
+
+  # Wait long enough for the system to actually go down
+  sleep 20;
+
+  # Poll until SSH comes back (up to 5 minutes)
+  my $conn = Rex::get_current_connection()->{conn};
+  my $back = 0;
+  for my $i (1..60) {
+    eval { $conn->disconnect() };
+    eval { $conn->reconnect() };
+    unless ($@) {
+      # Verify we can actually run a command
+      my $test = eval { run "echo ok", auto_die => 0; "ok" };
+      if (defined $test && $test =~ /ok/) {
+        Rex::Logger::info("  Host is back online (after ~" . ($i * 5 + 20) . "s)");
+        $back = 1;
+        last;
+      }
+    }
+    Rex::Logger::info("  Waiting for host to come back... ($i/60)");
+    sleep 5;
+  }
+
+  die "Host did not come back after reboot\n" unless $back;
 }
 
 1;
