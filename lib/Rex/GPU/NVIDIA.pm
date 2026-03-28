@@ -208,7 +208,15 @@ sub _install_driver_debian {
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
   update_package_db;
-  pkg \@packages, ensure => "present";
+
+  # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
+  # post-install scripts (DKMS build, grub update, initramfs). Verify via dpkg -l.
+  my $pkg_str = join(" ", @packages);
+  run "DEBIAN_FRONTEND=noninteractive apt-get install -y $pkg_str", auto_die => 0;
+
+  my $check = run "dpkg -l nvidia-driver 2>/dev/null | grep -q '^ii'", auto_die => 0;
+  die "nvidia-driver not installed after apt-get install — check apt output\n"
+    if $? != 0;
 }
 
 sub _enable_debian_nonfree {
@@ -259,9 +267,9 @@ sub _install_driver_redhat {
     @packages = ("kernel-devel-$running_kernel", "kernel-headers");
   }
 
-  # Driver packages — different for v10 (no module streams)
+  # Driver packages — different for v10 (no module streams, dkms variant)
   if ($major >= 10) {
-    push @packages, "kmod-nvidia-open", "nvidia-driver", "nvidia-driver-cuda";
+    push @packages, "kmod-nvidia-open-dkms", "nvidia-driver", "nvidia-driver-cuda";
   }
   else {
     run "dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true", auto_die => 0;
@@ -270,12 +278,24 @@ sub _install_driver_redhat {
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
   update_package_db;
-  pkg \@packages, ensure => "present";
+
+  # Use run() directly: Rex::Pkg::Dnf fails when dnf exits non-zero due to
+  # DKMS post-install scripts (kernel module build). Verify via rpm -q instead.
+  my $pkg_str = join(" ", @packages);
+  run "dnf install -y $pkg_str", auto_die => 0;
+
+  my $check = run "rpm -q nvidia-driver 2>&1", auto_die => 0;
+  die "nvidia-driver not installed after dnf install — check dnf output\n"
+    if $? != 0;
 }
 
 sub _rhel_major_version {
-  my $version = operating_system_version();
-  return int($version);
+  # Rex::Commands::Gather::operating_system_version() strips dots,
+  # so "10.1" becomes "101". Use operating_system_release() for the raw
+  # version string and extract the major version ourselves.
+  my $release = Rex::Commands::Gather::operating_system_release();
+  $release =~ /^(\d+)/;
+  return $1 + 0;
 }
 
 # ============================================================
@@ -359,14 +379,18 @@ sub _install_toolkit_debian {
     content => 'deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
 
   update_package_db;
-  pkg ["nvidia-container-toolkit"], ensure => "present";
+  run "DEBIAN_FRONTEND=noninteractive apt-get install -y nvidia-container-toolkit", auto_die => 0;
+  my $check = run "dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'", auto_die => 0;
+  die "nvidia-container-toolkit not installed\n" if $? != 0;
 }
 
 sub _install_toolkit_redhat {
   run "curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | tee /etc/yum.repos.d/nvidia-container-toolkit.repo",
     auto_die => 0;
-
-  pkg ["nvidia-container-toolkit"], ensure => "present";
+  run "dnf clean expire-cache", auto_die => 0;
+  run "dnf install -y nvidia-container-toolkit", auto_die => 0;
+  my $check = run "rpm -q nvidia-container-toolkit 2>&1", auto_die => 0;
+  die "nvidia-container-toolkit not installed\n" if $? != 0;
 }
 
 sub _install_toolkit_suse {
