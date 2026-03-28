@@ -1,0 +1,11 @@
+Revision history for Rex-GPU
+
+{{$NEXT}}
+  - Initial release
+  - GPU hardware detection via PCI class codes (NVIDIA, AMD)
+  - NVIDIA driver installation (Debian/Ubuntu, RHEL/Rocky, openSUSE)
+  - NVIDIA Container Toolkit installation
+  - Containerd runtime configuration (RKE2, K3s, standalone)
+  - Requires Rex::LibSSH (set connection => 'LibSSH') for SFTP-less hosts
+  - Clear error when connecting to SFTP-less host without LibSSH backend
+  - eg/Rexfile example for GPU detection and cluster deployment

@@ -23,29 +23,12 @@ use vars qw(@EXPORT);
   verify_nvidia
 );
 
-=head1 FUNCTIONS
-
-=cut
-
 =method install_driver
 
 Install NVIDIA GPU drivers appropriate for the detected OS.
 
-Handles:
-
-=over
-
-=item Kernel headers installation
-
-=item Nouveau blacklisting
-
-=item NVIDIA driver package installation (DKMS)
-
-=item Kernel module loading
-
-=back
-
-Supported OS: Debian, Ubuntu, Rocky, CentOS, RedHat, AlmaLinux, Fedora.
+Supported: Debian 11-13, Ubuntu 22.04/24.04, RHEL/Rocky/Alma 8-10,
+CentOS Stream 9-10, openSUSE Leap 15.6/16.0.
 
 =cut
 
@@ -62,14 +45,15 @@ sub install_driver {
   elsif (is_redhat()) {
     _install_driver_redhat($os, $running_kernel);
   }
+  elsif (is_suse()) {
+    _install_driver_suse($os, $running_kernel);
+  }
   else {
     die "Unsupported OS for NVIDIA driver installation: $os\n";
   }
 
-  # Blacklist nouveau
   _blacklist_nouveau();
 
-  # Load nvidia kernel module
   run "modprobe nvidia", auto_die => 0;
 
   verify_nvidia();
@@ -79,11 +63,7 @@ sub install_driver {
 
 =method install_container_toolkit
 
-Install the NVIDIA Container Toolkit from the official nvidia.github.io
-repository. This is a separate repository from the driver packages.
-
-Installs: C<nvidia-container-toolkit> (includes nvidia-container-runtime,
-libnvidia-container, nvidia-ctk).
+Install the NVIDIA Container Toolkit.
 
 =cut
 
@@ -98,6 +78,9 @@ sub install_container_toolkit {
   elsif (is_redhat()) {
     _install_toolkit_redhat();
   }
+  elsif (is_suse()) {
+    _install_toolkit_suse();
+  }
   else {
     die "Unsupported OS for NVIDIA Container Toolkit: $os\n";
   }
@@ -108,18 +91,7 @@ sub install_container_toolkit {
 =method configure_containerd($runtime)
 
 Configure the containerd runtime for NVIDIA GPU access.
-
-C<$runtime> can be:
-
-=over
-
-=item C<rke2> — RKE2's containerd (config.toml.tmpl + conf.d import)
-
-=item C<k3s> — K3s containerd (same socket path as RKE2)
-
-=item C<containerd> — Standalone containerd (uses nvidia-ctk)
-
-=back
+C<$runtime>: C<rke2>, C<k3s>, or C<containerd>.
 
 =cut
 
@@ -131,11 +103,8 @@ sub configure_containerd {
 
   Rex::Logger::info("Configuring containerd for NVIDIA GPU (runtime: $runtime)");
 
-  if ($runtime eq 'rke2') {
+  if ($runtime eq 'rke2' || $runtime eq 'k3s') {
     _configure_containerd_rke2();
-  }
-  elsif ($runtime eq 'k3s') {
-    _configure_containerd_rke2();  # K3s uses same paths as RKE2
   }
   elsif ($runtime eq 'containerd') {
     _configure_containerd_standalone();
@@ -149,10 +118,7 @@ sub configure_containerd {
 
 =method verify_nvidia
 
-Verify the NVIDIA installation: kernel module, nvidia-smi, libcuda,
-container toolkit. Logs warnings for any missing components.
-
-Returns 1 if all checks pass, 0 otherwise.
+Verify the NVIDIA installation. Returns 1 if all checks pass.
 
 =cut
 
@@ -160,19 +126,15 @@ sub verify_nvidia {
   Rex::Logger::info("Verifying NVIDIA installation...");
   my $ok = 1;
 
-  # Kernel module
   my $lsmod = run "lsmod | grep '^nvidia '", auto_die => 0;
   if ($? != 0 || !$lsmod) {
     Rex::Logger::info("nvidia kernel module not loaded (reboot may be needed)", "warn");
-    my $dkms = run "dkms status 2>&1 | grep nvidia", auto_die => 0;
-    Rex::Logger::info("DKMS: $dkms") if $dkms;
     $ok = 0;
   }
   else {
     Rex::Logger::info("  [ok] nvidia kernel module loaded");
   }
 
-  # nvidia-smi
   my $smi = run "nvidia-smi -L 2>&1", auto_die => 0;
   chomp $smi if defined $smi;
   if (defined $smi && $smi =~ /GPU \d+:/) {
@@ -183,17 +145,6 @@ sub verify_nvidia {
     $ok = 0;
   }
 
-  # libcuda
-  my $libcuda = run "ldconfig -p | grep 'libcuda.so '", auto_die => 0;
-  if ($? == 0 && $libcuda) {
-    Rex::Logger::info("  [ok] libcuda available");
-  }
-  else {
-    Rex::Logger::info("libcuda.so not found", "warn");
-    $ok = 0;
-  }
-
-  # Container toolkit
   if (can_run("nvidia-ctk")) {
     Rex::Logger::info("  [ok] nvidia-container-toolkit installed");
   }
@@ -209,51 +160,68 @@ sub verify_nvidia {
   return $ok;
 }
 
-#
-# Debian/Ubuntu driver installation
-#
+# ============================================================
+#  Debian / Ubuntu
+# ============================================================
 
 sub _install_driver_debian {
   my ($os, $running_kernel) = @_;
 
-  my @packages;
-  if ($os eq 'Ubuntu') {
-    @packages = (
-      "linux-headers-$running_kernel",
-      "linux-headers-generic",
-      "nvidia-driver-535",
-    );
-  }
-  else {
-    # Debian
-    @packages = (
-      "linux-headers-$running_kernel",
-      "linux-headers-amd64",
-      "nvidia-driver",
-      "nvidia-smi",
-      "libcuda1",
-    );
+  my $arch = run "dpkg --print-architecture", auto_die => 0;
+  chomp $arch;
+
+  # Ensure non-free repos are enabled (Debian only, Ubuntu has restricted by default)
+  if ($os ne 'Ubuntu') {
+    _enable_debian_nonfree();
   }
 
-  Rex::Logger::info("  Installing driver packages: " . join(", ", @packages));
+  my @packages = ("linux-headers-$running_kernel");
+
+  if ($os eq 'Ubuntu') {
+    push @packages, "linux-headers-generic";
+    # Ubuntu: use server variant for K8s, auto-detect latest
+    my $latest = run "apt-cache search '^nvidia-driver-[0-9].*-server\$' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
+      auto_die => 0;
+    chomp $latest if $latest;
+    push @packages, ($latest || "nvidia-driver-570-server");
+  }
+  else {
+    # Debian: arch-specific headers meta + driver meta
+    push @packages, "linux-headers-$arch";
+    push @packages, "nvidia-driver";
+  }
+
+  Rex::Logger::info("  Installing: " . join(", ", @packages));
   update_package_db;
   pkg \@packages, ensure => "present";
 }
 
-#
-# RHEL/Rocky driver installation
-#
+sub _enable_debian_nonfree {
+  # Add contrib non-free non-free-firmware to all deb lines
+  my $sources = run "cat /etc/apt/sources.list 2>/dev/null", auto_die => 0;
+  return unless $sources;
+
+  if ($sources !~ /non-free/) {
+    Rex::Logger::info("  Enabling non-free repos for NVIDIA drivers");
+    run "sed -i 's/^deb \\(.*\\) main/deb \\1 main contrib non-free non-free-firmware/' /etc/apt/sources.list",
+      auto_die => 0;
+  }
+}
+
+# ============================================================
+#  RHEL / Rocky / AlmaLinux / CentOS Stream
+# ============================================================
 
 sub _install_driver_redhat {
   my ($os, $running_kernel) = @_;
 
-  my $version = operating_system_version();
+  my $major = _rhel_major_version();
 
   # Enable required repos
-  Rex::Logger::info("  Enabling EPEL and CRB/PowerTools...");
+  Rex::Logger::info("  Enabling EPEL and extra repos...");
   pkg ["epel-release"], ensure => "present";
 
-  if ($version >= 9) {
+  if ($major >= 9) {
     run "dnf config-manager --set-enabled crb 2>/dev/null || true", auto_die => 0;
   }
   else {
@@ -261,43 +229,90 @@ sub _install_driver_redhat {
   }
 
   # Add NVIDIA CUDA repo
-  Rex::Logger::info("  Adding NVIDIA CUDA repository...");
-  my $distro = _rhel_distro_string($os, $version);
+  my $distro = "rhel$major";
+  Rex::Logger::info("  Adding NVIDIA CUDA repo ($distro)...");
   run "dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/x86_64/cuda-$distro.repo 2>/dev/null",
     auto_die => 0;
   run "dnf clean expire-cache", auto_die => 0;
 
-  # Install kernel headers and driver
+  # Kernel headers
   my @packages;
-  if ($version >= 9) {
+  if ($major >= 9) {
     @packages = ("kernel-devel-matched", "kernel-headers");
   }
   else {
     @packages = ("kernel-devel-$running_kernel", "kernel-headers");
   }
 
-  # Enable DKMS module stream and install driver
-  run "dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true", auto_die => 0;
-  push @packages, "nvidia-open";
+  # Driver packages — different for v10 (no module streams)
+  if ($major >= 10) {
+    push @packages, "kmod-nvidia-open", "nvidia-driver", "nvidia-driver-cuda";
+  }
+  else {
+    run "dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true", auto_die => 0;
+    push @packages, "nvidia-open";
+  }
 
-  Rex::Logger::info("  Installing driver packages: " . join(", ", @packages));
+  Rex::Logger::info("  Installing: " . join(", ", @packages));
   update_package_db;
   pkg \@packages, ensure => "present";
 }
 
-sub _rhel_distro_string {
-  my ($os, $version) = @_;
-
-  my $major = int($version);
-  if ($os =~ /Rocky|Alma|CentOS/) {
-    return "rhel$major";
-  }
-  return "rhel$major";
+sub _rhel_major_version {
+  my $version = operating_system_version();
+  return int($version);
 }
 
-#
-# Nouveau blacklisting
-#
+# ============================================================
+#  openSUSE Leap
+# ============================================================
+
+sub _install_driver_suse {
+  my ($os, $running_kernel) = @_;
+
+  my $version = operating_system_version();
+  my $major = int($version);
+
+  # Add NVIDIA repos
+  if ($major >= 16) {
+    Rex::Logger::info("  Adding NVIDIA repos (suse16)...");
+    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null || true",
+      auto_die => 0;
+    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/suse16/x86_64/cuda-suse16.repo cuda 2>/dev/null || true",
+      auto_die => 0;
+  }
+  else {
+    my $leap_version = sprintf("%.1f", $version / 10);  # 156 -> 15.6
+    Rex::Logger::info("  Adding NVIDIA repos (opensuse15, Leap $leap_version)...");
+    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/$leap_version/ nvidia-gfx 2>/dev/null || true",
+      auto_die => 0;
+    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/opensuse15/x86_64/cuda-opensuse15.repo cuda 2>/dev/null || true",
+      auto_die => 0;
+  }
+  run "zypper --gpg-auto-import-keys refresh 2>/dev/null", auto_die => 0;
+
+  # Kernel devel
+  my $kernel_version = $running_kernel;
+  $kernel_version =~ s/-default$//;
+  my @packages = ("kernel-default-devel=$kernel_version", "kernel-syms");
+
+  # Driver packages — G07 for 16.x, G06 for 15.x
+  if ($major >= 16) {
+    push @packages, "nvidia-open-driver-G07-signed-kmp-default",
+                    "nvidia-video-G07", "nvidia-compute-utils-G07";
+  }
+  else {
+    push @packages, "nvidia-open-driver-G06-signed-kmp-default",
+                    "nvidia-video-G06", "nvidia-compute-utils-G06";
+  }
+
+  Rex::Logger::info("  Installing: " . join(", ", @packages));
+  run "zypper install -y " . join(" ", @packages), auto_die => 0;
+}
+
+# ============================================================
+#  Nouveau blacklisting
+# ============================================================
 
 sub _blacklist_nouveau {
   file "/etc/modprobe.d/blacklist-nouveau.conf",
@@ -309,16 +324,18 @@ sub _blacklist_nouveau {
   elsif (is_redhat()) {
     run "dracut --force 2>/dev/null", auto_die => 0;
   }
+  elsif (is_suse()) {
+    run "dracut --force 2>/dev/null", auto_die => 0;
+  }
 }
 
-#
-# Container toolkit installation
-#
+# ============================================================
+#  Container toolkit installation
+# ============================================================
 
 sub _install_toolkit_debian {
   pkg ["curl", "gnupg"], ensure => "present";
 
-  # GPG key (modern signed-by approach)
   run "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null",
     auto_die => 0;
 
@@ -326,35 +343,39 @@ sub _install_toolkit_debian {
     content => 'deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
 
   update_package_db;
-
   pkg ["nvidia-container-toolkit"], ensure => "present";
 }
 
 sub _install_toolkit_redhat {
-  pkg ["curl"], ensure => "present";
-
   run "curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | tee /etc/yum.repos.d/nvidia-container-toolkit.repo",
     auto_die => 0;
 
   pkg ["nvidia-container-toolkit"], ensure => "present";
 }
 
-#
-# Containerd configuration
-#
+sub _install_toolkit_suse {
+  # Container toolkit available from CUDA repo (already added by _install_driver_suse)
+  # Fallback: standalone repo
+  run "zypper addrepo --refresh https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo nvidia-container-toolkit 2>/dev/null || true",
+    auto_die => 0;
+  run "zypper --gpg-auto-import-keys refresh 2>/dev/null", auto_die => 0;
+
+  run "zypper install -y nvidia-container-toolkit", auto_die => 0;
+}
+
+# ============================================================
+#  Containerd configuration
+# ============================================================
 
 sub _configure_containerd_rke2 {
-  # RKE2 auto-generates containerd config — use template with imports
   file "/var/lib/rancher/rke2/agent/etc/containerd", ensure => 'directory';
   file "/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl",
     content => "imports = [\"/etc/containerd/conf.d/*.toml\"]\nversion = 2\n";
 
-  # Drop nvidia runtime config in conf.d
   _write_nvidia_containerd_config();
 }
 
 sub _configure_containerd_standalone {
-  # Use nvidia-ctk to configure system containerd
   run "nvidia-ctk runtime configure --runtime=containerd 2>&1", auto_die => 0;
   run "systemctl restart containerd 2>/dev/null", auto_die => 0;
 }
