@@ -141,3 +141,34 @@ sub _parse_amd_line {
 }
 
 1;
+
+=head1 SYNOPSIS
+
+  use Rex::GPU::Detect;
+
+  my $gpus = detect();
+  # {
+  #   nvidia => [ { name => "RTX 4090", pci_class => "0302", compute => 1 } ],
+  #   amd    => [ { name => "Radeon RX 7900", pci_class => "0300" } ],
+  # }
+
+=head1 DESCRIPTION
+
+L<Rex::GPU::Detect> detects GPU hardware on a remote host by parsing C<lspci -nn>
+output and matching against PCI vendor and class codes.
+
+Detected vendors: NVIDIA (vendor C<10de>), AMD (vendor C<1002>).
+
+Virtual GPUs (virtio, QEMU, VMware, VirtualBox) are detected and silently
+skipped — no host driver installation is needed for those.
+
+NVIDIA GPUs are further classified as I<compute-capable> based on PCI class
+code C<0302> (3D controller) or known compute product families (RTX, Quadro,
+Tesla, etc.). Only compute-capable GPUs trigger driver installation in
+L<Rex::GPU>.
+
+=head1 SEE ALSO
+
+L<Rex::GPU>, L<Rex::GPU::NVIDIA>
+
+=cut

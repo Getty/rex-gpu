@@ -410,6 +410,41 @@ TOML
 
 1;
 
+=head1 SYNOPSIS
+
+  use Rex::GPU::NVIDIA;
+
+  # Install driver, toolkit, and configure containerd for RKE2
+  install_driver();
+  install_container_toolkit();
+  configure_containerd('rke2');   # 'rke2', 'k3s', or 'containerd'
+
+  # Or just verify what's installed
+  my $ok = verify_nvidia();
+
+=head1 DESCRIPTION
+
+L<Rex::GPU::NVIDIA> manages NVIDIA GPU driver installation, container toolkit
+setup, and containerd runtime configuration across all major Linux distributions.
+
+Supported distributions for driver installation:
+
+=over
+
+=item * Debian 11–13
+
+=item * Ubuntu 22.04 / 24.04
+
+=item * RHEL / Rocky Linux / AlmaLinux 8–10, CentOS Stream 9–10
+
+=item * openSUSE Leap 15.6 / 16.0
+
+=back
+
+On openSUSE the signed kmp-meta package is used to ensure the kernel module
+and userspace libraries are always installed at the same version, avoiding
+the C<Driver/library version mismatch> error from C<nvidia-smi>.
+
 =head1 SEE ALSO
 
 L<Rex::GPU>, L<Rex::GPU::Detect>

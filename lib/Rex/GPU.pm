@@ -118,7 +118,7 @@ It handles the complete stack needed to make GPUs available in Kubernetes:
 
 =item 1. GPU hardware detection via PCI class codes
 
-=item 2. NVIDIA driver installation (Debian/Ubuntu, RHEL/Rocky)
+=item 2. NVIDIA driver installation (Debian/Ubuntu, RHEL/Rocky, openSUSE)
 
 =item 3. NVIDIA Container Toolkit installation
 
