@@ -273,20 +273,22 @@ sub _install_driver_suse {
   my $version = operating_system_version();
   my $major = int($version);
 
-  # Add NVIDIA repos
+  # Add NVIDIA repos (use direct baseurls — zypper cannot parse yum .repo files)
   if ($major >= 16) {
     Rex::Logger::info("  Adding NVIDIA repos (suse16)...");
-    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null || true",
+    run "zypper rr nvidia-gfx cuda 2>/dev/null || true", auto_die => 0;
+    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null",
       auto_die => 0;
-    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/suse16/x86_64/cuda-suse16.repo cuda 2>/dev/null || true",
+    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/suse16/x86_64 cuda 2>/dev/null",
       auto_die => 0;
   }
   else {
     my $leap_version = sprintf("%.1f", $version / 10);  # 156 -> 15.6
     Rex::Logger::info("  Adding NVIDIA repos (opensuse15, Leap $leap_version)...");
-    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/$leap_version/ nvidia-gfx 2>/dev/null || true",
+    run "zypper rr nvidia-gfx cuda 2>/dev/null || true", auto_die => 0;
+    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/$leap_version/ nvidia-gfx 2>/dev/null",
       auto_die => 0;
-    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/opensuse15/x86_64/cuda-opensuse15.repo cuda 2>/dev/null || true",
+    run "zypper addrepo --refresh https://developer.download.nvidia.com/compute/cuda/repos/opensuse15/x86_64 cuda 2>/dev/null",
       auto_die => 0;
   }
   run "zypper --gpg-auto-import-keys refresh 2>/dev/null", auto_die => 0;
@@ -354,11 +356,19 @@ sub _install_toolkit_redhat {
 }
 
 sub _install_toolkit_suse {
-  # Container toolkit available from CUDA repo (already added by _install_driver_suse)
-  # Fallback: standalone repo
-  run "zypper addrepo --refresh https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo nvidia-container-toolkit 2>/dev/null || true",
+  # The .repo file URL is yum/dnf format — zypper needs the baseurl directly.
+  # Remove any stale entry (possibly added with the wrong URL) before re-adding.
+  my $arch = run "uname -m", auto_die => 0;
+  chomp $arch;
+  $arch ||= 'x86_64';
+
+  run "zypper rr nvidia-container-toolkit 2>/dev/null || true", auto_die => 0;
+  run "rpm --import https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null",
     auto_die => 0;
-  run "zypper --gpg-auto-import-keys refresh 2>/dev/null", auto_die => 0;
+  run "zypper addrepo --refresh https://nvidia.github.io/libnvidia-container/stable/rpm/$arch nvidia-container-toolkit 2>/dev/null",
+    auto_die => 0;
+  run "zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>/dev/null",
+    auto_die => 0;
 
   run "zypper install -y nvidia-container-toolkit", auto_die => 0;
 }
