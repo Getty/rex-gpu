@@ -86,6 +86,7 @@ sub gpu_setup {
       Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $compute[0]->{name});
       Rex::GPU::NVIDIA::install_driver(reboot => ($opts{reboot} ? 1 : 0));
       Rex::GPU::NVIDIA::install_container_toolkit();
+      Rex::GPU::NVIDIA::generate_cdi_specs();
 
       my $runtime = $opts{containerd_config} // 'rke2';
       if ($runtime ne 'none') {

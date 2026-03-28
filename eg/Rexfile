@@ -77,9 +77,12 @@ task 'server', sub {
         distribution => $distribution,
         token        => $params->{token},
     );
-    $opts{tls_san}  = $params->{tls_san}  if $params->{tls_san};
-    $opts{hostname} = $params->{hostname} if $params->{hostname};
-    $opts{domain}   = $params->{domain}   if $params->{domain};
+    $opts{tls_san}          = $params->{tls_san}          if $params->{tls_san};
+    $opts{hostname}         = $params->{hostname}         if $params->{hostname};
+    $opts{domain}           = $params->{domain}           if $params->{domain};
+    $opts{kubeconfig_file}  = $params->{kubeconfig_file}  if $params->{kubeconfig_file};
+    $opts{gpu}              = $params->{gpu}              if $params->{gpu};
+    $opts{reboot}           = $params->{reboot}           if $params->{reboot};
 
     Rex::Rancher::Node::prepare_node(%opts);
     Rex::Rancher::Server::install_server(%opts);

@@ -21,6 +21,7 @@ use vars qw(@EXPORT);
   install_container_toolkit
   configure_containerd
   verify_nvidia
+  generate_cdi_specs
 );
 
 =method install_driver
@@ -419,6 +420,27 @@ version = 2
           [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
             BinaryName = "/usr/bin/nvidia-container-runtime"
 TOML
+}
+
+# ============================================================
+#  CDI spec generation
+# ============================================================
+
+=method generate_cdi_specs
+
+Generate CDI (Container Device Interface) specifications for all detected
+NVIDIA GPUs. Required for the Kubernetes device plugin to enumerate GPU
+resources without needing privileged pod access.
+
+Writes to C</etc/cdi/nvidia.yaml>.
+
+=cut
+
+sub generate_cdi_specs {
+  Rex::Logger::info("Generating NVIDIA CDI specs...");
+  run "mkdir -p /etc/cdi", auto_die => 0;
+  run "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml 2>/dev/null", auto_die => 0;
+  Rex::Logger::info("  [ok] CDI specs written to /etc/cdi/nvidia.yaml");
 }
 
 # ============================================================
