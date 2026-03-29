@@ -8,9 +8,11 @@ GPU detection and driver management for Rex. Works with any Kubernetes setup
 ```
 Rex::GPU              — gpu_detect(), gpu_setup() — main entry points
 Rex::GPU::Detect      — PCI class code based GPU detection (NVIDIA, AMD)
-Rex::GPU::NVIDIA      — NVIDIA driver, container toolkit, CDI specs, containerd config
-Rex::GPU::Compat::NoSFTP — shell-based fallbacks for SFTP-less hosts
+Rex::GPU::NVIDIA — NVIDIA driver, container toolkit, CDI specs, containerd config
 ```
+
+Requires `Rex::LibSSH` for deployment to hosts without SFTP (e.g. Hetzner
+dedicated servers). Use `set connection => 'LibSSH'` in your Rexfile.
 
 ## Usage
 
