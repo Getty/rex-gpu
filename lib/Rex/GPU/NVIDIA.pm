@@ -279,10 +279,11 @@ sub _install_driver_debian {
   }
 
   Rex::Logger::info("  Installing: " . join(", ", @packages));
-  # DPkg::Lock::Timeout=120: wait up to 2 min for any apt/dpkg lock held by
-  # the system's initial setup (unattended-upgrades, cloud-init, Hetzner init)
-  # that may be active right after first boot. Returns non-zero on repo warnings
-  # (snap repos, expired GPG keys) — use auto_die => 0 throughout.
+  # Stop automatic apt services before installing — on a fresh Hetzner boot,
+  # unattended-upgrades and apt-daily hold /var/lib/dpkg/lock-frontend, which
+  # causes apt-get to fail immediately even with DPkg::Lock::Timeout set.
+  run "systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true",
+    auto_die => 0;
   run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
 
   # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
