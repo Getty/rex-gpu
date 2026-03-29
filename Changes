@@ -1,6 +1,6 @@
 Revision history for Rex-GPU
 
-{{$NEXT}}
+0.001     2026-03-29 04:20:30Z
   - Initial release
   - GPU hardware detection via PCI class codes (NVIDIA, AMD)
   - NVIDIA driver installation (Debian 12/13, Ubuntu 22.04/24.04, RHEL/Rocky 8/9/10, openSUSE Leap 15.6/16.0)
