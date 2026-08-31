@@ -1,0 +1,8 @@
+claude: true
+prompt: |
+  Drain the Rex::GPU karr board. Pick the highest-priority actionable ticket,
+  delegate behavior-relevant work under lib/ to the rex-gpu-worker agent, and a
+  pre-release audit to rex-gpu-release-checker — do not touch pipeline code
+  yourself. Follow .claude/rules/rex-gpu-rules.md. Never run dzil release or any
+  CPAN upload, and never install drivers or reboot a real host from here. Hand
+  each ticket back to review with a note; stop when nothing is actionable.
