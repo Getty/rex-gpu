@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-08-31T04:29:46Z
+id: 1
+priority: low
+status: backlog
+tags:
+- amd
+- driver
+title: AMD GPU driver support
+updated: 2026-08-31T04:29:46Z
+---
+
+AMD GPUs are detected (vendor 1002) but compute is hardcoded to 0 and gpu_setup only logs a warning — no driver/ROCm install path exists. lib/Rex/GPU.pm:159, Detect.pm _parse_amd_line. Detect-only is a deliberate current state; building the install path needs a decision on ROCm vs amdgpu-dkms and the k8s device-plugin story.
