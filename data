@@ -1,0 +1,4 @@
+---
+board:
+  name: Rex::GPU
+version: 1
