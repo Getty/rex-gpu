@@ -100,6 +100,6 @@ a follow-up ticket on the *other* repo's board, never as an edit made here.
 
 Perl house style and cpanfile pinning: skills `getty-perl-core`,
 `getty-perl-release-author-getty`, `perl-release-dist-ini`. Rex idioms, connection types and
-the SFTP question: skill `getty-rex`. This distribution's pipeline, detection contract and
+the SFTP question: skill `rex`. This distribution's pipeline, detection contract and
 distro matrix: skill `rex-gpu-core`. All are force-loaded for `rex-gpu-*` agents; do not
 duplicate them here.

@@ -6,7 +6,7 @@ allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 briefing:
   skills:
     - rex-gpu-core
-    - getty-rex
+    - rex
     - getty-perl-core
     - kanban-issues-karr-cli
 ---

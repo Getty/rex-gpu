@@ -13,7 +13,7 @@ driver path. Do not add AMD install code without a ticket that says to.
 Consumes `Rex::LibSSH` (`recommends`, not a pin) because the target hosts — Hetzner
 dedicated servers — ship without an SFTP subsystem. Every file op in this distribution
 therefore has to survive on exec channels; Rex idioms and the SFTP question live in skill
-`getty-rex`. Downstream, `Rex::Rancher` calls `gpu_setup` via its optional `gpu => 1`.
+`rex`. Downstream, `Rex::Rancher` calls `gpu_setup` via its optional `gpu => 1`.
 
 ## The pipeline — order is load-bearing
 
