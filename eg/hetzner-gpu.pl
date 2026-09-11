@@ -4,7 +4,12 @@
 # Usage:
 #   rex -f eg/hetzner-gpu.pl -H <host> deploy
 
-use Rex -feature => ['1.4'];
+# Rex::LibSSH >= 0.004 verifies the host key against known_hosts by default.
+# Fresh Hetzner hosts have no entry, so disable the check for first-contact
+# provisioning. For production, instead run
+#   ssh-keyscan <host> >> ~/.ssh/known_hosts
+# before deploying to keep verification.
+use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
 use Rex::LibSSH;
 use Rex::GPU;
 use Rex::Rancher;

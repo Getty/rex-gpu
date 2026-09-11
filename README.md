@@ -56,6 +56,20 @@ use Rex::LibSSH;
 set connection => 'LibSSH';
 ```
 
+### Host-key verification (Rex::LibSSH ≥ 0.004)
+
+Rex::LibSSH 0.004 and later verify the server's host key against `known_hosts` by default. A freshly provisioned host has no entry yet, so the **first** connect fails with `host key is not in known_hosts and strict_hostkeycheck is on`. Either scan the key in first — recommended, keeps verification:
+
+```
+ssh-keyscan <host> >> ~/.ssh/known_hosts
+```
+
+or disable the check Rexfile-wide, as the bundled `eg/` examples do for first-contact provisioning (a deliberate security tradeoff):
+
+```perl
+use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
+```
+
 ## Installation
 
 ```
