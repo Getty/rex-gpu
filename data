@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-11T02:43:32Z
+claimed_by: claude
+class: standard
+completed: 2026-09-11T22:59:52Z
+created: 2026-08-31T04:29:50Z
+id: 2
+priority: medium
+started: 2026-08-31T04:30:10Z
+status: done
+tags:
+- test
+title: No hardware/pipeline test coverage
+updated: 2026-09-11T22:59:52Z
+---
+
+t/ contains only 00-load.t (compile check). No detection, driver-install, containerd-config or reboot path is exercised — a wrong PCI regex, package list or version branch ships unseen. Consider fixture-based unit tests for Detect (parse lspci -nn samples per vendor/class) which need no hardware, and document what must be run on a real GPU node before release.
+
+DONE (commit 42f10d3, branch worktree-gpu-ticket-round, NICHT gepusht).
+
+Neu: t/10-detect.t -- fixture-basierte Characterization-Tests, KEINE Hardware/Netzwerk/Paketmanager/SSH. prove -lr t/ gruen (Files=2, Tests=12 top-level; 9 subtests / 50 Assertions in 10-detect.t).
+
+Abgedeckt:
+- _is_nvidia_compute: class-0302-Short-circuit + compute/non-compute-Familien (RTX/TITAN/Quadro/Tesla/A100/H100/L40/V100/P100/GTX10xx/16xx => 1; MX/GT/GTS/NVS/GTX2-9xx/unbekannt => 0). Das ist der Branch, dessen falsche Antwort den falschen Treiber installiert.
+- _parse_nvidia_line (0302 + 0300), _parse_amd_line.
+- detect() end-to-end mit gemocktem run()/is_installed() (typeglob-Override): nvidia-only, amd-only, virtual-GPU-Short-circuit, mixed, empty/undef.
+
+Header der Testdatei dokumentiert die Hardware-Test-Luecke (was ein Maintainer vor Release auf echtem GPU-Node fahren MUSS: echtes lspci; install_driver je Distro; Rex::Pkg-Bypass-Verify gegen partiellen DKMS-Build; _blacklist_nouveau + initramfs; _reboot_and_wait reconnect-Polling; toolkit; CDI; containerd).
+
+Characterization, nicht gruengefaerbt -- KEINE lib/-Logik geaendert. Zwei IST-Auffaelligkeiten mit # XXX asserted und auf neue Karte #5 gezogen: (a) AMD-Namens-Regex matcht das Standard-lspci-Format nie -> 'Unknown AMD GPU'; (b) NVIDIA/AMD-Name-Output != POD-Beispiele. Beide detect-only/kosmetisch (keine Install-Entscheidung betroffen).
+
+2026-09-11 22:59 Gemerged nach main in 7073df8 (Merge der Ticket-Runde); prove gruen.
