@@ -238,6 +238,25 @@ This module requires L<Rex::LibSSH> (or SFTP) on the connection backend.
 Hetzner servers do not enable the SFTP subsystem by default; use
 C<set connection =E<gt> "LibSSH"> in your Rexfile.
 
+L<Rex::LibSSH> version C<0.004> and later verify the server's host key against
+C<known_hosts> by default. A freshly provisioned host has no entry yet, so the
+B<first> connection fails with C<host key is not in known_hosts and
+strict_hostkeycheck is on>. There are two ways to handle this:
+
+=over
+
+=item * B<Recommended> (keeps host-key verification) — scan the key into
+C<known_hosts> before deploying:
+
+  ssh-keyscan <host> >> ~/.ssh/known_hosts
+
+=item * B<Disable the check Rexfile-wide> — what the bundled C<eg/> examples do
+for first-contact provisioning; a deliberate security tradeoff:
+
+  use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
+
+=back
+
 =head1 SEE ALSO
 
 L<Rex>, L<Rex::LibSSH>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>,
