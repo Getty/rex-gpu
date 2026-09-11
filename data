@@ -1,0 +1,35 @@
+---
+claimed_at: 2026-09-11T02:45:11Z
+claimed_by: claude
+class: standard
+completed: 2026-09-11T23:00:00Z
+created: 2026-08-31T04:29:54Z
+id: 3
+priority: low
+started: 2026-09-11T02:44:30Z
+status: done
+tags:
+- release
+- pod
+title: Verify supported-distro claims against code before release
+updated: 2026-09-11T23:00:00Z
+---
+
+README/POD list Debian 11-13, Ubuntu 22.04/24.04, RHEL/Rocky/Alma 8-10, CentOS Stream 9/10, openSUSE Leap 15.6/16.0. Keep these in sync with the actual branches in NVIDIA.pm install_driver — a distro in the SYNOPSIS but dropped from code is a release blocker. Owned by rex-gpu-release-checker.
+
+VERIFIKATION DURCH (keine Doku-Edit noetig).
+
+Doku-Listen untereinander in sync: README.md:43-46, lib/Rex/GPU.pm POD:224-230 und lib/Rex/GPU/NVIDIA.pm POD:664-670 sind byte-identisch -- Debian 11/12/13, Ubuntu 22.04/24.04, RHEL/Rocky/Alma 8/9/10 + CentOS Stream 9/10, openSUSE Leap 15.6/16.0.
+
+Abgleich mit den install_driver-Branches (NVIDIA.pm):
+- Debian/Ubuntu: is_debian()-Dispatch; _install_driver_debian verzweigt nur os eq 'Ubuntu' vs else -- KEIN Versions-Gate -> alle claimed Debian 11-13 + Ubuntu 22.04/24.04 abgedeckt. OK.
+- RHEL-Familie: _rhel_major_version() (rohes Release + /^(\d+)/ -> Major), Branches major>=9 / else(8) + major>=10 fuer Pakete, CUDA-Repo rhel$major -> Majors 8/9/10+ -> alle claimed RHEL/Rocky/Alma 8-10 + CentOS Stream 9/10 abgedeckt. OK.
+- openSUSE: Branch via $major -> siehe unten.
+
+Kein Doku-DRIFT: nichts Beworbenes fehlt im Dispatch; keine README/POD-Aenderung noetig. (Code ist sogar breiter als die Claims -> sichere Richtung.)
+
+ABER die Code-Verifikation deckte einen echten BLOCKER auf: openSUSE Leap 15.6 (ein claimed Distro) wird durch die gestrippte Versionszahl faelschlich in den Leap-16-Zweig geroutet (falsches Repo/Treiber). -> neue High-Prio-Karte #6. Der Leap-15.6-Claim aus den Docs zu ENTFERNEN waere der falsche Fix (getestetes/beabsichtigtes Distro) -- stattdessen Code fixen (#6).
+
+Nebenbefund (kein Blocker): Debian 11 (bullseye) ist in README/POD als 'tested' gelistet, der 0.001-Changes-Eintrag nannte aber nur Debian 12/13 als getesteten Install-Satz. Code behandelt Debian 11 (is_debian non-Ubuntu, nvidia-driver aus non-free), also NICHT 'aus dem Code gefallen' -- ob Debian 11 tatsaechlich getestet wurde, ist eine Maintainer-Claim-Genauigkeitsfrage, kein Code-Drift.
+
+2026-09-11 22:59 Gemerged nach main in 7073df8 (Merge der Ticket-Runde); prove gruen.
