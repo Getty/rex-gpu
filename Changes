@@ -1,6 +1,14 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - Fix openSUSE Leap NVIDIA driver: operating_system_version() strips dots
+    ("15.6" -> "156"), so int() routed *every* Leap through the >= 16 branch
+    and Leap 15.x got the leap/16.0/ repo + G07 meta package instead of
+    leap/15.x/ + G06. Derive the major from the raw operating_system_release()
+    string; add offline unit test t/20-suse-driver.t (karr #6)
+  - Document actual detected NVIDIA name form in the SYNOPSIS examples
+    ("AD104GL [RTX 4000 SFF Ada Generation]", codename + bracketed marketing
+    string) — the previous "NVIDIA RTX ..." example did not match the code (karr #5)
   - Document Rex::LibSSH >= 0.004 host-key verification: the eg/ deploy
     examples disable the check (disable_strict_host_key_checking feature)
     for first-contact provisioning on fresh Hetzner hosts; ssh-keyscan

@@ -47,7 +47,7 @@ hashref describing one detected GPU:
   {
     nvidia => [
       {
-        name      => "NVIDIA RTX 4000 SFF Ada Generation",
+        name      => "AD104GL [RTX 4000 SFF Ada Generation]",
         vendor    => "nvidia",
         pci_class => "0302",   # "0300" = VGA controller, "0302" = 3D controller
         compute   => 1,        # 1 if CUDA-capable, 0 otherwise

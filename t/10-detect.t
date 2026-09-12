@@ -86,11 +86,13 @@ subtest '_parse_nvidia_line — datacenter (class 0302)' => sub {
   is($gpu->{vendor},    'nvidia', 'vendor nvidia');
   is($gpu->{pci_class}, '0302',   'pci_class 0302');
   is($gpu->{compute},   1,        'compute 1 (class 0302 short-circuit)');
-  # XXX characterization: the captured name keeps the codename AND the bracketed
-  # marketing name verbatim — it is NOT the "NVIDIA RTX 4000 SFF Ada Generation"
-  # shown in the POD SYNOPSIS of Detect.pm. The POD example does not match the code.
+  # The captured name keeps the codename AND the bracketed marketing name
+  # verbatim (e.g. "AD104GL [RTX 4000 SFF Ada Generation]") — no "NVIDIA " prefix,
+  # no de-bracketing. The POD SYNOPSIS in Detect.pm/GPU.pm documents this exact
+  # form (karr #5); the name is a raw detection string and drives no branch
+  # except the family-token match in _is_nvidia_compute.
   is($gpu->{name}, 'AD104GL [RTX 4000 SFF Ada Generation]',
-    'name = codename + bracketed marketing string (POD example is aspirational)');
+    'name = codename + bracketed marketing string (matches POD SYNOPSIS)');
 };
 
 subtest '_parse_nvidia_line — consumer (class 0300)' => sub {

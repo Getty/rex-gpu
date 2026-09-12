@@ -33,7 +33,7 @@ Returns a hashref with detected GPUs grouped by vendor:
   # {
   #   nvidia => [
   #     {
-  #       name      => "NVIDIA RTX 4000 SFF Ada Generation",
+  #       name      => "AD104GL [RTX 4000 SFF Ada Generation]",
   #       vendor    => "nvidia",
   #       pci_class => "0302",   # 0300 = VGA, 0302 = 3D/compute
   #       compute   => 1,        # 1 if CUDA-capable

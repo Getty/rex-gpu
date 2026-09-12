@@ -318,7 +318,7 @@ sub _enable_debian_nonfree {
 sub _install_driver_redhat {
   my ($os, $running_kernel) = @_;
 
-  my $major = _rhel_major_version();
+  my $major = _os_major_version();
 
   # Enable required repos
   Rex::Logger::info("  Enabling EPEL and extra repos...");
@@ -368,13 +368,15 @@ sub _install_driver_redhat {
     if $? != 0;
 }
 
-sub _rhel_major_version {
+sub _os_major_version {
   # Rex::Commands::Gather::operating_system_version() strips dots,
-  # so "10.1" becomes "101". Use operating_system_release() for the raw
-  # version string and extract the major version ourselves.
-  my $release = Rex::Commands::Gather::operating_system_release();
-  $release =~ /^(\d+)/;
-  return $1 + 0;
+  # so "10.1" becomes "101". Use the raw operating_system_release() string
+  # and extract the major version ourselves. An explicit $release may be
+  # passed so callers stay pure and unit-testable.
+  my ($release) = @_;
+  $release //= Rex::Commands::Gather::operating_system_release();
+  my ($major) = $release =~ /^(\d+)/;
+  return ($major // 0) + 0;
 }
 
 # ============================================================
@@ -384,8 +386,8 @@ sub _rhel_major_version {
 sub _install_driver_suse {
   my ($os, $running_kernel) = @_;
 
-  my $version = operating_system_version();
-  my $major = int($version);
+  my $release = Rex::Commands::Gather::operating_system_release();
+  my ($repo_url, $meta_pkg) = _suse_nvidia_repo_params($release);
 
   # Remove any stale NVIDIA packages first — avoids kmp/userspace version mismatch
   # caused by libnvidia-ml/libnvidia-cfg from the standard OSS non-free repo lagging
@@ -395,34 +397,41 @@ sub _install_driver_suse {
     auto_die => 0;
 
   # Add NVIDIA GFX repo (use direct baseurls — zypper cannot parse yum .repo files)
-  if ($major >= 16) {
-    Rex::Logger::info("  Adding NVIDIA GFX repo (suse16)...");
-    run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
-    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null",
-      auto_die => 0;
-  }
-  else {
-    my $leap_version = sprintf("%.1f", $version / 10);  # 156 -> 15.6
-    Rex::Logger::info("  Adding NVIDIA GFX repo (opensuse15, Leap $leap_version)...");
-    run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
-    run "zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/$leap_version/ nvidia-gfx 2>/dev/null",
-      auto_die => 0;
-  }
+  Rex::Logger::info("  Adding NVIDIA GFX repo (Leap $release): $repo_url");
+  run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
+  run "zypper addrepo --refresh $repo_url nvidia-gfx 2>/dev/null", auto_die => 0;
   run "zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null", auto_die => 0;
 
   # Use the meta package — it co-installs kmp-default + userspace at the same version,
   # preventing the split that causes "Driver/library version mismatch" with nvidia-smi.
-  # Pre-signed kmp packages don't need kernel-devel/headers.
-  my $meta_pkg = $major >= 16
-    ? "nvidia-open-driver-G07-signed-kmp-meta"
-    : "nvidia-open-driver-G06-signed-kmp-meta";
-
+  # Pre-signed kmp packages don't need kernel-devel/headers. The repo URL and meta
+  # package (G06 for Leap 15.x, G07 for 16.x) come from _suse_nvidia_repo_params.
   Rex::Logger::info("  Installing $meta_pkg...");
   run "zypper install -y $meta_pkg", auto_die => 0;
 
   # Lock the OSS non-free standalone packages so future zypper updates don't
   # pull in a stale libnvidia-ml / libnvidia-cfg and cause a mismatch again.
   run "zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true", auto_die => 0;
+}
+
+sub _suse_nvidia_repo_params {
+  my ($release) = @_;
+
+  # Derive the major from the raw release string. operating_system_version()
+  # strips dots ("15.6" -> "156"), which made int() see 156 and route every
+  # Leap through the ">= 16" branch (karr #6).
+  my $major = _os_major_version($release);
+
+  if ($major >= 16) {
+    return ("https://download.nvidia.com/opensuse/leap/16.0/",
+            "nvidia-open-driver-G07-signed-kmp-meta");
+  }
+
+  # Leap 15.x: keep the full x.y version in the repo path (leap/15.6/).
+  my ($leap_version) = $release =~ /^(\d+\.\d+)/;
+  $leap_version //= $release;
+  return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
+          "nvidia-open-driver-G06-signed-kmp-meta");
 }
 
 # ============================================================
