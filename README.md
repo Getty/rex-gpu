@@ -43,7 +43,8 @@ Tested on Hetzner dedicated servers running:
 - Debian 11 (bullseye), 12 (bookworm), 13 (trixie)
 - Ubuntu 22.04 (jammy), 24.04 (noble)
 - RHEL / Rocky Linux / AlmaLinux 8, 9, 10 — CentOS Stream 9, 10
-- openSUSE Leap 15.6, 16.0
+
+The verified target set is the RKE2 Linux family above. **openSUSE Leap / SLES is unverified and unsupported** — SUSE is not a deploy target for the GPU-on-Rancher pipeline.
 
 GPUs tested include the **NVIDIA RTX 4000 SFF Ada Generation** (PCI class `0302`, datacenter compute profile).
 

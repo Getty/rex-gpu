@@ -676,9 +676,12 @@ Supported distributions:
 
 =item * RHEL / Rocky Linux / AlmaLinux 8, 9, 10 — CentOS Stream 9, 10
 
-=item * openSUSE Leap 15.6, 16.0
-
 =back
+
+The verified target set is the RKE2 Linux family above. B<openSUSE Leap / SLES
+is unverified and unsupported> — SUSE is not a deploy target for the
+GPU-on-Rancher pipeline. The C<_install_driver_suse> path exists but is not
+exercised; do not treat a SUSE run as evidence.
 
 Tested on Hetzner dedicated servers with NVIDIA RTX 4000 SFF Ada Generation.
 
