@@ -4,12 +4,12 @@
 # Usage:
 #   rex -f eg/hetzner-gpu.pl -H <host> deploy
 
-# Rex::LibSSH >= 0.004 verifies the host key against known_hosts by default.
-# Fresh Hetzner hosts have no entry, so disable the check for first-contact
-# provisioning. For production, instead run
-#   ssh-keyscan <host> >> ~/.ssh/known_hosts
-# before deploying to keep verification.
-use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
+# Rex::LibSSH >= 0.004 verifies the host key against known_hosts by default
+# (CWE-322 fix). A fresh Hetzner host has no entry, so the 'before ALL' hook at
+# the bottom ssh-keyscans it into known_hosts before the first connect — this
+# KEEPS verification on. To override and skip verification instead, add
+# 'disable_strict_host_key_checking' to the feature list below.
+use Rex -feature => ['1.4'];
 use Rex::LibSSH;
 use Rex::GPU;
 use Rex::Rancher;
@@ -38,3 +38,13 @@ task 'deploy', group => 'avatar', sub {
     kubeconfig_file => "$ENV{HOME}/.kube/rexdemo.yaml",
   );
 };
+
+# Pre-connect host-key scan (Rex::LibSSH >= 0.004) — see the note at the top.
+# ssh-keyscans the target into known_hosts on the local machine before the
+# first connect, keeping verification on. Must come after the task definition.
+before 'ALL' => sub {
+  my ($server) = @_;
+  rancher_scan_known_hosts($server);
+};
+
+1;

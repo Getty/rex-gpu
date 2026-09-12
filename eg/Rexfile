@@ -12,14 +12,16 @@
 # SSH key: defaults to ~/.ssh/id_ed25519, override with REX_KEY env var
 # SSH user: defaults to root, override with REX_USER env var
 
-# Rex::LibSSH >= 0.004 verifies the host key against known_hosts by default.
-# Fresh Hetzner hosts have no entry, so disable the check for first-contact
-# provisioning. For production, instead run
-#   ssh-keyscan <host> >> ~/.ssh/known_hosts
-# before deploying to keep verification.
-use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
+# Rex::LibSSH >= 0.004 verifies the host key against known_hosts by default
+# (CWE-322 fix). A fresh Hetzner host has no entry, so the 'before ALL' hook at
+# the bottom ssh-keyscans it into known_hosts before the first connect — this
+# KEEPS verification on. To override and skip verification instead (e.g. hosts
+# reinstalled with changing keys), add 'disable_strict_host_key_checking' to the
+# feature list below.
+use Rex -feature => ['1.4'];
 use Rex::LibSSH;
 use Rex::GPU;
+use Rex::Rancher;
 use Rex::Rancher::Agent;
 use Rex::Rancher::Node;
 use Rex::Rancher::Server;
@@ -112,3 +114,15 @@ task 'agent', sub {
     Rex::Rancher::Node::prepare_node(%opts);
     Rex::Rancher::Agent::install_agent(%opts);
 };
+
+# Pre-connect host-key scan (Rex::LibSSH >= 0.004) — see the note at the top.
+# Runs on the local machine before Rex opens the SSH connection for any task,
+# seeding the target's key into known_hosts so the verified connect succeeds
+# (keeps verification on rather than disabling it). Must come after the task
+# definitions: 'before' attaches to tasks that already exist.
+before 'ALL' => sub {
+    my ($server) = @_;
+    rancher_scan_known_hosts($server);
+};
+
+1;

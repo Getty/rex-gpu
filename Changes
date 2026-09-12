@@ -9,10 +9,11 @@ Revision history for Rex-GPU
   - Document actual detected NVIDIA name form in the SYNOPSIS examples
     ("AD104GL [RTX 4000 SFF Ada Generation]", codename + bracketed marketing
     string) — the previous "NVIDIA RTX ..." example did not match the code (karr #5)
-  - Document Rex::LibSSH >= 0.004 host-key verification: the eg/ deploy
-    examples disable the check (disable_strict_host_key_checking feature)
-    for first-contact provisioning on fresh Hetzner hosts; ssh-keyscan
-    documented as the verification-preserving alternative
+  - Rex::LibSSH >= 0.004 host-key verification: the eg/ deploy examples now
+    KEEP verification on and ssh-keyscan the fresh host into known_hosts via a
+    'before ALL' pre-connect hook (rancher_scan_known_hosts), consistent with
+    Rex::Rancher and this dist's own POD recommendation. Override by adding
+    disable_strict_host_key_checking to the feature list.
 
 0.001     2026-03-29 04:20:30Z
   - Initial release
