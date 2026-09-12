@@ -1,0 +1,46 @@
+---
+claimed_at: 2026-09-11T02:44:34Z
+claimed_by: claude
+class: standard
+completed: 2026-09-12T02:47:10Z
+created: 2026-09-11T02:44:34Z
+id: 6
+priority: high
+started: 2026-09-12T02:47:10Z
+status: done
+title: openSUSE Leap 15.6 bekommt Leap-16-NVIDIA-Repo + falschen Treiber (Version-Dots
+  gestrippt)
+updated: 2026-09-12T02:47:10Z
+---
+
+RELEASE-BLOCKER fuer den Leap-15.6-Claim (README/POD). Entdeckt bei der Distro-Claim-Verifikation (karr #3).
+
+Ort: lib/Rex/GPU/NVIDIA.pm _install_driver_suse (~Z.384-426).
+
+Bug:
+  my $version = operating_system_version();   # Leap 15.6 -> "156", 16.0 -> "160" (Dots gestrippt)
+  my $major   = int($version);                # int("156") = 156  (NICHT 15)
+  if ($major >= 16) { ...suse16: addrepo .../opensuse/leap/16.0/ ; meta G07... }
+  else { leap_version = sprintf("%.1f",$version/10)=15.6 ; meta G06 }   # TOTER CODE
+
+Faktenbasis: Rex::Commands::Gather::operating_system_version() (/home/getty/perl5/lib/perl5/Rex/Commands/Gather.pm:154-162) ruft operating_system_release() und macht dann s/[\.,]//g -> strippt die Punkte. Host.pm liest fuer SuSE /etc/os-release VERSION_ID ("15.6"/"16.0"). Also liefert operating_system_version() "156"/"160".
+
+Folge: int("156")=156, 156>=16 TRUE -> Leap 15.6 nimmt den suse16-Zweig: falsches Repo https://download.nvidia.com/opensuse/leap/16.0/ UND falsches Meta-Paket nvidia-open-driver-G07-signed-kmp-meta (die Ternary Z.416-418 nutzt denselben kaputten $major, also G07 statt G06). Der korrekte 15.x-else-Zweig (leap/15.6/ + G06) ist fuer KEIN Leap erreichbar (15x und 16x sind nach int() beide >= 16). Leap 16.0 funktioniert nur zufaellig (160>=16).
+
+Auf echtem Leap-15.6-Host (claimed/getestetes Distro) installiert gpu_setup damit den falschen Treiber -> Fehlschlag oder Versionsmismatch.
+
+Vorgeschlagener Fix (spiegelt _rhel_major_version, gleiche Datei Z.371-378): echten Major aus dem rohen Release ziehen, $version (156) fuer die leap_version-Arithmetik behalten:
+  my $version = operating_system_version();          # 156 / 160
+  my ($major) = operating_system_release() =~ /^(\d+)/;  # 15 / 16
+  # dann if ($major >= 16) korrekt; else: leap_version = sprintf("%.1f",$version/10) = 15.6
+
+NICHT in dieser Runde gefixt: behavior-relevanter Treiber-Install-/Version-Branch-Code auf einem Distro OHNE Test-Host, ausserhalb der beauftragten 3 Tickets. Braucht Maintainer + idealerweise echten Leap-15.6-Node zur Bestaetigung, plus Leap-16.x-Regressionscheck nach dem Fix.
+
+2026-09-11 23:03 ENTSCHEIDUNGSVORLAGE (verifiziert gegen main-Code lib/Rex/GPU/NVIDIA.pm):
+Bug bestaetigt: Z.387-388 $version=operating_system_version() (=156 bei Leap 15.6), $major=int($version) (=156). Z.398 if($major>=16) -> 156>=16 TRUE -> Leap 15.6 nimmt suse16-Zweig (Z.401: leap/16.0/-Repo) + Z.416-418: G07 statt G06. Korrekter else-Zweig (Z.404-410: leap_version=15.6, G06) ist fuer JEDES Leap unerreichbar. Leap 16.0 klappt nur zufaellig (160>=16).
+Fix-Baustein liegt in-file: _rhel_major_version() (Z.371-378) macht es korrekt (operating_system_release() roh, /^(\d+)/). SUSE-Pfad nutzt es nur nicht.
+OPTION A (empfohlen, minimal-invasiv): Z.388 int($version) ersetzen durch major aus rohem Release: my ($major)=Rex::Commands::Gather::operating_system_release()=~/^(\d+)/; $version(=156) fuer die /10-Arithmetik in Z.405 behalten. Spiegelt _rhel_major_version.
+OPTION B: warten bis echter Leap-15.6-Host da ist, dann fixen+verifizieren.
+RISIKO/VERIFIKATION: Leap-16.x-Regression pruefen (release "16.0" -> major=16, bleibt korrekt). Braucht Leap-15.6-Node: gpu_setup muss leap/15.6/ + G06 ziehen; plus Leap-16.0-Regressioncheck (leap/16.0/ + G07). POD Z.635-636 ist bereits richtig (G06=15.x, G07=16.x) -- nur der Code-Branch ist falsch.
+
+2026-09-12 02:47 Gefixt in commit a283587 (raw-Release-Major statt int(dot-stripped)); reine _suse_nvidia_repo_params + Offline-Unit-Test t/20-suse-driver.t (15.6->G06, 16.0->G07). Live-Verifikation auf echtem Leap-15.6-Host als Follow-up-Card #7.
