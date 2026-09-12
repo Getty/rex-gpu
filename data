@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-09-12T02:47:02Z
+id: 7
+priority: low
+status: backlog
+tags:
+- nvidia
+- verify
+- rke2
+title: NVIDIA-Treiber-Install auf echtem RKE2-Target-Node verifizieren (Debian/Ubuntu/RHEL)
+updated: 2026-09-12T04:11:45Z
+---
+
+Live-Hardware-Verifikation des NVIDIA-Treiber-Installs auf einem echten RKE2-Target-Node (Debian/Ubuntu oder RHEL/Rocky). t/10-detect.t deckt install_driver bewusst NICHT ab -- nur reine Detection-Logik ist unit-getestet; der Treiber-Install je Distro-Familie ist explizit Maintainer-Arbeit auf echtem Node. Zu pruefen: gpu_setup installiert Treiber sauber, nvidia-smi ohne Version-Mismatch, Container-Toolkit + CDI, containerd-RKE2-Integration.
+
+2026-09-12 04:11 Umgewidmet von 'openSUSE Leap 15.6 verifizieren' (2026-09-12): SUSE ist kein Deploy-Ziel mehr (in POD/README als unsupported markiert, commit folgt). Verifikation gehoert auf einen unterstuetzten RKE2-Linux-Target.
