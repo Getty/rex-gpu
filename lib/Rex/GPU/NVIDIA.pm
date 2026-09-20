@@ -143,14 +143,34 @@ C<$runtime> selects how containerd is configured:
 
 =item C<rke2> or C<k3s> (default: C<rke2>)
 
-Creates C</var/lib/rancher/rke2/agent/etc/containerd/> and writes a
-C<config.toml.tmpl> that imports snippets from C</etc/containerd/conf.d/>.
-Then writes C</etc/containerd/conf.d/99-nvidia.toml> which registers the
-NVIDIA runtime as C<io.containerd.runc.v2> with
-C<BinaryName=/usr/bin/nvidia-container-runtime>.
+Registers the NVIDIA runtime C<additively>, without replacing the base
+containerd config that RKE2/K3s generate. The mechanism is chosen from the
+effective, generated C<config.toml> under
+C</var/lib/rancher/{rke2,k3s}/agent/etc/containerd/>:
 
-This approach is used by both RKE2 and K3s because they share the same
-containerd include mechanism.
+=over
+
+=item * B<Already wired> — if that C<config.toml> already contains an
+C<nvidia> runtime block (modern RKE2/K3s auto-detect
+C<nvidia-container-runtime> on C<PATH> and wire it themselves), this is a
+B<no-op>: nothing is written and the native config is left untouched.
+
+=item * B<Modern (containerd 2.x / config v3)> — writes an additive drop-in
+at C<config-v3.toml.d/99-nvidia.toml> (RKE2/K3s already import
+C<config-v3.toml.d/*.toml>). The base config — C<SystemdCgroup>, the pinned
+sandbox image, snapshotter options and the registry C<certs.d> path — is
+preserved.
+
+=item * B<Legacy (containerd 1.x / config v2)> — writes a C<config.toml.tmpl>
+that begins with C<{{ template "base" . }}> and only I<adds> the nvidia
+runtime, so the rendered base config is preserved.
+
+=back
+
+Both RKE2 and K3s use the same logic (only the C</var/lib/rancher/*> base
+directory differs). If no generated C<config.toml> exists yet and no config
+version marker is found, the modern v3 drop-in is written and a warning is
+logged.
 
 =item C<containerd>
 
@@ -171,7 +191,7 @@ sub configure_containerd {
   Rex::Logger::info("Configuring containerd for NVIDIA GPU (runtime: $runtime)");
 
   if ($runtime eq 'rke2' || $runtime eq 'k3s') {
-    _configure_containerd_rke2();
+    _configure_containerd_rke2($runtime);
   }
   elsif ($runtime eq 'containerd') {
     _configure_containerd_standalone();
@@ -504,36 +524,138 @@ sub _install_toolkit_suse {
 #  Containerd configuration
 # ============================================================
 
-sub _configure_containerd_rke2 {
-  file "/var/lib/rancher/rke2/agent/etc/containerd", ensure => 'directory';
-  file "/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl",
-    content => "imports = [\"/etc/containerd/conf.d/*.toml\"]\nversion = 2\n";
+sub _rke2_base_dir {
+  my ($runtime) = @_;
+  $runtime //= 'rke2';
+  my $dist = ($runtime eq 'k3s') ? 'k3s' : 'rke2';
+  return "/var/lib/rancher/$dist/agent/etc/containerd";
+}
 
-  _write_nvidia_containerd_config();
+# Decide, from the effective containerd state, HOW to register the nvidia
+# runtime. Pure (regex + booleans only, no I/O) so it is unit-testable offline.
+#
+#   config      => contents of the RKE2/K3s-generated config.toml (or undef)
+#   has_v3_tmpl => a config-v3.toml.tmpl base template is present
+#   has_v3_dir  => a config-v3.toml.d/ drop-in directory is present
+#
+# Returns one of:
+#   'present' — the distro already wired an nvidia runtime (leave it alone)
+#   'v3'      — modern containerd 2.x / config v3: use an additive drop-in
+#   'v2'      — legacy containerd 1.x / config v2: extend the base template
+#
+# Ordering is load-bearing: a distro that auto-detected nvidia-container-runtime
+# on PATH wires the runtime itself, so 'present' must win before any write path.
+sub _containerd_nvidia_action {
+  my (%s) = @_;
+  my $config = $s{config} // '';
+
+  # Already wired (RKE2/K3s auto-detect, or a prior additive drop-in) — no-op.
+  return 'present' if $config =~ /runtimes\.'?nvidia'?[.\]]/;
+
+  # Modern config v3: additive drop-in in config-v3.toml.d/.
+  return 'v3' if $s{has_v3_tmpl} || $s{has_v3_dir};
+  return 'v3' if $config =~ /^\s*version\s*=\s*3\b/m;
+  return 'v3' if $config =~ /config-v3\.toml\.d/;
+
+  # Legacy config v2 (containerd 1.x): base-extending config.toml.tmpl.
+  return 'v2'
+    if $config =~ /^\s*version\s*=\s*2\b/m
+    || $config =~ /io\.containerd\.grpc\.v1\.cri/;
+
+  # No generated config yet and no version markers: default to the modern
+  # v3 drop-in (the current RKE2/K3s norm). Caller warns; see POD.
+  return 'v3';
+}
+
+# Modern (containerd 2.x / config v3) additive drop-in. RKE2/K3s import
+# config-v3.toml.d/*.toml into their generated config.toml, so this ADDS the
+# nvidia runtime without touching the base — SystemdCgroup, the pinned sandbox
+# image, snapshotter opts and the certs.d config_path all survive. Uses the
+# v3 CRI plugin path (io.containerd.cri.v1.runtime), matching what the distro
+# auto-wires. SystemdCgroup=true keeps the cgroup driver aligned with kubelet.
+sub _nvidia_containerd_dropin_v3 {
+  return <<'TOML';
+version = 3
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'nvidia']
+  runtime_type = "io.containerd.runc.v2"
+
+[plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.'nvidia'.options]
+  BinaryName = "/usr/bin/nvidia-container-runtime"
+  SystemdCgroup = true
+TOML
+}
+
+# Legacy (containerd 1.x / config v2) base-extending template. RKE2/K3s render
+# config.toml.tmpl if present; {{ template "base" . }} emits the full default
+# config first, then we ADD the nvidia runtime under the v2 CRI plugin path.
+# NEVER a bare full-config tmpl (that replaced the base and was karr #9).
+sub _nvidia_containerd_tmpl_v2 {
+  return <<'TOML';
+{{ template "base" . }}
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes."nvidia"]
+  runtime_type = "io.containerd.runc.v2"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes."nvidia".options]
+  BinaryName = "/usr/bin/nvidia-container-runtime"
+  SystemdCgroup = true
+TOML
+}
+
+sub _path_exists {
+  my ($flag, $path) = @_;
+  run "test $flag $path", auto_die => 0;
+  return $? == 0 ? 1 : 0;
+}
+
+sub _configure_containerd_rke2 {
+  my ($runtime) = @_;
+  $runtime //= 'rke2';
+
+  my $base        = _rke2_base_dir($runtime);
+  my $config_file = "$base/config.toml";
+
+  # RKE2/K3s regenerate config.toml on every startup; it reflects the effective
+  # merged runtime config, including any nvidia runtime the distro auto-wired
+  # after finding nvidia-container-runtime on PATH.
+  my $config = run "cat $config_file 2>/dev/null", auto_die => 0;
+
+  my $action = _containerd_nvidia_action(
+    config      => $config,
+    has_v3_tmpl => _path_exists("-f", "$base/config-v3.toml.tmpl"),
+    has_v3_dir  => _path_exists("-d", "$base/config-v3.toml.d"),
+  );
+
+  if ($action eq 'present') {
+    Rex::Logger::info(
+      "  $runtime already wired the nvidia runtime natively — leaving containerd config untouched");
+    return;
+  }
+
+  if ($action eq 'v3') {
+    Rex::Logger::info(
+      "  no generated $config_file yet and no config version markers — "
+      . "assuming modern (config v3) $runtime", "warn")
+      unless defined $config && length $config;
+
+    file "$base/config-v3.toml.d", ensure => 'directory';
+    file "$base/config-v3.toml.d/99-nvidia.toml",
+      content => _nvidia_containerd_dropin_v3();
+    Rex::Logger::info(
+      "  wrote additive nvidia drop-in: $base/config-v3.toml.d/99-nvidia.toml");
+  }
+  else {
+    file $base, ensure => 'directory';
+    file "$base/config.toml.tmpl", content => _nvidia_containerd_tmpl_v2();
+    Rex::Logger::info(
+      "  wrote base-extending config.toml.tmpl (legacy v2): $base/config.toml.tmpl");
+  }
 }
 
 sub _configure_containerd_standalone {
   run "nvidia-ctk runtime configure --runtime=containerd 2>&1", auto_die => 0;
   run "systemctl restart containerd 2>/dev/null", auto_die => 0;
-}
-
-sub _write_nvidia_containerd_config {
-  file "/etc/containerd/conf.d", ensure => 'directory';
-  file "/etc/containerd/conf.d/99-nvidia.toml", content => <<'TOML';
-version = 2
-
-[plugins]
-  [plugins."io.containerd.grpc.v1.cri"]
-    [plugins."io.containerd.grpc.v1.cri".containerd]
-      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
-          privileged_without_host_devices = false
-          runtime_engine = ""
-          runtime_root = ""
-          runtime_type = "io.containerd.runc.v2"
-          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
-            BinaryName = "/usr/bin/nvidia-container-runtime"
-TOML
 }
 
 # ============================================================
@@ -661,9 +783,12 @@ enumerate GPU resources without requiring privileged container access.
 
 =head2 Containerd configuration
 
-For RKE2 and K3s, the NVIDIA runtime is registered via a drop-in snippet at
-C</etc/containerd/conf.d/99-nvidia.toml>, imported via the distribution's
-C<config.toml.tmpl> mechanism. For standalone containerd,
+For RKE2 and K3s, the NVIDIA runtime is registered additively and
+version-aware, without clobbering the config that the distribution generates:
+a no-op when RKE2/K3s already wired the runtime natively, a
+C<config-v3.toml.d/> drop-in on modern (containerd 2.x / config v3) hosts, or
+a base-extending (C<{{ template "base" . }}>) C<config.toml.tmpl> on legacy
+(containerd 1.x / config v2) hosts. For standalone containerd,
 C<nvidia-ctk runtime configure> is used.
 
 Supported distributions:

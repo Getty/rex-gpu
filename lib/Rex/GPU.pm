@@ -83,12 +83,14 @@ runtime snippet is placed:
 
 =over
 
-=item C<rke2> (default) — writes to
-C</var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl> and drops a
-snippet in C</etc/containerd/conf.d/99-nvidia.toml>
+=item C<rke2> (default) — registers the NVIDIA runtime additively under
+C</var/lib/rancher/rke2/agent/etc/containerd/>: a no-op if RKE2 already wired
+it natively, otherwise a C<config-v3.toml.d/> drop-in (modern, config v3) or a
+base-extending C<config.toml.tmpl> (legacy, config v2). The RKE2-generated base
+config is never replaced.
 
-=item C<k3s> — same as C<rke2>; K3s and RKE2 share the same containerd
-config include mechanism
+=item C<k3s> — same logic as C<rke2>, under C</var/lib/rancher/k3s/...>; K3s
+and RKE2 share the same containerd config mechanism
 
 =item C<containerd> — runs C<nvidia-ctk runtime configure --runtime=containerd>
 for a standalone containerd installation

@@ -1,6 +1,17 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - Fix containerd config for RKE2/K3s clobbering the distribution's native
+    config on modern hosts. The old code wrote a full config.toml.tmpl
+    (version=2, io.containerd.grpc.v1.cri) that REPLACED the RKE2/K3s-generated
+    config — on containerd 2.x / config v3 that dropped SystemdCgroup, the
+    pinned sandbox image, snapshotter opts and the certs.d config_path.
+    configure_containerd is now version-aware and additive: a no-op when
+    RKE2/K3s already wired the nvidia runtime natively, a config-v3.toml.d/
+    drop-in on modern hosts, or a base-extending config.toml.tmpl (renders the
+    distribution base first via its "base" template, then adds nvidia) on
+    legacy config-v2 hosts. Handles RKE2 and K3s under their respective
+    /var/lib/rancher/*/agent/etc/containerd/ dirs (karr #9)
   - Fix openSUSE Leap NVIDIA driver: operating_system_version() strips dots
     ("15.6" -> "156"), so int() routed *every* Leap through the >= 16 branch
     and Leap 15.x got the leap/16.0/ repo + G07 meta package instead of
