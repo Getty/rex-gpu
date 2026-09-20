@@ -35,6 +35,14 @@ L</verify_nvidia> to confirm the kernel module loaded correctly.
 
 Dies if the detected OS is not supported.
 
+If a working NVIDIA driver is already loaded and functional (C<nvidia-smi -L>
+lists a GPU) — for example on a host provisioned via the NVIDIA CUDA package
+repository, or on a re-run — C<install_driver> logs this and returns
+immediately without installing anything, and without blacklisting nouveau or
+rebooting. This keeps the call idempotent and stops the per-distro package
+selection from installing a second, version-conflicting (or lower) driver over
+the one already present.
+
 Options:
 
 =over
@@ -59,6 +67,24 @@ unloaded before the NVIDIA kernel module can bind to the device.
 
 sub install_driver {
   my (%opts) = @_;
+
+  # Idempotency short-circuit (distro-neutral, BEFORE per-distro package
+  # selection): if a working NVIDIA driver is already loaded and functional, do
+  # NOT install a second driver source. A host provisioned via the NVIDIA CUDA
+  # package repo (cuda-drivers / unversioned nvidia-driver userspace), or a
+  # re-run of gpu_setup, already has the module bound; the per-distro
+  # auto-selection would otherwise pick a DIFFERENT (possibly lower) version
+  # whose versioned libs Conflict with the installed userspace — apt/dnf/zypper
+  # then refuse and the install-verify seam dies. nvidia-smi -L lists a "GPU N:"
+  # device only when the module is loaded and functional, so it is the safe,
+  # OS-neutral signal. nouveau is already displaced by the loaded module, so the
+  # blacklist and reboot are skipped too — a clean no-op on such a host.
+  my $smi = run "nvidia-smi -L 2>&1", auto_die => 0;
+  chomp $smi if defined $smi;
+  if (_nvidia_driver_present($smi)) {
+    Rex::Logger::info("NVIDIA driver already present and working — skipping driver install ($smi)");
+    return;
+  }
 
   my $os = operating_system();
   my $running_kernel = run "uname -r";
@@ -91,6 +117,18 @@ sub install_driver {
   verify_nvidia();
 
   Rex::Logger::info("NVIDIA driver installation complete");
+}
+
+# Pure predicate for the install_driver idempotency short-circuit: given the
+# output of `nvidia-smi -L`, is a working NVIDIA driver already loaded? Only a
+# functional, module-bound driver lists a "GPU N:" device line; every failure
+# form (NVML init error, "No devices were found", "command not found") does not
+# match. Same signal verify_nvidia() uses to confirm nvidia-smi works. Pure
+# (regex only, no run/dpkg) so it is unit-testable offline.
+sub _nvidia_driver_present {
+  my ($smi) = @_;
+  return 0 unless defined $smi;
+  return $smi =~ /GPU \d+:/ ? 1 : 0;
 }
 
 =method install_container_toolkit
