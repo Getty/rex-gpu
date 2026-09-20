@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-20T20:58:18Z
+claimed_by: claude
+class: standard
+completed: 2026-09-20T20:58:18Z
+created: 2026-09-12T02:47:02Z
+id: 7
+priority: low
+started: 2026-09-20T20:37:58Z
+status: done
+tags:
+- nvidia
+- verify
+- rke2
+title: NVIDIA-Treiber-Install auf echtem RKE2-Target-Node verifizieren (Debian/Ubuntu/RHEL)
+updated: 2026-09-20T20:58:18Z
+---
+
+Live-Hardware-Verifikation des NVIDIA-Treiber-Installs auf einem echten RKE2-Target-Node (Debian/Ubuntu oder RHEL/Rocky). t/10-detect.t deckt install_driver bewusst NICHT ab -- nur reine Detection-Logik ist unit-getestet; der Treiber-Install je Distro-Familie ist explizit Maintainer-Arbeit auf echtem Node. Zu pruefen: gpu_setup installiert Treiber sauber, nvidia-smi ohne Version-Mismatch, Container-Toolkit + CDI, containerd-RKE2-Integration.
+
+2026-09-12 04:11 Umgewidmet von 'openSUSE Leap 15.6 verifizieren' (2026-09-12): SUSE ist kein Deploy-Ziel mehr (in POD/README als unsupported markiert, commit folgt). Verifikation gehoert auf einen unterstuetzten RKE2-Linux-Target.
+
+2026-09-20 19:51 Aus #8 (geschlossen, Duplikat zu #4) eingegliedert: Rex::LibSSHs naechstes Release (rex-libssh HEAD 7085c0f, noch nicht released) verifiziert Host-Keys per Default gegen known_hosts (CWE-322). Der Deploy-Flow-Fix ist bereits in main -- eg/ ssh-keyscan-Seeding (commit 40eff36) aus #4. Bei der Live-Verifikation auf dem RKE2-Node daher zusaetzlich pruefen: erster Connect auf frischen Hetzner-Host mit dem neuen Rex::LibSSH gelingt (ssh-keyscan-Seeding greift), und cpanfile bleibt recommends/unpinned bis das Upgrade bewusst gezogen wird.
+
+2026-09-20 20:38 In Arbeit: Live-Hardware-Verifikation gestartet auf otho-lab (10.230.30.52, Ubuntu 24.04.4 x86_64, RTX 3090). Nutzer hat Experimentier-System freigegeben inkl. Reboot + Reinstall. WICHTIGER Ist-Zustand VOR dem Test (read-only Recon): Node ist bereits voll GPU-faehiger, LAUFENDER rke2-agent (joined an 10.230.30.110:9345, Label node-class=rtx3090), aber NICHT via rex-gpu provisioniert -- Treiber 610.57.04 via NVIDIA-CUDA-Repo (cuda-drivers/cuda-keyring, nicht rex-gpus nvidia-driver-XXX-server), Toolkit 1.20.0, CDI via nvidia-cdi-refresh.service in /run/cdi, containerd-nvidia-Runtime via RKE2-Auto-Detection (kein custom config-v3.toml.tmpl). Verifikation an rex-gpu-worker delegiert: erst read-only detect (Contract am RTX 3090), dann Risiko-/Idempotenz-Bewertung von gpu_setup gegen den bereits provisionierten Stack (Konflikt-Risiko: -server-Treiberpaket neben cuda-drivers).
+
+2026-09-20 20:58 ERLEDIGT: Live-Hardware-Verifikation auf otho-lab (10.230.30.52, Ubuntu 24.04.4, RTX 3090, RKE2 v1.36.3+rke2r1) durchgefuehrt. Detection-Contract am RTX 3090 bestaetigt (gpu_detect liefert GA102 [GeForce RTX 3090], pci_class 0300, compute=1; QEMU-stdvga korrekt ignoriert; matcht POD + t/10-detect.t). LibSSH-Erstconnect mit Verifikation an OK (ssh-keyscan-Seeding aus 40eff36 greift; cpanfile unveraendert). gpu_setup gegen den bereits (via CUDA-Repo/GPU-Operator) provisionierten Stack getestet: Treiber = Konflikt, faellt SAFE (apt verweigert 595-server neben 610, Verify-Seam stirbt sauber, kein Teilschaden); CDI = redundant + Doppelquelle; containerd = AKTIVER KONFLIKT (legacy config.toml.tmpl ersetzt RKE2s native v3-Config -- headline). Node danach byte-identisch zum Baseline zurueckgebaut (config.toml sha match, nvidia-smi OK, rke2-agent aktiv, GPU-operator Ready, keine rex-gpu-Artefakte). Kein lib/-Code geaendert. Befunde als Follow-ups: #9 (HIGH containerd v3-Clobber), #10 (Treiber-Idempotenz vs cuda-drivers), #11 (CDI-Doppelquelle), #12 (Dev-Harness-Doku). Kernerkenntnis: auf Ubuntu 24.04 + aktuellem RKE2 sind rex-gpus Handschritte teils redundant, teils konfligierend gegenueber CUDA-Repo-Packaging + RKE2-Auto-Detection; die containerd-Integration wurde offenbar gegen aelteres RKE2 (containerd 1.x/v2) verifiziert und ist gedriftet.
