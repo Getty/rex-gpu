@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-09-20T19:51:42Z
+created: 2026-09-20T18:52:34Z
+id: 8
+priority: high
+started: 2026-09-20T19:51:42Z
+status: done
+tags:
+- libssh
+- security
+title: Rex::LibSSH's next release verifies host keys by default (CWE-322) — check
+  Hetzner provisioning flow
+updated: 2026-09-20T19:51:42Z
+---
+
+Rex::LibSSH gets a new default in its next release: the server host key is verified against known_hosts before authentication (CWE-322 fix). Freshly provisioned Hetzner dedicated servers are never in known_hosts, so the first connection in a deploy task can fail with a host-key error after a Rex::LibSSH upgrade.
+
+Before bumping Rex::LibSSH here, check the provisioning flow: either ssh-keyscan the box into known_hosts first, or set an explicit opt-out (strict_hostkeycheck => 0 per connection, or -feature => ['disable_strict_host_key_checking'] Rexfile-wide).
+
+Source: rex-libssh pre-release audit (HEAD 7085c0f). Not yet released.
+
+2026-09-20 19:51 Geschlossen als durch #4 adressiert (gefixt d17b4bd, gemerged 7073df8; eg/ auf ssh-keyscan-Seeding standardisiert in 40eff36). Substanz identisch mit #4, nur frischeres rex-libssh-Pre-Release-Audit (HEAD 7085c0f). Verbleibende reine Live-Verifikation an #7 angehaengt.
