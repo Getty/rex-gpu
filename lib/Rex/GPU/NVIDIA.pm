@@ -389,10 +389,14 @@ sub _install_driver_redhat {
     run "dnf config-manager --set-enabled powertools 2>/dev/null || true", auto_die => 0;
   }
 
-  # Add NVIDIA CUDA repo
-  my $distro = "rhel$major";
-  Rex::Logger::info("  Adding NVIDIA CUDA repo ($distro)...");
-  run "dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/x86_64/cuda-$distro.repo 2>/dev/null",
+  # Add NVIDIA CUDA repo — arch-aware: aarch64 server/datacenter parts (Grace,
+  # Hopper, Blackwell) are published under the "sbsa" tree, not "x86_64".
+  my $distro  = "rhel$major";
+  my $machine = run "uname -m", auto_die => 0;
+  chomp $machine if defined $machine;
+  my $arch = _cuda_repo_arch($machine);
+  Rex::Logger::info("  Adding NVIDIA CUDA repo ($distro/$arch)...");
+  run "dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo 2>/dev/null",
     auto_die => 0;
   run "dnf clean expire-cache", auto_die => 0;
 
@@ -424,6 +428,24 @@ sub _install_driver_redhat {
   my $check = run "rpm -q nvidia-driver 2>&1", auto_die => 0;
   die "nvidia-driver not installed after dnf install — check dnf output\n"
     if $? != 0;
+}
+
+# Map the machine hardware name (`uname -m`) to the architecture token NVIDIA
+# uses in its CUDA package repositories:
+#   developer.download.nvidia.com/compute/cuda/repos/<distro>/<arch>/
+# aarch64 server/datacenter parts (Grace, Hopper, Blackwell) are published as
+# "sbsa" — NOT "aarch64" or "arm64" (verified: repos/rhel9/sbsa and
+# repos/rhel10/sbsa resolve, repos/.../aarch64 does not). Everything else keeps
+# the previous behaviour and maps to "x86_64", including an empty string when
+# `uname -m` could not be read. Pure (string map only) so it is unit-testable
+# offline. NB: this token is specific to the CUDA repos. The
+# libnvidia-container toolkit repo uses "aarch64" for the same machine, so do
+# NOT reuse this helper for the toolkit path.
+sub _cuda_repo_arch {
+  my ($machine) = @_;
+  $machine //= '';
+  return 'sbsa' if $machine eq 'aarch64' || $machine eq 'arm64';
+  return 'x86_64';
 }
 
 sub _os_major_version {
@@ -800,6 +822,8 @@ are added to C</etc/apt/sources.list> automatically if not already present.
 On RHEL/Rocky/AlmaLinux/CentOS Stream, the NVIDIA CUDA repository is added
 and the open-kernel DKMS variant is used. For RHEL 10+ the module streams
 approach is not available; C<kmod-nvidia-open-dkms> is installed directly.
+The CUDA repository URL is architecture-aware: aarch64 hosts use the C<sbsa>
+tree (C<repos/rhelN/sbsa/>), x86_64 hosts the C<x86_64> tree.
 
 On openSUSE Leap, the signed kmp-meta package (C<nvidia-open-driver-G06-signed-kmp-meta>
 for Leap 15.x, C<nvidia-open-driver-G07-signed-kmp-meta> for Leap 16.x) is

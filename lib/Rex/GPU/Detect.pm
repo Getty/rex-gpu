@@ -31,6 +31,19 @@ my $NVIDIA_VENDOR_RE = qr/\[10de:[0-9a-f]{4}\]/i;
 # AMD vendor ID
 my $AMD_VENDOR_RE = qr/\[1002:[0-9a-f]{4}\]/i;
 
+# Known compute-capable NVIDIA PCI device IDs (lowercase, from the
+# [10de:XXXX] field). Grace-Blackwell parts such as the GB10 (10de:2e12,
+# NVIDIA DGX Spark, aarch64) enumerate as a VGA controller [0300] and, on a
+# host whose /usr/share/misc/pci.ids predates the silicon, lspci prints only
+# "Device" with no marketing name — so the name-token rules in
+# _is_nvidia_compute cannot recognise them. The device ID is the one signal
+# always present in lspci output regardless of pci.ids freshness. Add ONLY
+# verified datacenter/compute IDs here; this does not change the unknown-model
+# default (still compute => 0).
+my %NVIDIA_COMPUTE_DEVICE_IDS = (
+  '2e12' => 'GB10',   # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64
+);
+
 =head1 FUNCTIONS
 
 =cut
@@ -103,11 +116,12 @@ sub _parse_nvidia_line {
   my ($line) = @_;
 
   my ($pci_class) = $line =~ /\[(03\d{2})\]/;
+  my ($device_id) = $line =~ /\[10de:([0-9a-f]{4})\]/i;
   my ($name) = $line =~ /:\s+NVIDIA\s+Corporation\s+(.+?)\s*\[10de:/;
   $name //= 'Unknown NVIDIA GPU';
   $pci_class //= '0300';
 
-  my $compute = _is_nvidia_compute($pci_class, $name);
+  my $compute = _is_nvidia_compute($pci_class, $name, $device_id);
 
   my $status = $compute ? 'ok' : 'skip';
   Rex::Logger::info("  [$status] NVIDIA: $name (PCI class $pci_class)");
@@ -121,10 +135,17 @@ sub _parse_nvidia_line {
 }
 
 sub _is_nvidia_compute {
-  my ($pci_class, $name) = @_;
+  my ($pci_class, $name, $device_id) = @_;
 
   # PCI class [0302] = 3D Controller — always compute/datacenter GPU
   return 1 if $pci_class eq '0302';
+
+  # Known compute-capable PCI device IDs. Covers Grace-Blackwell parts (e.g.
+  # GB10) that enumerate as VGA [0300] and whose marketing name lspci cannot
+  # resolve from a stale pci.ids. This is a positive allowlist only; it never
+  # changes the unknown-model default below (still 0).
+  return 1 if defined $device_id
+    && $NVIDIA_COMPUTE_DEVICE_IDS{lc $device_id};
 
   # Known compute-capable families
   return 1 if $name =~ /\b(RTX|TITAN|Quadro)\b/i;
@@ -209,6 +230,14 @@ GPUs trigger driver installation in L<Rex::GPU>. The classification rules:
 GPUs such as the A100, H100, and RTX 4000 Ada typically enumerate as class
 C<0302>.
 
+=item * Known compute-capable PCI device IDs — a positive allowlist keyed on the
+C<[10de:XXXX]> field. This covers Grace-Blackwell parts such as the GB10
+(C<10de:2e12>, NVIDIA DGX Spark, aarch64), which enumerate as a VGA controller
+(class C<0300>) and whose marketing name C<lspci> cannot resolve on a host
+whose C<pci.ids> predates the silicon — it prints only C<Device>, so the
+name-token rules below cannot see it. The device ID is present in C<lspci>
+output regardless of C<pci.ids> freshness.
+
 =item * Named product families: RTX, TITAN, Quadro, Tesla, GTX 10xx/16xx series
 
 =item * Non-compute: NVS, GT/GTS low-end, GTX 2xx–9xx legacy, MX-series mobile
@@ -216,7 +245,8 @@ C<0302>.
 =back
 
 Unrecognised NVIDIA GPU models default to C<compute =E<gt> 0> and emit a
-warning. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
+warning. The device-ID allowlist is a positive-only override and never changes
+that default. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
 implemented.
 
 =head1 SEE ALSO

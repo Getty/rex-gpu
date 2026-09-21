@@ -1,6 +1,19 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - aarch64 / NVIDIA DGX Spark (GB10) support, part 1 (detection + RHEL repo).
+    Detection now classifies the GB10 (PCI 10de:2e12) as compute via a
+    known-compute device-ID allowlist: it enumerates as a VGA controller
+    [0300] and, on a host whose pci.ids predates the silicon, lspci prints
+    only "Device" with no marketing name, so the name-token rules classified
+    it compute => 0 and gpu_setup skipped the whole pipeline on a Spark
+    (verified live on cortex). The allowlist is positive-only and does not
+    change the unknown-model default (still 0). The RHEL/Rocky/Alma CUDA
+    repository URL is now architecture-aware: aarch64 uses the "sbsa" tree
+    (repos/rhelN/sbsa/), x86_64 is unchanged — the old hardcoded x86_64
+    pointed aarch64 at a nonexistent repo. NB: the Ubuntu driver path on a
+    Blackwell Spark (open kernel modules) still needs a fresh-install test on
+    real hardware; it is not yet changed here (karr #14)
   - Make install_driver idempotent against a host that already has a working
     NVIDIA driver (e.g. provisioned via the NVIDIA CUDA apt/dnf repo, or a
     re-run of gpu_setup): a distro-neutral short-circuit now skips the driver

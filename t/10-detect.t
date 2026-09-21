@@ -75,6 +75,22 @@ subtest '_is_nvidia_compute classification' => sub {
   # an unrecognised chip must NOT trigger a datacenter driver install.
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'FooBar 9000 Unknown Model'), 0,
     'unknown model at class 0300 => 0 (safe default, no install)');
+
+  # Known-compute PCI device ID (3rd arg). GB10 (10de:2e12, DGX Spark, aarch64)
+  # enumerates as VGA [0300] with the marketing name UNRESOLVED by a stale
+  # pci.ids — lspci prints only "Device". The device-ID allowlist recognises it
+  # as compute where the name-token rules cannot. Verified live on cortex.
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2e12'), 1,
+    'GB10 device id 2e12 at class 0300 with name "Device" => compute');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2E12'), 1,
+    'device-id match is case-insensitive');
+  # The allowlist is a positive-only override: it must NOT flip the unknown
+  # default when the id is not on the list (still 0).
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', 'ffff'), 0,
+    'unlisted device id => unknown default 0 preserved');
+  # 2-arg calls (no device id) keep the exact prior behaviour.
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device'), 0,
+    'no device id => unknown default 0 (back-compatible signature)');
 };
 
 #### _parse_nvidia_line
@@ -103,6 +119,19 @@ subtest '_parse_nvidia_line — consumer (class 0300)' => sub {
   is($gpu->{pci_class}, '0300',                     'pci_class 0300');
   is($gpu->{compute},   1,                          'compute 1 (RTX name match)');
   is($gpu->{name},      'GA102 [GeForce RTX 3090]', 'name = codename + bracketed marketing string');
+};
+
+subtest '_parse_nvidia_line — GB10 aarch64 (name unresolved by pci.ids)' => sub {
+  # EXACT class-03 line captured live from cortex (NVIDIA DGX Spark, GB10,
+  # aarch64). pci.ids lacks 10de:2e12, so lspci renders the name as "Device";
+  # the device ID drives the compute classification.
+  my $gpu = Rex::GPU::Detect::_parse_nvidia_line(
+    '000f:01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2e12] (rev a1)'
+  );
+  is($gpu->{vendor},    'nvidia', 'vendor nvidia');
+  is($gpu->{pci_class}, '0300',   'pci_class 0300 (GB10 enumerates as VGA, not 3D)');
+  is($gpu->{name},      'Device', 'name = "Device" (pci.ids cannot resolve 10de:2e12)');
+  is($gpu->{compute},   1,        'compute 1 via device-id allowlist — pipeline runs on a Spark');
 };
 
 #### _parse_amd_line
@@ -136,6 +165,15 @@ subtest 'detect — NVIDIA only' => sub {
   is(scalar @{$r->{amd}},    0,        'no amd gpu');
   is($r->{nvidia}[0]{vendor}, 'nvidia', 'element vendor nvidia');
   is($r->{nvidia}[0]{compute}, 1,       'element compute 1');
+};
+
+subtest 'detect — GB10 aarch64 (real cortex string) => compute' => sub {
+  my $r = detect_with(
+    '000f:01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2e12] (rev a1)'
+  );
+  is(scalar @{$r->{nvidia}},   1,      'one nvidia gpu');
+  is($r->{nvidia}[0]{name},   'Device','name "Device" (unresolved by pci.ids)');
+  is($r->{nvidia}[0]{compute}, 1,      'compute 1 — gpu_setup runs the full pipeline on a Spark');
 };
 
 subtest 'detect — AMD only' => sub {
