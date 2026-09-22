@@ -210,6 +210,23 @@ directory differs). If no generated C<config.toml> exists yet and no config
 version marker is found, the modern v3 drop-in is written and a warning is
 logged.
 
+B<Healing an earlier clobber.> A host set up by the 0.001 release carries a
+stale full-config C<config.toml.tmpl> — the bare C<imports = [...]> +
+C<version = 2> template (B<no> C<{{ template "base" . }}>) that I<replaced> the
+distribution's base config. RKE2/K3s render that stale template, so the
+generated C<config.toml> already shows an C<nvidia> runtime and the
+B<Already wired> check above would no-op and leave the clobber (missing
+C<SystemdCgroup> / pinned sandbox / C<certs.d>) in place. Before that check,
+C<configure_containerd> therefore removes that C<config.toml.tmpl> B<only> when
+it matches the exact bare-clobber signature (never the base-extending template
+above, never a user's own custom C<config.toml.tmpl>, never
+C<config-v3.toml.d/>), then writes the additive v3 drop-in. Removing the
+template lets the distribution regenerate its native config, but the live
+C<config.toml> stays clobbered until then: this function does B<not> restart
+RKE2/K3s (that would bounce the node's containerd and its workloads); it logs a
+warning that the operator must restart the service or reboot the node for the
+native config to regenerate.
+
 =item C<containerd>
 
 Calls C<nvidia-ctk runtime configure --runtime=containerd> and restarts
@@ -669,12 +686,104 @@ sub _path_exists {
   return $? == 0 ? 1 : 0;
 }
 
+# Write the modern (config v3) additive nvidia drop-in under $base. Shared by
+# the normal 'v3' action and the karr #13 clobber-heal path so both emit the
+# exact same additive wiring. RKE2/K3s import config-v3.toml.d/*.toml into the
+# config.toml they generate, so this ADDS the nvidia runtime without touching
+# the base.
+sub _write_nvidia_v3_dropin {
+  my ($base) = @_;
+  file "$base/config-v3.toml.d", ensure => 'directory';
+  file "$base/config-v3.toml.d/99-nvidia.toml",
+    content => _nvidia_containerd_dropin_v3();
+  Rex::Logger::info(
+    "  wrote additive nvidia drop-in: $base/config-v3.toml.d/99-nvidia.toml");
+}
+
+# Pure predicate (karr #13): does this config.toml.tmpl content match the EXACT
+# full-config clobber that rex-gpu 0.002 wrote (pre-karr #9)? That code wrote a
+# bare template — literally:
+#
+#     imports = ["/etc/containerd/conf.d/*.toml"]
+#     version = 2
+#
+# which REPLACED the RKE2/K3s base config (no `{{ template "base" . }}`, hence
+# no SystemdCgroup / pinned sandbox image / certs.d config_path in the rendered
+# config.toml). Matching this — and ONLY this — is what lets the heal remove it
+# so the distro regenerates its native config.
+#
+# Removing a file on a live remote root shell is the top risk here, so the match
+# is deliberately narrow. Returns 1 ONLY when, ignoring blank lines and #
+# comments, the content is exactly an `imports =` line PLUS a `version = 2` line
+# and nothing else. Any `{{ template "base" ... }}` directive (the karr #9
+# base-extending tmpl, or any base-rendering template) => 0. Any other
+# substantive line — a [plugins...] section, a real base key, any further
+# content — means this carries actual config (a user's own tmpl, or something
+# that is not the bare clobber) => 0. When in doubt, 0.
+#
+# Pure (regex/string only, no run/file) so it is unit-testable offline, like
+# _containerd_nvidia_action / _nvidia_driver_present / _cdi_managed_source_present.
+sub _is_rke2_clobber_tmpl {
+  my ($content) = @_;
+  return 0 unless defined $content && length $content;
+
+  # The base-extending tmpl (#9) and any base-rendering template carry the
+  # `{{ template "base" . }}` directive — the signature of the SAFE tmpl.
+  return 0 if $content =~ /\{\{\s*template\s+["']base["']/;
+
+  my @lines = grep { /\S/ && !/^\s*#/ } split /\n/, $content;
+  return 0 unless @lines;
+
+  my ($imports, $version2) = (0, 0);
+  for my $l (@lines) {
+    if    ($l =~ /^\s*imports\s*=/)         { $imports  = 1 }
+    elsif ($l =~ /^\s*version\s*=\s*2\s*$/) { $version2 = 1 }
+    else                                    { return 0 }
+  }
+  return ($imports && $version2) ? 1 : 0;
+}
+
 sub _configure_containerd_rke2 {
   my ($runtime) = @_;
   $runtime //= 'rke2';
 
   my $base        = _rke2_base_dir($runtime);
   my $config_file = "$base/config.toml";
+  my $tmpl_file   = "$base/config.toml.tmpl";
+
+  # Heal an EARLIER clobber (karr #13). rex-gpu 0.002 (pre-karr #9) wrote a bare
+  # full-config config.toml.tmpl that REPLACED the RKE2/K3s base config. Detect
+  # and remove THAT exact artifact BEFORE trusting the generated config.toml
+  # below: the generated config IS the clobber's output — it already carries an
+  # nvidia runtime, so the 'already-wired' (present) check would no-op and leave
+  # the clobber (missing SystemdCgroup / pinned sandbox / certs.d) in place
+  # forever. Removing the tmpl is what lets the distro regenerate its native
+  # config on the next restart. _is_rke2_clobber_tmpl matches ONLY the bare
+  # clobber, never the #9 base-extending tmpl or a user's own custom tmpl.
+  my $tmpl = run "cat $tmpl_file 2>/dev/null", auto_die => 0;
+  if (_is_rke2_clobber_tmpl($tmpl)) {
+    Rex::Logger::info(
+      "  removing legacy rex-gpu full-config clobber $tmpl_file so $runtime "
+      . "regenerates its native containerd config (karr #13)", "warn");
+    run "rm -f $tmpl_file", auto_die => 0;
+
+    # The live config.toml is STILL the clobber's output until $runtime restarts
+    # and regenerates it. We deliberately do NOT restart rke2/k3s here: that
+    # bounces the node's containerd and its workloads as a side effect of GPU
+    # setup, and the node is no worse than before (it was already clobbered).
+    # The heal completes on the next $runtime restart / node reboot — warn so
+    # the operator triggers it. (config.toml is NOT self-healing.)
+    Rex::Logger::info(
+      "  restart $runtime (or reboot the node) to regenerate the native "
+      . "containerd config — config.toml stays clobbered until then", "warn");
+
+    # Wire nvidia additively into the config $runtime will regenerate. The
+    # real-world clobber target is modern RKE2/K3s (containerd 2.x / config v3),
+    # whose native config imports config-v3.toml.d/*.toml; a base-extending
+    # config.toml.tmpl would just recreate the file we just removed.
+    _write_nvidia_v3_dropin($base);
+    return;
+  }
 
   # RKE2/K3s regenerate config.toml on every startup; it reflects the effective
   # merged runtime config, including any nvidia runtime the distro auto-wired
@@ -699,11 +808,7 @@ sub _configure_containerd_rke2 {
       . "assuming modern (config v3) $runtime", "warn")
       unless defined $config && length $config;
 
-    file "$base/config-v3.toml.d", ensure => 'directory';
-    file "$base/config-v3.toml.d/99-nvidia.toml",
-      content => _nvidia_containerd_dropin_v3();
-    Rex::Logger::info(
-      "  wrote additive nvidia drop-in: $base/config-v3.toml.d/99-nvidia.toml");
+    _write_nvidia_v3_dropin($base);
   }
   else {
     file $base, ensure => 'directory';
@@ -940,8 +1045,11 @@ version-aware, without clobbering the config that the distribution generates:
 a no-op when RKE2/K3s already wired the runtime natively, a
 C<config-v3.toml.d/> drop-in on modern (containerd 2.x / config v3) hosts, or
 a base-extending (C<{{ template "base" . }}>) C<config.toml.tmpl> on legacy
-(containerd 1.x / config v2) hosts. For standalone containerd,
-C<nvidia-ctk runtime configure> is used.
+(containerd 1.x / config v2) hosts. A stale full-config C<config.toml.tmpl>
+left by the 0.001 release is detected by its exact bare-clobber signature and
+removed so the distribution regenerates its native config (the operator must
+restart the service or reboot for that to take effect). For standalone
+containerd, C<nvidia-ctk runtime configure> is used.
 
 Supported distributions:
 

@@ -1,6 +1,29 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - configure_containerd (rke2/k3s) now heals an EARLIER containerd clobber: a
+    host set up by the 0.001 release carries a stale full-config
+    config.toml.tmpl (the bare imports=... + version=2 template, no
+    `{{ template "base" . }}`) that replaced the RKE2/K3s base config. RKE2/K3s
+    render that stale template, so the generated config.toml already shows an
+    nvidia runtime and the "already-wired" no-op that karr #9 added left the
+    clobber — missing SystemdCgroup / pinned sandbox image / certs.d — in place.
+    configure_containerd now detects that exact bare-clobber signature and
+    removes the template before trusting the generated config, then writes the
+    additive v3 drop-in; the distribution regenerates its native config on the
+    next restart. The match is deliberately narrow (a new pure, offline-testable
+    predicate _is_rke2_clobber_tmpl, new t/70-containerd-heal.t): it never
+    removes the base-extending config.toml.tmpl, a user's own custom tmpl, or
+    config-v3.toml.d/. It does NOT restart rke2/k3s (that would bounce the
+    node's containerd and workloads) — it warns that the operator must restart
+    the service or reboot for the native config to regenerate; config.toml is
+    not self-healing. NB: not hardware-verified — no clobbered node was
+    available and the containerd step never ran live (the pipeline died at the
+    driver step, karr #7). A maintainer must reproduce a node clobbered by old
+    0.002 against modern RKE2 (containerd 2.x / config v3), run configure_containerd,
+    restart RKE2, and confirm the regenerated config.toml carries SystemdCgroup,
+    the pinned sandbox image and the certs.d config_path plus the nvidia runtime
+    (karr #13)
   - generate_cdi_specs no longer writes a static /etc/cdi/nvidia.yaml when a
     managed CDI source already owns the runtime scan dir. Modern
     nvidia-container-toolkit ships nvidia-cdi-refresh.path/.service, which keep
