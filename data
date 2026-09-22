@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-22T18:42:33Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T18:42:33Z
+created: 2026-09-20T20:57:44Z
+id: 12
+priority: low
+started: 2026-09-22T17:50:22Z
+status: done
+tags:
+- docs
+- dev
+title: 'Dev-Harness-Doku: stale installiertes Rex::GPU + rex -Ilib bricht'
+updated: 2026-09-22T18:42:33Z
+---
+
+Zwei Dev-Workflow-Stolpersteine bei der #7-Verifikation: (1) das installierte Rex::GPU (0.002 unter ~/perl5) ist STALE gegen Repo-HEAD (aelter als die openSUSE-Routing-/Detection-POD-Commits) -> ein naives rex -f eg/Rexfile testet ALTEN Code. Man muss PERL5LIB=<repo>/lib:~/perl5/lib/perl5 voranstellen, um den Working-Tree zu testen. (2) rex -Ilib mis-parst (-I -> No parameter for b); PERL5LIB ist noetig, -Ilib funktioniert nicht. Wert eine Notiz in eg/ oder einem Dev-Docs-Abschnitt, damit Maintainer bei der Hardware-Verifikation den richtigen Code testen.
+
+2026-09-22 Auf Branch fix/k11-cdi-dedup. Reine Dev-Doku (non-behavioral) -> Orchestrator selbst, kein Worker.
+
+2026-09-22 Committet ffda7f8 auf fix/k11-cdi-dedup (nur eg/Rexfile, +9). Maintainer-Notiz: PERL5LIB=$PWD/lib:~/perl5/lib/perl5 gegen stale installiertes Rex::GPU; rex -Ilib bricht. Bewusst KEIN Changes-Eintrag (reine Dev-Doku, kein user-facing Verhalten). Review bis Merge.
+
+2026-09-22 Merged nach main (Fast-forward 325fe1a, linear). Orchestrator-Review PASS. NICHT nach origin gepusht (Maintainer-Entscheidung). NICHT hardware-verifiziert -- vor gated release auf echter Hardware pruefen (siehe Changes-Bullet).
