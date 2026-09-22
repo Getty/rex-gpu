@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-20T23:09:15Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T17:48:14Z
+created: 2026-09-20T20:57:32Z
+id: 9
+priority: high
+started: 2026-09-20T22:42:16Z
+status: done
+tags:
+- containerd
+- rke2
+- bug
+title: containerd-Config zerstoert RKE2/K3s v3-Config auf modernem RKE2 (containerd
+  2.x)
+updated: 2026-09-22T17:48:14Z
+---
+
+Live verifiziert auf otho-lab (RKE2 v1.36.3+rke2r1, containerd 2.x, config v3, Ubuntu 24.04) im Zuge von #7. _configure_containerd_rke2 in lib/Rex/GPU/NVIDIA.pm schreibt ein legacy config.toml.tmpl (version=2, io.containerd.grpc.v1.cri). RKE2 v1.36.3 honoriert es und regeneriert config.toml als das 2-Zeilen-Template -- es ERSETZT damit RKE2s komplette native v3-Config. Verloren gehen: RKE2s auto-verdrahteter nvidia-Runtime-Block, SystemdCgroup=true (cgroup-driver-Mismatch-Risiko mit kubelet), gepinntes sandbox-Image rancher/mirrored-pause:3.10.2, snapshotter/overlayfs-Optionen, Registry certs.d config_path. Node kam nur humpelnd zurueck (nvidia via importiertem 99-nvidia.toml unter 1.x-cri-Pfad, ueberlebt nur durch containerds v2->v3-Migrations-Shim). Derselbe Code-Pfad bedient k3s -> k3s auf aktuellen Versionen ebenso betroffen. Root-Cause: Integration wurde gegen aelteres RKE2 (containerd 1.x/config v2) verifiziert und ist gegen aktuelles RKE2 gedriftet. Fix-Richtung: modernes RKE2/K3s detektiert nvidia-container-runtime selbst und verdrahtet es nativ; korrekter Override ist ein Drop-in in config-v3.toml.d/ (oder ein config-v3.toml.tmpl mit {{ template base . }}), NICHT ein Full-Config-tmpl. Kandidat: Schritt version-aware machen oder ueberspringen, wenn RKE2 nvidia schon verdrahtet hat. Dateien: _configure_containerd_rke2 / _write_nvidia_containerd_config. Downstream: erreicht Rex::Rancher-Consumer via gpu_setup; kubernetes-ocp NICHT betroffen (eigene Inline-Logik + RKE2-Auto-Detect). Auf otho-lab destruktiv getestet MIT Freigabe und byte-identisch zurueckgebaut.
+
+2026-09-20 22:42 In Arbeit: Fix delegiert an rex-gpu-worker. Ansatz: statt legacy Full-Config config.toml.tmpl (version=2, io.containerd.grpc.v1.cri) einen ADDITIVEN Drop-in in config-v3.toml.d/ schreiben ODER den Schritt ueberspringen, wenn RKE2/K3s die nvidia-Runtime bereits nativ verdrahtet hat; version-aware (alt containerd 1.x/v2 vs neu v3), fuer RKE2 UND k3s. Re-Verifikation gegen otho-lab (modernes RKE2 v1.36.3, containerd v3): containerd-Schritt darf RKE2s native Config NICHT ersetzen (SystemdCgroup, pinned sandbox rancher/mirrored-pause, certs.d, RKE2-eigenes nvidia-Wiring muessen intakt bleiben). Node danach byte-identisch zurueckbauen.
+
+2026-09-20 23:01 Fix implementiert + hardware-verifiziert + Orchestrator-Diff-Review PASS. Entfernt _write_nvidia_containerd_config + alten _configure_containerd_rke2 (Full-Config-tmpl-Clobber). Neu in lib/Rex/GPU/NVIDIA.pm: reine Entscheidung _containerd_nvidia_action (present/v3/v2, Praezedenz present>v3>v2>default-v3), additiver Drop-in config-v3.toml.d/99-nvidia.toml (io.containerd.cri.v1.runtime) fuer modernes RKE2/K3s, base-extending config.toml.tmpl mit {{ template base . }} fuer legacy v2, No-op wenn nvidia schon nativ verdrahtet. RKE2+k3s teilen Logik (nur Base-Dir differiert). POD in NVIDIA.pm+GPU.pm + Changes {{$NEXT}}-Bullet. Unit-Test t/30-containerd.t (Regression-Guard). prove gruen 4 Files/22 Tests (Compile/Logik only). Live otho-lab (RKE2 v1.36.3, containerd v3): Test A realer No-op (config.toml sha unveraendert, nichts geschrieben, Base intakt nach restart); Test B additiver v3-Pfad exerziert (Base voll intakt, crictl nvidia effektiv, keine Load-Errors, gesund); Node byte-identisch zurueckgebaut (sha eec68410 match). Scope sauber ($VERSION/cpanfile/Skill-Dateien unangetastet). NOCH NICHT committet (Working Tree, main hat unrelated Skill-Changes). Residual: legacy v2-Pfad nur Code (kein altes RKE2-Node testbar), k3s per Analogie; frueher-Clobber-Heilung -> Ticket #13.
+
+2026-09-20 23:09 Committed auf Branch fix/k9-containerd-v3-dropin (Autor Torsten + Co-Author Claude), NOCH NICHT nach main gemerged. Bleibt in Review bis Merge -- Muster wie #4 / Ticket-Runde 7073df8. prove gruen, Diff-Review PASS.
+
+2026-09-22 Merged nach main (Fast-forward c903e07, linear). Review PASS durch Orchestrator (Diff+Tests+POD+Changes, prove 6/28 gruen; Hardware-Verifikation laut Ticket). NICHT nach origin gepusht -- Push bleibt Maintainer-Entscheidung.
