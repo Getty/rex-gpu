@@ -1,6 +1,22 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - generate_cdi_specs no longer writes a static /etc/cdi/nvidia.yaml when a
+    managed CDI source already owns the runtime scan dir. Modern
+    nvidia-container-toolkit ships nvidia-cdi-refresh.path/.service, which keep
+    /run/cdi/nvidia.yaml fresh across driver updates; /etc/cdi and /run/cdi are
+    both default CDI scan dirs, so the old always-write behaviour defined
+    nvidia.com/gpu twice when the managed source was present (risking a
+    duplicate-device load error in CDI consumers) and the static copy drifted
+    against the refreshed one. When the nvidia-cdi-refresh unit is installed or
+    armed (or a /run/cdi/nvidia.yaml already exists), the managed generator is
+    triggered once and left to own CDI; otherwise /etc/cdi is written as before.
+    The decision is the pure, offline-testable predicate
+    _cdi_managed_source_present (new t/60-cdi-managed-source.t). NB: not
+    hardware-verified — the toolkit/CDI step never ran live (the pipeline died
+    at the driver step, karr #7); a maintainer must confirm on a real node with
+    nvidia-cdi-refresh installed that /etc/cdi stays empty, /run/cdi/nvidia.yaml
+    is fresh, and the CDI consumer loads nvidia.com/gpu exactly once (karr #11)
   - aarch64 / NVIDIA DGX Spark (GB10) support, part 1 (detection + RHEL repo).
     Detection now classifies the GB10 (PCI 10de:2e12) as compute via a
     known-compute device-ID allowlist: it enumerates as a VGA controller

@@ -724,25 +724,110 @@ sub _configure_containerd_standalone {
 
 =method generate_cdi_specs
 
-Generate CDI (Container Device Interface) specifications for all detected
-NVIDIA GPUs by running C<nvidia-ctk cdi generate>. CDI allows the Kubernetes
-NVIDIA device plugin to enumerate GPU resources without requiring a privileged
-container.
+Generate CDI (Container Device Interface) specifications for the detected
+NVIDIA GPUs so the Kubernetes NVIDIA device plugin can enumerate GPU resources
+without requiring a privileged container.
 
-Writes output to C</etc/cdi/nvidia.yaml>. The C</etc/cdi/> directory is
-created if it does not exist.
+If a B<managed CDI source> already owns the runtime scan dir, this function
+does B<not> also write a static C</etc/cdi/nvidia.yaml>. Modern
+C<nvidia-container-toolkit> ships C<nvidia-cdi-refresh.path>/C<.service>, which
+regenerate C</run/cdi/nvidia.yaml> and keep it fresh across driver updates.
+Because C</etc/cdi> and C</run/cdi> are both default CDI scan dirs, a second
+static copy would define the same device kind (C<nvidia.com/gpu>) twice — a
+duplicate-device load error in CDI consumers — and would drift against the
+refreshed copy over driver updates. In that case the managed generator is
+triggered once (so C</run/cdi> is populated immediately) and left to own CDI.
+
+Otherwise — no managed refresh unit and no existing C</run/cdi/nvidia.yaml> —
+output is written to C</etc/cdi/nvidia.yaml> via C<nvidia-ctk cdi generate>, and
+the C</etc/cdi/> directory is created if it does not exist. Only one of the two
+scan dirs is ever populated.
+
+The managed-source check keys on the C<nvidia-cdi-refresh.path> systemd unit
+state (installed/armed) rather than only on the presence of
+C</run/cdi/nvidia.yaml>, because C</run> is tmpfs and is empty right after the
+first-deploy reboot even though the refresh unit owns CDI from then on.
 
 This step must be run after L</install_container_toolkit> (which provides
-C<nvidia-ctk>) and, on first deploy, after the reboot that activates the
-NVIDIA kernel module (so the tool can enumerate physical devices).
+C<nvidia-ctk> and the refresh unit) and, on first deploy, after the reboot that
+activates the NVIDIA kernel module (so the tool can enumerate physical devices).
 
 =cut
 
 sub generate_cdi_specs {
   Rex::Logger::info("Generating NVIDIA CDI specs...");
+
+  # Hand off to a managed CDI source if one owns the runtime scan dir. Modern
+  # nvidia-container-toolkit ships nvidia-cdi-refresh.path/.service, which keep
+  # /run/cdi/nvidia.yaml fresh across driver updates. /etc/cdi and /run/cdi are
+  # BOTH default CDI scan dirs, so writing a static /etc/cdi/nvidia.yaml
+  # alongside the managed /run/cdi copy defines the same device kind
+  # (nvidia.com/gpu) twice — a duplicate-device load error in CDI consumers —
+  # and the static copy drifts against the refreshed one over driver updates.
+  # See _cdi_managed_source_present for the signal choice (karr #11).
+  my $enabled = run "systemctl is-enabled nvidia-cdi-refresh.path 2>/dev/null", auto_die => 0;
+  chomp $enabled if defined $enabled;
+  my $active = run "systemctl is-active nvidia-cdi-refresh.path 2>/dev/null", auto_die => 0;
+  chomp $active if defined $active;
+
+  if (_cdi_managed_source_present(
+      enabled_state => $enabled,
+      active_state  => $active,
+      run_cdi       => _path_exists("-f", "/run/cdi/nvidia.yaml"),
+  )) {
+    Rex::Logger::info(
+      "  nvidia-cdi-refresh manages CDI in /run/cdi — not writing a static "
+      . "/etc/cdi/nvidia.yaml (avoids a duplicate nvidia.com/gpu across scan dirs)");
+    # Kick the managed generator once so /run/cdi is populated NOW: /run is
+    # tmpfs and empty after the first-deploy reboot, and the .path watcher may
+    # not have fired yet (no driver-file change since it was armed). Best-effort
+    # — the unit re-runs itself on the next driver change; if the unit name
+    # differs (detected via the /run/cdi file), this is a harmless no-op.
+    run "systemctl start nvidia-cdi-refresh.service 2>/dev/null", auto_die => 0;
+    return;
+  }
+
   run "mkdir -p /etc/cdi", auto_die => 0;
   run "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml 2>/dev/null", auto_die => 0;
   Rex::Logger::info("  [ok] CDI specs written to /etc/cdi/nvidia.yaml");
+}
+
+# Pure predicate for the generate_cdi_specs managed-source short-circuit: is a
+# MANAGED CDI source already present that owns /run/cdi/nvidia.yaml? Modern
+# nvidia-container-toolkit ships nvidia-cdi-refresh.path/.service, which
+# regenerate a CDI spec into the /run/cdi runtime scan dir and keep it fresh
+# across driver updates. When it is present, generate_cdi_specs must NOT also
+# write a static /etc/cdi/nvidia.yaml (both are default scan dirs → duplicate
+# nvidia.com/gpu + drift; karr #11).
+#
+# Signals (gathered impurely by generate_cdi_specs, matched here):
+#   enabled_state => `systemctl is-enabled nvidia-cdi-refresh.path` output
+#   active_state  => `systemctl is-active  nvidia-cdi-refresh.path` output
+#   run_cdi       => a /run/cdi/nvidia.yaml already exists (boolean)
+#
+# The systemd unit state is the PRIMARY signal, not the file. /run is tmpfs and
+# is wiped on every boot, so on a first deploy (right after the nouveau reboot)
+# the managed source may not have fired yet and /run/cdi/nvidia.yaml is absent
+# even though the refresh unit owns CDI from here on. The unit being installed
+# (enabled/enabled-runtime/static/indirect/alias) or armed (active/activating)
+# is durable across that reboot and answers the real question — "will this host
+# keep /run/cdi fresh?" — which a bare file check cannot. run_cdi is a
+# belt-and-suspenders confirmation: this code only ever writes /etc/cdi, so a
+# /run/cdi/nvidia.yaml can only have come from some OTHER producer — unambiguous
+# evidence of a second CDI source for the same kind (catches a producer under a
+# different unit name, or a host with no systemctl). disabled/masked/not-found
+# (opted out, or no such unit) do NOT count as managed.
+#
+# Pure (regex/string/boolean only, no run/systemctl/test) so it is unit-testable
+# offline, like _nvidia_driver_present / _containerd_nvidia_action.
+sub _cdi_managed_source_present {
+  my (%s) = @_;
+  my $enabled = $s{enabled_state} // '';
+  my $active  = $s{active_state}  // '';
+  return 1 if $enabled =~ /^(?:enabled|enabled-runtime|static|indirect|alias)\b/;
+  return 1 if $active  =~ /^(?:active|activating)\b/;
+  return 1 if $s{run_cdi};
+  return 0;
 }
 
 # ============================================================
@@ -839,9 +924,14 @@ package repository (L<https://nvidia.github.io/libnvidia-container/>).
 
 =head2 CDI specs
 
-Container Device Interface specifications are written to C</etc/cdi/nvidia.yaml>
-by C<nvidia-ctk cdi generate>. CDI lets the Kubernetes device plugin
-enumerate GPU resources without requiring privileged container access.
+Container Device Interface specifications let the Kubernetes device plugin
+enumerate GPU resources without requiring privileged container access. When a
+managed CDI source — the C<nvidia-cdi-refresh> systemd unit shipped by modern
+C<nvidia-container-toolkit> — already keeps C</run/cdi/nvidia.yaml> fresh, that
+source is left to own CDI; otherwise a static spec is written to
+C</etc/cdi/nvidia.yaml> by C<nvidia-ctk cdi generate>. Only one of the two
+default scan dirs (C</etc/cdi>, C</run/cdi>) is populated, so C<nvidia.com/gpu>
+is never defined twice.
 
 =head2 Containerd configuration
 
