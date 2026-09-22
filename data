@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-22T18:42:38Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T18:42:38Z
+created: 2026-09-20T23:02:04Z
+id: 13
+priority: low
+started: 2026-09-22T17:50:14Z
+status: done
+tags:
+- containerd
+- rke2
+- idempotency
+title: gpu_setup heilt keinen frueheren containerd-Clobber (stale config.toml.tmpl)
+updated: 2026-09-22T18:42:38Z
+---
+
+Aus dem #9-Review. Ein Host, der vom ALTEN buggy Code geclobbert wurde, hat ein stale config.toml.tmpl (bzw. /etc/containerd/conf.d/99-nvidia.toml) auf Platte; RKE2 merged daraus eine nvidia-Runtime in die generierte config.toml. Der mit #9 gefixte _configure_containerd_rke2 sieht dann in config.toml bereits nvidia -> Aktion present (No-op) -> entfernt das stale clobbernde tmpl NICHT -> der Clobber (fehlendes SystemdCgroup / pinned sandbox / certs.d) bleibt bestehen. #9 stellt nur sicher, dass NEU nicht mehr geclobbert wird; Auto-Remediation frueherer Clobber ist bewusst out-of-scope von #9. Kandidat: ein von rex-gpu geschriebenes Full-Config config.toml.tmpl (bzw. conf.d/99-nvidia.toml) erkennen + entfernen und RKE2 neu generieren lassen. Angrenzend an #10 (Idempotenz). Praktische Relevanz gering, solange kaum Hosts mit dem alten Code (0.002) gegen modernes RKE2 gelaufen sind.
+
+2026-09-22 Auf Branch fix/k11-cdi-dedup (nach #11, eigener Commit), an rex-gpu-worker. Heikel: Datei-Removal auf Remote-Root -- nur exakte Alt-Clobber-Signatur, nie base-extending/legitimes tmpl.
+
+2026-09-22 Committet 325fe1a auf fix/k11-cdi-dedup. Pures _is_rke2_clobber_tmpl (nur exakte Bare-Clobber-Signatur; {{template base}}/Extra-Zeile/version!=2 => 0), Removal + additiver v3-Drop-in vor dem Vertrauen auf generierte config.toml, KEIN Auto-Restart (Operator muss rke2/k3s neu starten). t/70 (False-Positive-Grenzen), t/30 unveraendert, prove 8/37. REVIEWER-KORREKTUR: Worker schrieb 'pre-0.003 release'; faktisch war der Clobber-Code im RELEASED 0.001 (gegen 0.001-Tag verifiziert, imports+version=2 vorhanden), Fix landet im unreleased 0.002 -> Changes+POD auf '0.001 release' korrigiert. Bewusst NICHT gemacht (vom Worker geflaggt): altes /etc/containerd/conf.d/99-nvidia.toml bleibt (inerter Orphan nach Regeneration); k3s-von-0.002-unter-rke2-Pfad nicht sonderbehandelt. NICHT hardware-verifiziert (kein geclobberter Node, containerd-Schritt nie live #7). Review bis Merge.
+
+2026-09-22 Merged nach main (Fast-forward 325fe1a, linear). Orchestrator-Review PASS. NICHT nach origin gepusht (Maintainer-Entscheidung). NICHT hardware-verifiziert -- vor gated release auf echter Hardware pruefen (siehe Changes-Bullet).
