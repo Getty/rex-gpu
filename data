@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-09-20T23:17:32Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T17:48:23Z
+created: 2026-09-20T20:57:36Z
+id: 10
+priority: medium
+started: 2026-09-20T23:09:23Z
+status: done
+tags:
+- nvidia
+- driver
+- idempotency
+title: Treiber-Install nicht idempotent gegen cuda-drivers-Host (Konflikt + Downgrade)
+updated: 2026-09-22T17:48:23Z
+---
+
+Live verifiziert auf otho-lab (#7). Auf einem via NVIDIA-CUDA-apt-Repo provisionierten Host (cuda-drivers, unversioniertes 610-Userspace) waehlt rex-gpus Ubuntu-Zweig automatisch nvidia-driver-595-server; dessen versionierte Libs Conflicten mit libnvidia-encode/-fbc1/-gl -> apt verweigert (dry-run: Unable to correct problems, held broken packages), macht KEINE Aenderung. Realer gpu_setup(reboot=>0) stirbt danach am Install-Verify-Seam (nvidia-driver-595-server not installed after apt-get install); 610-Stack intakt, nvidia-smi laeuft, nouveau-blacklist NICHT geschrieben (die vor _blacklist_nouveau, initramfs unangetastet). Verify-Seam arbeitet korrekt = faellt SAFE, keine Teilbeschaedigung. ABER: kein Pre-Check auf einen bereits funktionierenden Treiber blockiert gpu_setup auf solchen Hosts, und Ubuntu-Auto-Detect kann eine NIEDRIGERE Version waehlen (595 < installiertes 610 = Downgrade) auf einem frischen Host. Kandidat: frueher Short-Circuit nvidia-smi laeuft schon in ausreichender Version, oder konfligierendes cuda-drivers/nvidia-driver erkennen und warnen/skippen. Als Idempotenz/UX rahmen, NICHT als Security-Regression -- der Seam faellt korrekt safe.
+
+2026-09-20 23:17 Committed auf Branch fix/k9-containerd-v3-dropin (Autor Torsten + Co-Author Claude), noch NICHT gemerged -- Review bis Merge. Fix: distro-neutraler Short-Circuit am Anfang von install_driver (nvidia-smi -L listet GPU -> log + return, VOR Paketwahl; Rex::Pkg-Bypass + Verify-Seam unangetastet) + reines Praedikat _nvidia_driver_present. Unit-Test t/40-driver-idempotency.t, prove gruen 5 Files/24 Tests (Logik only). Live otho-lab: install_driver no-oppt sauber (nur nvidia-smi -L lief, kein apt/dpkg/modprobe/reboot, Host unveraendert) statt am Verify-Seam zu sterben. Downgrade per Konstruktion verhindert. Residual: binaerer Present-Check (kein force-Upgrade eines alten Treibers -> ggf. spaeter force=>-Option, signaturrelevant fuer Rex::Rancher); Fresh-Host-Install-Pfad hier nicht auf Hardware getestet (Logik/Unit).
+
+2026-09-22 Merged nach main (Fast-forward c903e07, linear). Review PASS durch Orchestrator (Diff+Tests+POD+Changes, prove 6/28 gruen; Hardware-Verifikation laut Ticket). NICHT nach origin gepusht -- Push bleibt Maintainer-Entscheidung.
