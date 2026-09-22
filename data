@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-22T18:42:28Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T18:42:28Z
+created: 2026-09-20T20:57:40Z
+id: 11
+priority: medium
+started: 2026-09-22T17:50:05Z
+status: done
+tags:
+- cdi
+- nvidia
+title: 'CDI-Doppelquelle: statisches /etc/cdi vs. nvidia-cdi-refresh /run/cdi'
+updated: 2026-09-22T18:42:28Z
+---
+
+Aus #7. Modernes NVIDIA-Packaging liefert nvidia-cdi-refresh.service/.path, das /run/cdi schreibt und bei Treiberwechsel frisch haelt. rex-gpus generate_cdi_specs (lib/Rex/GPU/NVIDIA.pm) schreibt ein STATISCHES /etc/cdi/nvidia.yaml. Beide sind Default-CDI-Scan-Dirs -> doppelte Device-Definitionen (gleiche kind nvidia.com/gpu, cdiVersion 0.7.0, gleiche Device-Namen 0 / GPU-UUID / all) -> Risiko eines duplicate-device Load-Fehlers in CDI-Consumern, und die /etc/cdi-Kopie ist statisch, driftet also gegen das refreshte /run/cdi ueber Treiber-Updates. nvidia-ctk cdi generate Output bestaetigt identisch zum Live-/run/cdi/nvidia.yaml (nach /tmp erzeugt, NICHT appliziert). Kandidat: nvidia-cdi-refresh bzw. existierendes /run/cdi erkennen und skippen, oder nur an einen Ort schreiben. (Toolkit-Redundanz vs. vorhandenes 1.20.0 nur per Inspektion -- Pipeline starb am Treiber, Toolkit-Schritt nicht live ausgefuehrt.)
+
+2026-09-22 Aufgegriffen nach k9/k10/k14-Merge. Branch fix/k11-cdi-dedup off main (c903e07). Implementierung an rex-gpu-worker delegiert; Orchestrator committet + Board. Kein Push.
+
+2026-09-22 Committet bf13c87 auf fix/k11-cdi-dedup (NVIDIA.pm generate_cdi_specs + pures _cdi_managed_source_present + t/60 + Changes + POD). prove gruen 7/32. REVIEW-HINWEIS fuer Maintainer: Fix emittiert eine NEUE aktive Aktion 'systemctl start nvidia-cdi-refresh.service' (best-effort, auto_die=>0) wenn managed, damit /run/cdi auf frischem tmpfs sofort befuellt ist -- geht bewusst ueber reines Skippen hinaus. NICHT hardware-verifiziert (Toolkit/CDI-Schritt lief nie live, #7). Review bis Merge.
+
+2026-09-22 Merged nach main (Fast-forward 325fe1a, linear). Orchestrator-Review PASS. NICHT nach origin gepusht (Maintainer-Entscheidung). NICHT hardware-verifiziert -- vor gated release auf echter Hardware pruefen (siehe Changes-Bullet).
