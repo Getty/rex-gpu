@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-09-21T00:42:23Z
+claimed_by: claude
+class: standard
+completed: 2026-09-22T17:48:31Z
+created: 2026-09-20T23:09:19Z
+id: 14
+priority: low
+started: 2026-09-21T00:25:18Z
+status: done
+tags:
+- aarch64
+- nvidia
+- driver
+- hardware
+title: aarch64 / DGX Spark (GB10) NVIDIA-Treiber-Support
+updated: 2026-09-22T17:48:31Z
+---
+
+Sibling zu #1 (AMD): neue Arch/Hardware-Matrix. rex-gpu setzt x86_64 voraus, v.a. im Treiber-Pfad: RHEL/CUDA-Repo-URL hat x86_64 HART in der URL (developer.download.nvidia.com/.../repos/$distro/x86_64/...) -> auf aarch64 falsches Repo (NVIDIA publiziert aarch64 als sbsa bzw. arm64); Ubuntu installiert nvidia-driver-XXX-server (arm64/GB10-Paketset unklar; Blackwell braucht die OPEN Kernel-Module); SUSE-Toolkit-Pfad defaultet uname -m auf x86_64. Bereits arch-neutral: Detection (lspci-Parsing), CDI-Generierung, containerd-Config. Ziel: arch-aware Treiber-Matrix (x86_64 vs sbsa/aarch64 + korrektes GB10-Paketset). ERSTER SCHRITT vor jeglichem Code: read-only Recon auf cortex.ai.citilan.de (DGX Spark, GB10, aarch64) -- wie die GPU auf aarch64 via lspci enumeriert, welcher Treiber-Weg real installiert ist, was rex-gpu konkret braucht. Verifikation gegen echten Spark moeglich (cortex vorhanden).
+
+2026-09-21 00:25 In Arbeit: cortex-Recon + aarch64-Support an rex-gpu-worker delegiert. Nutzer hat WRITE/destruktiv auf cortex.ai.citilan.de (DGX Spark GB10, aarch64, ~10.230.30.155) freigegeben (Breakage OK, Experimentiersystem). Vorgehen: erst read-only Recon (arch/OS, lspci-Enumeration der GB10, rex-gpu-Detect gegen cortex, installierter Treiber-Weg + Paketnamen, ob NVIDIA sbsa/aarch64-Repo publiziert), dann arch-aware Treiber-Matrix implementieren soweit belegt (RHEL-CUDA-URL x86_64->sbsa/aarch64, Ubuntu arm64, SUSE uname -m, GB10 braucht open-Module), gegen cortex verifizieren. Branch fix/k9-... (baut auf #10-Short-Circuit). Kein Commit/Board durch Worker.
+
+2026-09-21 00:42 Teil 1 committed auf Branch fix/k9-containerd-v3-dropin (Autor Torsten + Co-Author Claude), noch NICHT gemerged -- Review bis Merge. Umfang: GB10-Detection (Device-ID-Allowlist 2e12, positiv-only, Unknown bleibt 0) live auf cortex verifiziert (compute 0->1); RHEL/Rocky/Alma CUDA-Repo arch-aware (sbsa auf aarch64, URLs HTTP-200-verifiziert, x86_64 unveraendert). prove gruen 6/28, dzil build+test clean. WICHTIG: Teil 1 aktiviert die Detection -> auf FRISCHEM Ubuntu-arm64-Spark liefe gpu_setup jetzt in install_driver und der Ubuntu-Zweig waehlt die proprietaere nvidia-driver-595-server (fuer Blackwell falsch) statt open; Verify-Seam faellt laut aus (fail-safe), aber Install falsch. Ubuntu-open-Install = Teil 2 -> Ticket #15; fuer Ubuntu-Sparks Teil 1+2 zusammen releasen. RHEL-aarch64-Pfad ist fuer sich korrekt (nur Install noch hardware-ungetestet). Residual: Device-ID-Allowlist hat nur GB10 2e12; weitere Blackwell-Datacenter-IDs (GB200/GH200) fallen bis zum Eintrag auf 0.
+
+2026-09-22 Merged nach main (Fast-forward c903e07, linear). Review PASS durch Orchestrator (Diff+Tests+POD+Changes, prove 6/28 gruen; Hardware-Verifikation laut Ticket). NICHT nach origin gepusht -- Push bleibt Maintainer-Entscheidung.
