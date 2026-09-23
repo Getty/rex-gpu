@@ -39,16 +39,60 @@ my $AMD_VENDOR_RE = qr/\[1002:[0-9a-f]{4}\]/i;
 # "Device" with no marketing name — so the name-token rules in
 # _is_nvidia_compute cannot recognise them. The device ID is the one signal
 # always present in lspci output regardless of pci.ids freshness. Add ONLY
-# verified datacenter/compute IDs here; this does not change the unknown-model
-# default (still compute => 0).
+# desktop, workstation or datacenter IDs taken from NVIDIA's table, never a
+# laptop chip; this does not change the unknown-model default (still
+# compute => 0).
 #
 # This list only makes a device compute. Which driver it needs (open or
 # proprietary kernel module, which branches) is NOT kept here: that is the
 # generation table in Rex::GPU::NVIDIA::Requirement (karr #30), which also
 # holds the GB10 open-kernel-module row (karr #15) this entry used to flag.
+#
+# Blackwell desktop and workstation/server cards (karr #21): GeForce RTX 50xx
+# desktop and RTX PRO Blackwell (workstation, SFF, Max-Q, Server Edition)
+# can enumerate as VGA [0300] too (a card at 3D [0302] is compute by class
+# anyway), and a stale pci.ids ("Device [10de:2b85]") skips them the same
+# way. IDs and names are taken verbatim from NVIDIA's supported-chips table,
+# driver 615.71.09: README/supportedchips.html
+# (us.download.nvidia.com/XFree86/Linux-x86_64/615.71.09/) and the identical
+# table in the open-gpu-kernel-modules README at 615.71.09. One entry per
+# device ID; subsystem-ID variants of the same card share it. Deliberately
+# NOT listed, although in the same tables and the 2900-2FFF range:
+#   * every "Laptop GPU" / "Generation Laptop GPU" (RTX 50xx mobile, RTX PRO
+#     500-5000 Blackwell laptop): 2C18 2C19 2C38 2C39 2C58 2C59 2D18 2D19
+#     2D39 2D58 2D59 2D98 2DB8 2DB9 2DD8 2F18 2F38 2F58;
+#   * RTX PRO Blackwell "Embedded GPU" modules: 2C77 2C79 2D79 2DF9;
+#   * RTX 6000D (2BB9), DRIVE P2021 (29BB), and B200/GB200/B300/GB300, which
+#     enumerate as 3D controller [0302] and are compute by class anyway.
+# There is no range match: a new card is compute by ID only once its ID is
+# added here from NVIDIA's table.
 my %NVIDIA_COMPUTE_DEVICE_IDS = (
   '2e12' => { name => 'GB10' },
   # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64.
+
+  # GeForce RTX 50xx, desktop
+  '2b85' => { name => 'GeForce RTX 5090' },
+  '2b87' => { name => 'GeForce RTX 5090 D' },
+  '2b8c' => { name => 'GeForce RTX 5090 D v2' },
+  '2c02' => { name => 'GeForce RTX 5080' },
+  '2c05' => { name => 'GeForce RTX 5070 Ti' },
+  '2c09' => { name => 'GeForce RTX 5070' },
+  '2f04' => { name => 'GeForce RTX 5070' },
+  '2d04' => { name => 'GeForce RTX 5060 Ti' },
+  '2d05' => { name => 'GeForce RTX 5060' },
+  '2f06' => { name => 'GeForce RTX 5060' },
+  '2d83' => { name => 'GeForce RTX 5050' },
+
+  # RTX PRO Blackwell, workstation and server
+  '2bb1' => { name => 'RTX PRO 6000 Blackwell Workstation Edition' },
+  '2bb4' => { name => 'RTX PRO 6000 Blackwell Max-Q Workstation Edition' },
+  '2bb5' => { name => 'RTX PRO 6000 Blackwell Server Edition' },
+  '2bb3' => { name => 'RTX PRO 5000 Blackwell / RTX PRO 5000 72GB Blackwell' },
+  '2c31' => { name => 'RTX PRO 4500 Blackwell' },
+  '2c3a' => { name => 'RTX PRO 4500 Blackwell Server Edition' },
+  '2c34' => { name => 'RTX PRO 4000 Blackwell' },
+  '2c33' => { name => 'RTX PRO 4000 Blackwell SFF Edition' },
+  '2d30' => { name => 'RTX PRO 2000 Blackwell' }
 );
 
 # Rex::GPU::Detect::open_kernel_module_required and legacy_driver_requirement
@@ -163,8 +207,9 @@ sub _is_nvidia_compute {
   return 1 if $pci_class eq '0302';
 
   # Known compute-capable PCI device IDs. Covers Grace-Blackwell parts (e.g.
-  # GB10) that enumerate as VGA [0300] and whose marketing name lspci cannot
-  # resolve from a stale pci.ids. This is a positive allowlist only; it never
+  # GB10), GeForce RTX 50xx desktop and RTX PRO Blackwell cards that
+  # enumerate as VGA [0300] and whose marketing name lspci cannot resolve
+  # from a stale pci.ids. This is a positive allowlist only; it never
   # changes the unknown-model default below (still 0).
   return 1 if defined $device_id
     && $NVIDIA_COMPUTE_DEVICE_IDS{lc $device_id};
@@ -340,7 +385,14 @@ C<[10de:XXXX]> field. This covers Grace-Blackwell parts such as the GB10
 (class C<0300>) and whose marketing name C<lspci> cannot resolve on a host
 whose C<pci.ids> predates the silicon — it prints only C<Device>, so the
 name-token rules below cannot see it. The device ID is present in C<lspci>
-output regardless of C<pci.ids> freshness.
+output regardless of C<pci.ids> freshness. The same list holds the desktop
+GeForce RTX 50xx cards and the RTX PRO Blackwell workstation and server cards
+(e.g. C<10de:2b85> RTX 5090, C<10de:2bb1> RTX PRO 6000 Blackwell Workstation
+Edition), one explicit ID each from NVIDIA's supported-chips table (driver
+615.71.09). Laptop Blackwell chips (C<... Laptop GPU>) and the RTX PRO
+"Embedded" modules are not on it: with an unresolved name they stay
+C<compute =E<gt> 0>. A card NVIDIA publishes later is recognised by ID only
+once it is added; there is no device-ID range match.
 
 =item * Named product families: RTX, TITAN, Quadro, Tesla, GTX 10xx/16xx series
 

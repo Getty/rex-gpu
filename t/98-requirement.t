@@ -255,12 +255,16 @@ subtest 'subclass overrides generations' => sub {
 
 subtest 'the table never makes a GPU compute' => sub {
   # Blackwell and pre-Turing IDs with a name no rule knows: still not compute.
-  for my $id (qw( 2901 2b85 3182 1db4 102d )) {
+  # 2c18 (RTX 5090 Laptop) stands in for the Blackwell range; 2b85 (desktop
+  # RTX 5090) used to, until karr #21 put it on the Detect allowlist.
+  for my $id (qw( 2901 2c18 3182 1db4 102d )) {
     is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
       $id.' as VGA "Device" => not compute' );
   }
   is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2e12' ), 1,
     'GB10 still compute via the Detect allowlist' );
+  is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2b85' ), 1,
+    'RTX 5090 compute via the Detect allowlist (karr #21), not the table' );
 };
 
 done_testing;

@@ -177,6 +177,90 @@ subtest 'detect — GB10 aarch64 (real cortex string) => compute' => sub {
   is($r->{nvidia}[0]{compute}, 1,      'compute 1 — gpu_setup runs the full pipeline on a Spark');
 };
 
+#### karr #21: Blackwell desktop / RTX PRO by device ID, laptops not
+
+# Captures every Rex::Logger::info call made while $code runs.
+sub logged {
+  my ($code) = @_;
+  my @log;
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { push @log, [ @_ ] };
+  my $ret = $code->();
+  return ($ret, \@log);
+}
+
+subtest 'unresolved name at class 0300 — allowlisted Blackwell IDs => compute' => sub {
+  # IDs from NVIDIA's supportedchips table, driver 615.71.09. The line is what
+  # lspci prints when pci.ids does not know the ID: just "Device".
+  my %ids = (
+    '2b85' => 'GeForce RTX 5090',
+    '2b8c' => 'GeForce RTX 5090 D v2',
+    '2c02' => 'GeForce RTX 5080',
+    '2f04' => 'GeForce RTX 5070',
+    '2d83' => 'GeForce RTX 5050',
+    '2bb1' => 'RTX PRO 6000 Blackwell Workstation Edition',
+    '2bb5' => 'RTX PRO 6000 Blackwell Server Edition',
+    '2c3a' => 'RTX PRO 4500 Blackwell Server Edition',
+    '2d30' => 'RTX PRO 2000 Blackwell'
+  );
+  for my $id (sort keys %ids) {
+    my ($gpu, $log) = logged(sub {
+      Rex::GPU::Detect::_parse_nvidia_line(
+        '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:'.$id.'] (rev a1)'
+      );
+    });
+    is($gpu->{name},      'Device', $id.' name unresolved');
+    is($gpu->{device_id}, $id,      $id.' device_id');
+    is($gpu->{compute},   1,        $id.' ('.$ids{$id}.') => compute via device-id allowlist');
+    ok(!(grep { ($_->[1] // '') eq 'warn' } @$log), $id.' no unknown-model warning');
+  }
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2B85'), 1,
+    'upper-case device id matches too');
+
+  my $r = detect_with(
+    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2b85] (rev a1)'
+  );
+  is($r->{nvidia}[0]{compute}, 1, 'detect: RTX 5090 with unresolved name => compute, pipeline runs');
+};
+
+subtest 'unresolved name at class 0300 — laptop / embedded Blackwell => not compute' => sub {
+  # Same tables, deliberately left out: laptop chips and RTX PRO Embedded
+  # modules stay on the unknown-model default (0) and warn.
+  my %ids = (
+    '2c18' => 'GeForce RTX 5090 Laptop GPU',
+    '2d98' => 'GeForce RTX 5050 Laptop GPU',
+    '2c38' => 'RTX PRO 5000 Blackwell Generation Laptop GPU',
+    '2c77' => 'RTX PRO 5000 Blackwell Embedded GPU'
+  );
+  for my $id (sort keys %ids) {
+    my ($gpu, $log) = logged(sub {
+      Rex::GPU::Detect::_parse_nvidia_line(
+        '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:'.$id.'] (rev a1)'
+      );
+    });
+    is($gpu->{compute}, 0, $id.' ('.$ids{$id}.') => not compute');
+    ok((grep { ($_->[1] // '') eq 'warn' && $_->[0] =~ /Unknown NVIDIA GPU model: Device/ } @$log),
+      $id.' warns "Unknown NVIDIA GPU model"');
+  }
+  my $r = detect_with(
+    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2c18] (rev a1)'
+  );
+  is($r->{nvidia}[0]{compute}, 0, 'detect: unresolved RTX 5090 Laptop => compute 0, pipeline skipped');
+};
+
+subtest 'resolved names unchanged by the allowlist' => sub {
+  # CHARACTERIZATION (karr #21 report, not a decision): a laptop Blackwell
+  # chip whose name pci.ids DOES resolve is compute today through the RTX
+  # name token, like every RTX laptop part before it. The allowlist leaves
+  # laptop IDs out but does not change the name rule.
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GB202M [GeForce RTX 5090 Laptop GPU]', '2c18'), 1,
+    'resolved "RTX 5090 Laptop GPU" => compute via RTX name token (today)');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GB202 [GeForce RTX 5090]', '2b85'), 1,
+    'resolved RTX 5090 => compute');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GT 710', '128b'), 0,
+    'resolved non-compute name with an unlisted id => still 0');
+};
+
 subtest 'detect — AMD only' => sub {
   my $r = detect_with(
     '0a:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XTX] [1002:744c] (rev c8)'

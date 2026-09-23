@@ -14,6 +14,13 @@ Revision history for Rex-GPU
     Builder is enabled with subscription-manager (a failure only warns);
     `pkg epel-release` had no candidate there. Rocky and Alma without
     lsb_release are unchanged. Not hardware-verified (karr #39)
+  - Detection counts desktop GeForce RTX 50xx and RTX PRO Blackwell
+    workstation/server cards as compute by PCI device ID, so a host whose
+    stale pci.ids makes lspci print only "Device [10de:2b85]" now gets the
+    full gpu_setup pipeline (also via Rex::Rancher gpu => 1) instead of a
+    skip. Explicit IDs from NVIDIA's supported-chips table (driver
+    615.71.09), no range; Blackwell laptop and "Embedded" chips with an
+    unresolved name stay compute => 0. Not hardware-verified (karr #21)
   - install_driver counts a driver as installed only if nvidia-smi -L lists
     a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
     a working nvidia-smi but no CUDA library now gets a warning and the
