@@ -1,0 +1,32 @@
+---
+claimed_at: 2026-09-23T23:51:28Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T23:51:28Z
+created: 2026-09-23T20:03:27Z
+id: 42
+priority: medium
+started: 2026-09-23T20:29:17Z
+status: done
+tags:
+- ocp
+- driver
+- escalated-from:kubernetes-ocp#155
+title: 'OCP-Anforderungen: install_driver so, dass OCP seinen Treiberzweig ersetzen
+  kann'
+updated: 2026-09-23T23:51:28Z
+---
+
+OCP (kubernetes-ocp k155) will im Modus gpu.driver: host seinen eigenen Treiberzweig (share/Rexfile install_nvidia, ~334-495) durch Rex::GPU::NVIDIA::install_driver ersetzen. containerd-Config und CDI bleiben beim GPU Operator, gpu_setup/configure_containerd/generate_cdi_specs nutzt OCP nicht. Was fehlt:
+
+- Erkennung ohne lspci/pciutils moeglich: OCP erkennt ueber sysfs (vendor 0x10de) und uebergibt gpu => {device_id, name}; install_driver muss damit ohne gpu_detect auskommen. (OCP-Test t/44 verbietet pciutils.)
+- Skip-Kriterium: nvidia-smi UND libcuda vorhanden (heute nur nvidia-smi) -- Rexfile ~479-495
+- Ubuntu: ubuntu-drivers install als Weg (OCP-Entscheidung, kein geratener Paketname) oder Override ueber eigene Setup-Klasse -> k34, k35
+- install_container_toolkit idempotent / nur wenn fehlt (DGX-Images bringen es mit) -> k37, k38
+- install_driver ohne verify_nvidia-Warnung vor dem Toolkit
+- Rocky/Alma -> k39; Blackwell 0300 -> k21
+- Release ohne das bare config.toml.tmpl-Verhalten aus 0.001 (OCP loescht das aktiv, k45 dort)
+
+2026-09-23 20:03 Korrektur: 'k45 dort' meint kubernetes-ocp k45 (OCP loescht das Template), nicht k45 auf diesem Board.
+
+ERLEDIGT auf main (6a553c3 Toolkit-Skip, 68f68f3 Ubuntu resolve_source, ba13573 Custom-Setups, 1a2cf54 OCP-Punkte). API-Vertrag fuer OCP: install_driver(gpu => {device_id => "2b85", name => "..."}) oder gpus => [...]; kein gpu_detect/lspci/pciutils. device_id = genau 4 Hex-Ziffern (sysfs-"0x" abschneiden, kein Newline), sonst Abbruch vor Host-Aenderung; fehlend = unbekannte GPU (keine Kepler-Ablehnung, keine Blackwell-open-Wahl). Skip nur wenn nvidia-smi -L eine GPU listet UND libcuda.so.1 im ldconfig -p-Cache. install_driver prueft danach nur Treiber (Modul, nvidia-smi, libcuda), keine Toolkit-Warnung. install_container_toolkit ueberspringt, wenn nvidia-ctk laeuft und das Paket installiert ist (kein Upgrade beim Re-Run). Ubuntu ueber eigenes Setup: Vorlage eg/ubuntu-drivers/ (resolve_source via ubuntu-drivers list --gpgpu). Offen aus der Liste: Rocky/Alma = #39 (laeuft), Blackwell 0300 = #21 (laeuft), Release = Maintainer-Entscheidung.
