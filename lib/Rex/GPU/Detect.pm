@@ -112,8 +112,10 @@ hashref describing one detected GPU:
     ],
   }
 
-If no supported GPU is found, or if a virtual GPU is detected, both arrays
-are empty (C<[]>).
+If no supported GPU is found, or if the only display devices are virtual,
+both arrays are empty (C<[]>). A virtual display next to a real NVIDIA/AMD
+card (GPU passthrough, cloud GPU VM) is skipped on its own line and the real
+card is still reported.
 
 =cut
 
@@ -128,12 +130,12 @@ sub detect {
 
   return $result unless $pci_output;
 
-  # Skip virtual GPUs
-  if ($pci_output =~ $VIRTUAL_GPU_RE) {
-    Rex::Logger::info("Virtual GPU detected (virtio/QEMU/VMware/VBox) — skipping");
-    return $result;
-  }
-
+  # Virtual displays are skipped PER LINE, not by matching the whole blob: a
+  # passthrough host (vfio-pci) or cloud GPU VM shows an emulated console
+  # (QXL, virtio-vga, ...) next to the real card, and a blob match hid the
+  # real card (karr #17). Vendor checks run first, so a [10de:]/[1002:] line
+  # is never classified virtual — only a line that is not NVIDIA/AMD can be.
+  my $virtual = 0;
   for my $line (split /\n/, $pci_output) {
     if ($line =~ $NVIDIA_VENDOR_RE) {
       my $gpu = _parse_nvidia_line($line);
@@ -143,7 +145,14 @@ sub detect {
       my $gpu = _parse_amd_line($line);
       push @{$result->{amd}}, $gpu if $gpu;
     }
+    elsif ($line =~ $VIRTUAL_GPU_RE) {
+      $virtual++;
+      Rex::Logger::info("  [skip] virtual display: $line");
+    }
   }
+
+  Rex::Logger::info("Virtual GPU detected (virtio/QEMU/VMware/VBox) — skipping")
+    if $virtual && !@{$result->{nvidia}} && !@{$result->{amd}};
 
   return $result;
 }
@@ -289,9 +298,15 @@ output for these class codes, then classifies devices by vendor ID:
 
 =head2 Virtual GPU filtering
 
-Devices with vendor IDs C<1af4> (virtio), C<1b36> (QEMU), C<15ad> (VMware),
-or C<80ee> (VirtualBox) are detected and silently skipped. No driver
-installation is needed on virtual machines.
+Display devices with vendor IDs C<1af4> (virtio), C<1b36> (QEMU/QXL),
+C<15ad> (VMware), or C<80ee> (VirtualBox) are skipped line by line; they need
+no host driver. Skipping one does not end the scan: on a VM with a
+passed-through GPU (vfio-pci) the emulated console display and the real card
+appear side by side, and the real card is still detected. A VM whose display
+devices are all virtual returns empty arrays, as before. The vendor checks
+run first, so a C<10de>/C<1002> line is never treated as virtual — this also
+means an NVIDIA vGPU guest device (vendor C<10de>) is detected like a
+passed-through card; C<lspci -nn> cannot tell the two apart.
 
 =head2 NVIDIA compute classification
 

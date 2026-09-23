@@ -49,9 +49,10 @@ Returns a hashref with detected GPUs grouped by vendor:
   #   ],
   # }
 
-Virtual GPUs (virtio, QEMU, VMware, VirtualBox) are detected and silently
-skipped — both arrays will be empty. See L<Rex::GPU::Detect> for details on
-the classification logic.
+Virtual display devices (virtio, QEMU, VMware, VirtualBox) are skipped. If
+they are the only display devices both arrays are empty; a real card passed
+through next to one (vfio-pci, cloud GPU VM) is still detected. See
+L<Rex::GPU::Detect> for details on the classification logic.
 
 =cut
 

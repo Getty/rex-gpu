@@ -16,6 +16,15 @@ Revision history for Rex-GPU
     hardware (karr #18)
   - generate_cdi_specs POD: the CDI spec captures the MIG layout at generation
     time; say how to regenerate it after MIG reconfiguration (karr #19)
+  - Fix detect() hiding a real GPU behind a virtual display: a single virtio/
+    QEMU(QXL)/VMware/VirtualBox display line anywhere in lspci output made the
+    whole scan return empty, so a GPU passthrough (vfio-pci) host or cloud GPU
+    VM — which shows an emulated console next to the real card — reported no
+    NVIDIA GPU and gpu_setup silently did nothing. Virtual displays are now
+    skipped per line and the real card is detected; output with only virtual
+    displays still returns empty arrays. NVIDIA vGPU guest devices (vendor
+    10de) are indistinguishable from passthrough in lspci -nn and are now
+    detected the same way. Not hardware-verified (karr #17)
   - configure_containerd (rke2/k3s) now heals an EARLIER containerd clobber: a
     host set up by the 0.001 release carries a stale full-config
     config.toml.tmpl (the bare imports=... + version=2 template, missing the

@@ -186,7 +186,7 @@ subtest 'detect — AMD only' => sub {
   is($r->{amd}[0]{compute}, 0,      'element compute 0');
 };
 
-subtest 'detect — virtual GPU short-circuits the whole scan' => sub {
+subtest 'detect — virtual-only output => empty (unchanged)' => sub {
   # virtio [1af4] alone
   my $r = detect_with(
     '00:02.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio GPU [1af4:1050] (rev 01)'
@@ -201,14 +201,55 @@ subtest 'detect — virtual GPU short-circuits the whole scan' => sub {
   is(scalar @{$q->{nvidia}}, 0, 'qemu => no nvidia');
   is(scalar @{$q->{amd}},    0, 'qemu => no amd');
 
-  # A virtio line ANYWHERE in the output suppresses real cards too — the scan
-  # returns empty before it ever parses the NVIDIA line below it.
-  my $m = detect_with(
-      "00:02.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio GPU [1af4:1050] (rev 01)\n"
-    . "65:00.0 VGA compatible controller [0300]: NVIDIA Corporation GA102 [GeForce RTX 3090] [10de:2204] (rev a1)"
+  # Several virtual displays and nothing else => still empty.
+  my $vv = detect_with(
+      "00:01.0 VGA compatible controller [0300]: Red Hat, Inc. QXL paravirtual graphic card [1b36:0100] (rev 05)\n"
+    . "00:02.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio 1.0 GPU [1af4:1050] (rev 01)"
   );
-  is(scalar @{$m->{nvidia}}, 0, 'virtio+nvidia => no nvidia (short-circuit)');
-  is(scalar @{$m->{amd}},    0, 'virtio+nvidia => no amd (short-circuit)');
+  is(scalar @{$vv->{nvidia}}, 0, 'qxl+virtio only => no nvidia');
+  is(scalar @{$vv->{amd}},    0, 'qxl+virtio only => no amd');
+};
+
+# karr #17: a virtual line is skipped on its own; it no longer hides a real
+# card elsewhere in the output. (Until k17 this block asserted the opposite —
+# virtio+nvidia => empty — as a characterization of the blob-match bug.)
+subtest 'detect — virtual console + passed-through NVIDIA (vfio / cloud GPU VM)' => sub {
+  my $r = detect_with(
+      "00:01.0 VGA compatible controller [0300]: Red Hat, Inc. QXL paravirtual graphic card [1b36:0100] (rev 05)\n"
+    . "06:00.0 3D controller [0302]: NVIDIA Corporation AD102GL [L40S] [10de:26b9] (rev a1)"
+  );
+  is(scalar @{$r->{nvidia}},     1,      'QXL + L40S => one nvidia gpu');
+  is(scalar @{$r->{amd}},        0,      'no amd gpu');
+  is($r->{nvidia}[0]{name},      'AD102GL [L40S]', 'the real card is the one reported');
+  is($r->{nvidia}[0]{pci_class}, '0302', 'pci_class 0302');
+  is($r->{nvidia}[0]{device_id}, '26b9', 'device_id from [10de:26b9]');
+  is($r->{nvidia}[0]{compute},   1,      'compute 1 — pipeline runs in the passthrough VM');
+
+  # Order must not matter (virtual line after the real one).
+  my $m = detect_with(
+      "65:00.0 VGA compatible controller [0300]: NVIDIA Corporation GA102 [GeForce RTX 3090] [10de:2204] (rev a1)\n"
+    . "00:02.0 VGA compatible controller [0300]: Red Hat, Inc. Virtio GPU [1af4:1050] (rev 01)"
+  );
+  is(scalar @{$m->{nvidia}}, 1, 'nvidia+virtio => one nvidia gpu');
+  is(scalar @{$m->{amd}},    0, 'nvidia+virtio => no amd');
+};
+
+subtest 'detect — bare metal BMC VGA (ASPEED) + RTX 4000 => unchanged' => sub {
+  # ASPEED [1a03] is neither virtual nor NVIDIA/AMD: ignored, as before k17.
+  my $r = detect_with(
+      "02:00.0 VGA compatible controller [0300]: ASPEED Technology, Inc. ASPEED Graphics Family [1a03:2000] (rev 41)\n"
+    . "01:00.0 3D controller [0302]: NVIDIA Corporation AD104GL [RTX 4000 SFF Ada Generation] [10de:27b0] (rev a1)"
+  );
+  is(scalar @{$r->{nvidia}},   1, 'one nvidia gpu');
+  is(scalar @{$r->{amd}},      0, 'no amd gpu (ASPEED ignored)');
+  is($r->{nvidia}[0]{name}, 'AD104GL [RTX 4000 SFF Ada Generation]', 'RTX 4000 reported');
+  is($r->{nvidia}[0]{compute}, 1, 'compute 1');
+
+  my $bmc = detect_with(
+    "02:00.0 VGA compatible controller [0300]: ASPEED Technology, Inc. ASPEED Graphics Family [1a03:2000] (rev 41)"
+  );
+  is(scalar @{$bmc->{nvidia}}, 0, 'ASPEED only => no nvidia');
+  is(scalar @{$bmc->{amd}},    0, 'ASPEED only => no amd');
 };
 
 subtest 'detect — mixed NVIDIA + AMD' => sub {
