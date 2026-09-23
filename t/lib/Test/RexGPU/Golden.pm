@@ -96,7 +96,9 @@ my %HOST = (
       [ 'cat /etc/apt/sources.list 2>/dev/null' =>
           "deb http://deb.debian.org/debian bookworm main\n"
         . "deb http://deb.debian.org/debian bookworm-updates main\n"
-        . "deb http://security.debian.org/debian-security bookworm-security main\n", 0 ]
+        . "deb http://security.debian.org/debian-security bookworm-security main\n", 0 ],
+      # ... and no deb822 .sources files next to it
+      [ 'ls -1 /etc/apt/sources.list.d/ 2>/dev/null' => '', 0 ]
     ]
   },
   'debian-13' => {
@@ -104,7 +106,21 @@ my %HOST = (
     responses => [
       [ 'uname -r' => '6.12.48+deb13-amd64', 0 ],
       # deb822 only (/etc/apt/sources.list.d/debian.sources): no sources.list
-      [ 'cat /etc/apt/sources.list 2>/dev/null' => '', 1 ]
+      [ 'cat /etc/apt/sources.list 2>/dev/null' => '', 1 ],
+      [ 'ls -1 /etc/apt/sources.list.d/ 2>/dev/null' => 'debian.sources', 0 ],
+      # what the trixie installer writes (cat output: last newline chomped)
+      [ 'cat /etc/apt/sources.list.d/debian.sources 2>/dev/null' =>
+          "Types: deb\n"
+        . "URIs: http://deb.debian.org/debian/\n"
+        . "Suites: trixie trixie-updates\n"
+        . "Components: main non-free-firmware\n"
+        . "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp\n"
+        . "\n"
+        . "Types: deb\n"
+        . "URIs: http://security.debian.org/debian-security/\n"
+        . "Suites: trixie-security\n"
+        . "Components: main non-free-firmware\n"
+        . "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp", 0 ]
     ]
   },
   'ubuntu-22.04' => {
@@ -353,6 +369,7 @@ my @READ_ONLY = (
   qr{${RUN}uname -[rm]$},
   qr{${RUN}dpkg --print-architecture$},
   qr{${RUN}cat \S+ 2>/dev/null$},
+  qr{${RUN}ls -1 \S+ 2>/dev/null$},
   qr{${RUN}(?:LC_ALL=C )?apt-cache (?:search|policy) },
   qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$},
   qr{${RUN}rpm -q },

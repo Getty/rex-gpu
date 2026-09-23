@@ -655,6 +655,21 @@ sub _ubuntu_legacy_driver_package {
 }
 
 sub _enable_debian_nonfree {
+  # Both formats may be present on one host (a leftover or comment-only
+  # sources.list next to deb822 debian.sources), so both are handled, classic
+  # first — its commands are unchanged.
+  my $classic = _enable_debian_nonfree_sources_list();
+  my $deb822  = _enable_debian_nonfree_deb822();
+  Rex::Logger::info("  No Debian archive entry recognised in /etc/apt/sources.list or "
+    . "/etc/apt/sources.list.d/*.sources — non-free was not enabled, Debian's "
+    . "nvidia-driver may have no installation candidate", 'warn')
+    unless $classic || $deb822;
+}
+
+# Classic one-line format. Returns true if the file has a "deb " line (the
+# sed decides what it touches, as before; a comment-only sources.list next to
+# debian.sources returns false).
+sub _enable_debian_nonfree_sources_list {
   # Add contrib non-free non-free-firmware to all deb lines
   my $sources = run "cat /etc/apt/sources.list 2>/dev/null", auto_die => 0;
   return unless $sources;
@@ -664,6 +679,127 @@ sub _enable_debian_nonfree {
     run "sed -i 's/^deb \\(.*\\) main/deb \\1 main contrib non-free non-free-firmware/' /etc/apt/sources.list",
       auto_die => 0;
   }
+  return $sources =~ /^deb\s/m ? 1 : 0;
+}
+
+# deb822 format (karr #36): /etc/apt/sources.list.d/*.sources, the default on
+# Debian 13 and on Debian's cloud images (debian.sources). Files are read with
+# cat, the edit is computed in Perl (_deb822_enable_nonfree, pure) and a
+# changed file is written back with `file` — exec-channel only under
+# Rex::LibSSH, no SFTP. Only names apt itself reads are considered (letters,
+# digits, _ . - ending in .sources), which also keeps them shell-safe.
+# Returns the number of Debian archive stanzas recognised (edited or already
+# complete).
+sub _enable_debian_nonfree_deb822 {
+  my $dir = '/etc/apt/sources.list.d';
+  my @names = grep { /^[A-Za-z0-9_.-]+\.sources$/ }
+    split /\n/, (run "ls -1 $dir/ 2>/dev/null", auto_die => 0) // '';
+
+  my $recognised = 0;
+  for my $name (@names) {
+    my $path    = "$dir/$name";
+    my $content = run "cat $path 2>/dev/null", auto_die => 0;
+    next if $? != 0 || !defined $content || $content eq '';
+    my ($new, $matched) = _deb822_enable_nonfree($content);
+    $recognised += $matched;
+    next unless defined $new;
+    Rex::Logger::info("  Enabling non-free repos for NVIDIA drivers ($path)");
+    file $path, content => $new, mode => 644;
+  }
+  return $recognised;
+}
+
+# Pure (karr #36): add the components contrib non-free non-free-firmware —
+# only those missing — to the Components: field of every deb822 stanza that
+# is a Debian archive. $content is a .sources file as `run "cat ..."` returns
+# it (last newline chomped). Returns ($new_content, $matched) — $new_content
+# undef when nothing changed (idempotent: a second pass returns undef),
+# $matched the number of Debian archive stanzas seen, edited or not. Every
+# line not rewritten is kept byte for byte, comments included.
+#
+# A stanza is a Debian archive — and edited — only if ALL of:
+#   * Types: lists "deb" (deb-src-only stanzas are left, like the classic
+#     sed that only touches "deb " lines), and Enabled: is not "no";
+#   * Components: lists "main" (third-party repos rarely do, Debian always);
+#   * every URIs: entry is Debian's: a host *.debian.org (deb., security.,
+#     ftp.xx., ...), Hetzner's Debian mirror (mirror.hetzner.com|de under
+#     /debian/), or the mirror+file:/etc/apt/mirrors/debian[-security].list
+#     indirection of Debian's cloud images. A stanza mixing in any other URI
+#     is left alone;
+#   * Signed-By:, if present, names a debian-archive-* keyring file under
+#     /usr/share/keyrings (an inline key or any other keyring means a
+#     third-party repo).
+# Suites are deliberately not matched against codenames: the URI and key
+# already pin the archive, and a codename list would miss the next release.
+# An unknown mirror (apt-cacher, a corporate mirror) is therefore NOT edited:
+# the caller then warns, and the driver install dies at its dpkg check as
+# before, rather than this editing a repository it cannot identify.
+sub _deb822_enable_nonfree {
+  my ($content) = @_;
+  return (undef, 0) unless defined $content && length $content;
+
+  my @lines = split /^/m, $content;
+  $lines[-1] .= "\n" unless $lines[-1] =~ /\n\z/;
+
+  # Stanzas: runs of lines separated by blank lines. Per stanza, per field
+  # (lower-cased name): its value and the index of its last line.
+  my (@stanzas, $cur, $field);
+  for my $i (0 .. $#lines) {
+    my $l = $lines[$i];
+    if ($l =~ /^\s*$/) { undef $cur; undef $field; next }
+    unless ($cur) { $cur = {}; push @stanzas, $cur }
+    next if $l =~ /^#/;
+    if ($l =~ /^([A-Za-z0-9][A-Za-z0-9_-]*):[ \t]*(.*?)\s*$/) {
+      $field = lc $1;
+      $cur->{$field} = { value => $2, last => $i };
+    }
+    elsif ($field && $l =~ /^[ \t]+(.*?)\s*$/) {
+      $cur->{$field}{value} .= ' '.$1;
+      $cur->{$field}{last}   = $i;
+    }
+  }
+
+  my ($changed, $matched) = (0, 0);
+  for my $s (@stanzas) {
+    next unless _deb822_is_debian_archive($s);
+    $matched++;
+    my %have    = map { $_ => 1 } split ' ', $s->{components}{value};
+    my @missing = grep { !$have{$_} } qw( contrib non-free non-free-firmware );
+    next unless @missing;
+    my $i = $s->{components}{last};
+    $lines[$i] =~ s/[ \t]*(\r?\n)\z/' '.join(' ', @missing).$1/e;
+    $changed++;
+  }
+  return ($changed ? join('', @lines) : undef, $matched);
+}
+
+sub _deb822_is_debian_archive {
+  my ($s) = @_;
+  my $tokens = sub { my $f = $s->{$_[0]}; $f ? split(' ', $f->{value}) : () };
+
+  return 0 unless grep { $_ eq 'deb' } $tokens->('types');
+  return 0 if $s->{enabled} && lc $s->{enabled}{value} eq 'no';
+  return 0 unless grep { $_ eq 'main' } $tokens->('components');
+
+  my @uris = $tokens->('uris');
+  return 0 unless @uris;
+  for my $uri (@uris) {
+    next if $uri =~ m{^mirror\+file:(?://)?/etc/apt/mirrors/debian(?:-security)?\.list$};
+    return 0 unless $uri =~ m{^(?:[a-z0-9]+\+)?(?:https?|ftp)://([^/:\s]+)(?::\d+)?(/\S*)?$}i;
+    my ($host, $path) = (lc $1, $2 // '/');
+    next if $host eq 'debian.org' || $host =~ /\.debian\.org$/;
+    next if $host =~ /^mirror\.hetzner\.(?:com|de)$/ && $path =~ m{^/debian/};
+    return 0;
+  }
+
+  if ($s->{'signed-by'}) {
+    my @keys = grep { length } split /[\s,]+/, $s->{'signed-by'}{value};
+    return 0 unless @keys;
+    for my $key (@keys) {
+      return 0 unless $key =~ m{^/usr/share/keyrings/debian-archive-[A-Za-z0-9_.-]+\.(?:gpg|pgp|asc)$};
+    }
+  }
+  return 1;
 }
 
 # ============================================================
@@ -1382,6 +1518,15 @@ and the initramfs is regenerated to prevent it from loading at boot.
 
 On Debian, C<contrib>, C<non-free>, and C<non-free-firmware> components
 are added to C</etc/apt/sources.list> automatically if not already present.
+Hosts using the deb822 format (C</etc/apt/sources.list.d/*.sources>, e.g.
+C<debian.sources> on Debian 13 and Debian cloud images) get the missing
+components added to the C<Components:> field of each Debian archive stanza:
+C<Types> includes C<deb>, C<Components> includes C<main>, every C<URIs> entry
+is a C<*.debian.org> host, Hetzner's C<mirror.hetzner.com/debian/> mirror or
+the cloud images' C<mirror+file:/etc/apt/mirrors/debian*.list>, and
+C<Signed-By> (if set) is a C<debian-archive-*> keyring. Third-party sources
+and unknown mirrors are left untouched; if no Debian archive entry is
+recognised in either format, a warning is logged.
 
 The package choice also depends on the GPU generation, read from the PCI
 device ID of the GPU passed as C<gpu> to L</install_driver>

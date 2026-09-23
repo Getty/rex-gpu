@@ -134,6 +134,35 @@ golden_is(
   'driver/ubuntu-24.04--ada--empty-search'
 );
 
+# deb822 (karr #36): debian.sources already carries every component -- read,
+# not rewritten (no file: line).
+golden_is(
+  driver_on(host_profile('debian-13', responses => [
+    [ 'cat /etc/apt/sources.list.d/debian.sources 2>/dev/null' =>
+        "Types: deb\nURIs: http://deb.debian.org/debian/\nSuites: trixie trixie-updates\n"
+      . "Components: main contrib non-free non-free-firmware\n"
+      . "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp", 0 ]
+  ]), gpu_fixture('ada')),
+  'driver/debian-13--ada--nonfree-enabled'
+);
+
+# Both formats on one host: the classic sed runs unchanged, then the deb822
+# file (Hetzner mirror) is rewritten; a third-party .sources file is read but
+# not written, and a name apt ignores is not even read.
+golden_is(
+  driver_on(host_profile('debian-12', responses => [
+    [ 'ls -1 /etc/apt/sources.list.d/ 2>/dev/null' =>
+        "debian.sources\nhashicorp.sources\nnvidia-container-toolkit.list\nold.sources.bak", 0 ],
+    [ 'cat /etc/apt/sources.list.d/debian.sources 2>/dev/null' =>
+        "Types: deb\nURIs: http://mirror.hetzner.com/debian/packages\nSuites: bookworm bookworm-updates\n"
+      . "Components: main\n", 0 ],
+    [ 'cat /etc/apt/sources.list.d/hashicorp.sources 2>/dev/null' =>
+        "Types: deb\nURIs: https://apt.releases.hashicorp.com\nSuites: bookworm\nComponents: main\n"
+      . "Signed-By: /usr/share/keyrings/hashicorp-archive-keyring.gpg", 0 ]
+  ]), gpu_fixture('ada')),
+  'driver/debian-12--ada--both-formats'
+);
+
 # Blackwell on a Debian release NVIDIA has no CUDA repo for: dies before any
 # host change.
 {
