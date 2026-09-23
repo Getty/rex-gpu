@@ -37,8 +37,19 @@ A meta package co-installs the kernel module and the userspace at one
 version, so C<nvidia-smi> never sees a C<Driver/library version mismatch>.
 Pre-signed kmp packages need no kernel headers.
 
-Only the proprietary C<nvidia-driver-G06-kmp-meta> is verified. The open
-meta packages are B<not> verified -- that gap is known and kept as it was.
+Every source verifies two entries after the install (L</verify_query>): the
+meta package, and the kernel module package it requires -- the capability
+C<nvidia-open-driver-G06-signed-kmp> / C<nvidia-open-driver-G07-signed-kmp>
+/ C<nvidia-driver-G06-kmp>, whichever kernel flavour (C<-default>,
+C<-64kb>, ...) provides it. Either missing dies with the rpm layer's
+C<... not installed after zypper install> message. That the module builds,
+loads and binds is left to L<Rex::GPU::NVIDIA/verify_nvidia>.
+
+=method verify_query
+
+C<rpm -q --whatprovides NAME>: a package provides its own name, so the meta
+package passes as before, and the kmp capability passes whichever flavour
+package carries it.
 
 =method leap_version
 
@@ -81,25 +92,42 @@ sub repo_url {
 # checked in their primary.xml 2026-09-23); it requires
 # nvidia-driver-G06-kmp and nvidia-userspace-meta-G06 at its own exact
 # version. The open G06/G07 metas do not support pre-Turing GPUs.
+#
+# Verification (karr #27), from the same primary.xml (x86_64, 2026-09-23):
+# every meta requires the capability "<kmp> = <its version>" plus
+# nvidia-userspace-meta-G0x. nvidia-driver-G06-kmp is provided by
+# nvidia-driver-G06-kmp-default / -64kb (NVIDIA's repo); the
+# nvidia-open-driver-G0x-signed-kmp capability by no package in NVIDIA's
+# repo -- the signed kmp comes from openSUSE's own repositories. rpm -q of
+# the meta alone would trust that libzypp, which commits package by package
+# and resolves dependencies itself, never leaves a meta without its kmp; the
+# capability query checks it, flavour-independent.
 sub sources {
   my ( $self ) = @_;
   my $url = $self->repo_url($self->leap_version);
   my $open = $self->_major_version($self->release) >= 16
     ? { name => 'nvidia-gfx-G07-open', branch_at_least => 595,
-        packages => [ 'nvidia-open-driver-G07-signed-kmp-meta' ] }
+        packages => [ 'nvidia-open-driver-G07-signed-kmp-meta' ],
+        verify   => [ 'nvidia-open-driver-G07-signed-kmp-meta', 'nvidia-open-driver-G07-signed-kmp' ] }
     : { name => 'nvidia-gfx-G06-open', branch => 580,
-        packages => [ 'nvidia-open-driver-G06-signed-kmp-meta' ] };
+        packages => [ 'nvidia-open-driver-G06-signed-kmp-meta' ],
+        verify   => [ 'nvidia-open-driver-G06-signed-kmp-meta', 'nvidia-open-driver-G06-signed-kmp' ] };
   return (
-    { %$open, kernel_module => 'open', verify => [], repo_url => $url },
+    { %$open, kernel_module => 'open', repo_url => $url },
     {
       name          => 'nvidia-gfx-G06',
       kernel_module => 'proprietary',
       branch        => 580,
       packages      => [ 'nvidia-driver-G06-kmp-meta' ],
-      verify        => [ 'nvidia-driver-G06-kmp-meta' ],
+      verify        => [ 'nvidia-driver-G06-kmp-meta', 'nvidia-driver-G06-kmp' ],
       repo_url      => $url
     }
   );
+}
+
+sub verify_query {
+  my ( $self, $what ) = @_;
+  return 'rpm -q --whatprovides '.$what;
 }
 
 sub plan {

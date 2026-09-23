@@ -75,7 +75,7 @@ my @COMMON = (
   [ q{lsmod | grep '^nvidia '}             => '', 1 ],
   [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$} => '', 0 ],
   [ q{rpm -q --qf '%{VERSION}' nvidia-driver 2>&1} => '580.95.05', 0 ],
-  [ qr{^rpm -q (\S+) 2>&1$}                => 'installed', 0 ],
+  [ qr{^rpm -q (?:--whatprovides )?(\S+) 2>&1$} => 'installed', 0 ],
   [ 'uname -m'                             => 'x86_64', 0 ],
   [ 'dpkg --print-architecture'            => 'amd64', 0 ]
 );

@@ -1,4 +1,4 @@
-# golden: driver/leap-16.0--ada
+# golden: driver/leap-16.0--ada--kmp-missing
 # Host interactions Rex::GPU emits, in order. Regenerate with
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 run: nvidia-smi -L 2>&1
@@ -11,11 +11,4 @@ run: zypper install -y nvidia-open-driver-G07-signed-kmp-meta
 run: zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true
 run: rpm -q --whatprovides nvidia-open-driver-G07-signed-kmp-meta 2>&1
 run: rpm -q --whatprovides nvidia-open-driver-G07-signed-kmp 2>&1
-file: /etc/modprobe.d/blacklist-nouveau.conf
-  | blacklist nouveau
-  | options nouveau modeset=0
-run: dracut --force 2>/dev/null
-run: modprobe nvidia
-run: lsmod | grep '^nvidia '
-run: nvidia-smi -L 2>&1
-can_run: nvidia-ctk
+DIE: nvidia-open-driver-G07-signed-kmp not installed after zypper install — check zypper output

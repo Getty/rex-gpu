@@ -38,16 +38,29 @@ sub install_packages {
 
 =method verify_packages
 
-Dies unless C<rpm -q> finds every package in C<< $plan->{verify} >>. An
-empty list verifies nothing.
+Dies unless L</verify_query> succeeds for every entry in
+C<< $plan->{verify} >>. An empty list verifies nothing.
+
+=method verify_query
+
+  my $cmd = $self->verify_query('nvidia-driver');
+
+The C<rpm> query L</verify_packages> runs for one entry: C<rpm -q NAME>, so
+an entry is a package name. L<Rex::GPU::NVIDIA::Setup::SUSE> asks
+C<rpm -q --whatprovides> instead, so its entries can be capabilities.
 
 =cut
+
+sub verify_query {
+  my ( $self, $what ) = @_;
+  return 'rpm -q '.$what;
+}
 
 sub verify_packages {
   my ( $self, $plan ) = @_;
   my $pm = $self->package_manager;
   for my $driver_pkg (@{ $plan->{verify} }) {
-    my $check = $self->run_cmd("rpm -q $driver_pkg 2>&1", auto_die => 0);
+    my $check = $self->run_cmd($self->verify_query($driver_pkg).' 2>&1', auto_die => 0);
     die "$driver_pkg not installed after $pm install — check $pm output\n"
       if $? != 0;
   }

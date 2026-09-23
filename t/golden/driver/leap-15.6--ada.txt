@@ -9,6 +9,8 @@ run: zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/15.6/ nv
 run: zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null
 run: zypper install -y nvidia-open-driver-G06-signed-kmp-meta
 run: zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true
+run: rpm -q --whatprovides nvidia-open-driver-G06-signed-kmp-meta 2>&1
+run: rpm -q --whatprovides nvidia-open-driver-G06-signed-kmp 2>&1
 file: /etc/modprobe.d/blacklist-nouveau.conf
   | blacklist nouveau
   | options nouveau modeset=0

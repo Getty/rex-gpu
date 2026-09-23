@@ -121,9 +121,12 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
     is_deeply([ grep { /uname -m/ } @{ $rec->{lines} } ], [], "$os + $g: plan does not read the arch");
     ok(scalar @{ $plan->{packages} }, "$os + $g: packages filled");
     if ($class eq $SUSE) {
-      # the default open meta package is not verified (karr #27, unchanged)
-      is(scalar @{ $plan->{verify} }, ($g eq 'volta' ? 1 : 0),
-        "$os + $g: only the pre-Turing meta package is verified");
+      # every source verifies its meta package and the kmp it requires (karr #27)
+      my $meta = $g eq 'volta' ? 'nvidia-driver-G06-kmp-meta'
+        : $os eq 'leap-16.0' ? 'nvidia-open-driver-G07-signed-kmp-meta'
+        : 'nvidia-open-driver-G06-signed-kmp-meta';
+      (my $kmp = $meta) =~ s/-meta$//;
+      is_deeply($plan->{verify}, [ $meta, $kmp ], "$os + $g: meta package and its kmp verified");
     }
     else {
       is($plan->{verify}[0], 'nvidia-driver', "$os + $g: nvidia-driver verified");

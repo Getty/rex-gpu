@@ -112,6 +112,27 @@ golden_is(
   'driver/rocky-9--ada--not-installed'
 );
 
+# openSUSE (karr #27): zypper install fails (no provider, exit 104) -- the
+# open meta package is not there, dies after the addlock, before nouveau.
+golden_is(
+  driver_on(host_profile('leap-15.6', responses => [
+    [ 'zypper install -y nvidia-open-driver-G06-signed-kmp-meta' =>
+        "No provider of 'nvidia-open-driver-G06-signed-kmp-meta' found.", 104 ],
+    [ 'rpm -q --whatprovides nvidia-open-driver-G06-signed-kmp-meta 2>&1' =>
+        'no package provides nvidia-open-driver-G06-signed-kmp-meta', 1 ]
+  ]), gpu_fixture('ada')),
+  'driver/leap-15.6--ada--install-failed'
+);
+
+# ... the meta package is there but no package provides the kmp it requires.
+golden_is(
+  driver_on(host_profile('leap-16.0', responses => [
+    [ 'rpm -q --whatprovides nvidia-open-driver-G07-signed-kmp 2>&1' =>
+        'no package provides nvidia-open-driver-G07-signed-kmp', 1 ]
+  ]), gpu_fixture('ada')),
+  'driver/leap-16.0--ada--kmp-missing'
+);
+
 # Pre-Turing on RHEL 10 gets a newer branch than 580: dies after install.
 golden_is(
   driver_on(host_profile('rocky-10', responses => [
