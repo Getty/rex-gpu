@@ -54,6 +54,31 @@ my %NVIDIA_COMPUTE_DEVICE_IDS = (
   # architecture has no proprietary kernel module, open is the only option.
 );
 
+# Blackwell-architecture NVIDIA PCI device IDs (karr #16), inclusive ranges.
+# Blackwell has NO proprietary kernel module — NVIDIA's open GPU kernel
+# modules are the only ones that bind — on every architecture, x86_64
+# included. This is ONLY an open-kernel-module signal for
+# open_kernel_module_required; it does NOT make a device compute (a GPU still
+# has to pass _is_nvidia_compute by class 0302, the allowlist above or its
+# name) and it does not change the unknown-model default.
+#
+# Source: the supported-GPU table in NVIDIA's open-gpu-kernel-modules
+# README.md (github.com/NVIDIA/open-gpu-kernel-modules, driver 615.71.09).
+# In that table the last pre-Blackwell (Ada) ID is 28F8, and every listed ID
+# from 2901 up to 2F58 is Blackwell: B200 (2901, 2909), GB200 (2941), GeForce
+# RTX 50xx desktop/laptop and RTX PRO Blackwell (2B85..2F58), GB10 (2E12).
+# 0x2900-0x2FFF is therefore taken as a block: an unlisted ID inside it is
+# post-Ada silicon and gets the -open driver (which supports every GPU from
+# Turing on). Blackwell Ultra (B300 3182, GB300 31C2/31C3) is listed
+# explicitly, NOT as a block — whatever else lands at 0x3000+ is unknown.
+# Any ID outside these ranges (every Turing/Ampere/Ada/Hopper part, and any
+# future generation) returns false, i.e. today's -server selection.
+my @NVIDIA_BLACKWELL_DEVICE_ID_RANGES = (
+  [ 0x2900, 0x2fff ],   # GB100/GB102 (B200, GB200), GB20x (RTX 50xx, RTX PRO), GB10
+  [ 0x3182, 0x3182 ],   # B300 SXM6 AC
+  [ 0x31c2, 0x31c3 ]    # GB300
+);
+
 =head1 FUNCTIONS
 
 =cut
@@ -181,14 +206,17 @@ sub _is_nvidia_compute {
 Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, lowercase or
 uppercase), returns true if that device is known to have B<no> proprietary
 kernel module at all — NVIDIA's I<open> GPU kernel modules are the only
-option (currently the GB10 / NVIDIA DGX Spark; Blackwell-architecture parts in
-general). Looks up the same C<%NVIDIA_COMPUTE_DEVICE_IDS> allowlist
-C<_is_nvidia_compute> uses, so a future compute device ID added there only
-needs to set its C<open_kernel_module> flag once, in this one place, rather
-than a second hardcoded device list in the driver installer. Returns false for
-C<undef>, an unlisted ID, or a listed ID that does not set the flag (e.g. a
-future Hopper-class ID reachable only by device ID, which does support the
-proprietary module).
+option: every Blackwell-architecture part, on any CPU architecture. True for
+an ID in the Blackwell device-ID ranges taken from NVIDIA's
+open-gpu-kernel-modules supported-GPU table (C<2900>-C<2FFF>: B200, GB200,
+GeForce RTX 50xx, RTX PRO Blackwell, GB10; plus B300 C<3182> and GB300
+C<31C2>/C<31C3>), or for an entry of the C<%NVIDIA_COMPUTE_DEVICE_IDS>
+allowlist that sets its C<open_kernel_module> flag. Both lists live in this
+module only, so the driver installer carries no second hardcoded device
+list. Returns false for C<undef>, a malformed ID, and every ID outside those
+ranges — Turing/Ampere/Ada/Hopper parts and any future generation keep the
+default proprietary C<-server> selection. The ranges only choose the driver
+variant; they never make a GPU compute-capable.
 
 Not in C<@EXPORT> — this is a C<Rex::GPU::NVIDIA>-internal lookup, not a
 Rexfile-facing command.
@@ -199,7 +227,13 @@ sub open_kernel_module_required {
   my ($device_id) = @_;
   return 0 unless defined $device_id;
   my $entry = $NVIDIA_COMPUTE_DEVICE_IDS{lc $device_id};
-  return ($entry && ref $entry eq 'HASH' && $entry->{open_kernel_module}) ? 1 : 0;
+  return 1 if $entry && ref $entry eq 'HASH' && $entry->{open_kernel_module};
+  return 0 unless $device_id =~ /^[0-9a-f]{4}$/i;
+  my $id = hex $device_id;
+  for my $range (@NVIDIA_BLACKWELL_DEVICE_ID_RANGES) {
+    return 1 if $id >= $range->[0] && $id <= $range->[1];
+  }
+  return 0;
 }
 
 sub _parse_amd_line {
@@ -293,8 +327,9 @@ Each detected NVIDIA GPU also carries its raw C<device_id> (the C<[10de:XXXX]>
 field, or C<undef> if lspci printed none). L<Rex::GPU> passes the whole GPU
 hashref through to L<Rex::GPU::NVIDIA/install_driver>, which uses
 L</open_kernel_module_required> on the device ID to pick the correct Ubuntu
-driver package variant for Blackwell-class silicon (the GB10) that has no
-proprietary kernel module at all.
+driver package variant for Blackwell-architecture silicon (B200/GB200/B300,
+GeForce RTX 50xx, RTX PRO Blackwell, GB10) that has no proprietary kernel
+module at all.
 
 =head1 SEE ALSO
 

@@ -69,10 +69,13 @@ Optional hashref — the detected GPU this driver install is for, in the same
 shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
 (C<name>, C<device_id>, ...). L<Rex::GPU> passes C<< $compute[0] >> here.
 Currently used only on Ubuntu: C<device_id> selects the C<-open> driver
-package variant instead of the default C<-server> one for Blackwell-class
-silicon (the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module at
-all. Every other OS branch, and the Ubuntu x86_64 path, ignore it. Omit it (or
-pass C<undef>) to keep the previous, GPU-agnostic package selection.
+package variant instead of the default C<-server> one for
+Blackwell-architecture silicon (B200/GB200/B300, GeForce RTX 50xx, RTX PRO
+Blackwell, the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module
+at all, on any CPU architecture (see
+L<Rex::GPU::Detect/open_kernel_module_required>). Every other GPU keeps the
+C<-server> package; every other OS branch ignores the option. Omit it (or pass
+C<undef>) to keep the previous, GPU-agnostic package selection.
 
 =back
 
@@ -357,15 +360,13 @@ sub _install_driver_debian {
     # Do NOT add nvidia-smi: on Ubuntu 24.04 it is a virtual package with no
     # installation candidate — it is pulled in automatically by the driver metapackage.
     #
-    # Blackwell-class datacenter silicon (the GB10 / NVIDIA DGX Spark, aarch64)
-    # ships with NO proprietary kernel module at all — only the -open variant
-    # builds/loads for it (karr #14/#15; the plain x86_64 -server path below is
-    # correct for the already-verified RTX 4000 Ada and stays untouched).
-    # _ubuntu_needs_open_kernel_module is scoped to arm64 + a GPU device ID
-    # Detect.pm's allowlist marks open-only, so it returns false — and this
-    # branch behaves exactly as before — for every x86_64 host regardless of
-    # which GPU is installed.
-    my $open = _ubuntu_needs_open_kernel_module($arch, $gpu);
+    # Blackwell-architecture silicon (B200/GB200, GeForce RTX 50xx, RTX PRO
+    # Blackwell, the GB10 / DGX Spark) ships with NO proprietary kernel module
+    # at all — only the -open variant binds, on x86_64 as on arm64 (karr
+    # #14/#15/#16). _ubuntu_needs_open_kernel_module keys on the detected PCI
+    # device ID only; for any non-Blackwell GPU (RTX 4000 Ada et al.), or no
+    # GPU passed, it returns false and this branch behaves exactly as before.
+    my $open = _ubuntu_needs_open_kernel_module($gpu);
     if ($open) {
       Rex::Logger::info("  Blackwell-class GPU on $arch — selecting the open-kernel-module driver");
     }
@@ -402,7 +403,7 @@ sub _install_driver_debian {
   run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y $pkg_str", auto_die => 0;
 
   # On Ubuntu the driver package is e.g. nvidia-driver-590-server (or, for
-  # Blackwell-class aarch64 GPUs, nvidia-driver-590-server-open); on Debian it
+  # Blackwell-architecture GPUs, nvidia-driver-590-server-open); on Debian it
   # is nvidia-driver. Check whichever name we actually installed.
   my $driver_pkg = ($os eq 'Ubuntu') ? $packages[-1] : 'nvidia-driver';
   my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
@@ -410,25 +411,20 @@ sub _install_driver_debian {
     if $? != 0;
 }
 
-# Pure predicate (karr #15): given the dpkg-reported architecture and the
-# detected GPU hashref (Rex::GPU::Detect shape: name/device_id/...), should
-# Ubuntu driver selection pick the -open package variant instead of the
-# default -server one? Scoped deliberately narrow: Blackwell-class silicon
-# such as the GB10 (NVIDIA DGX Spark) has NO proprietary kernel module at all,
-# and currently ships only on the aarch64 builds dpkg reports as "arm64" — so
-# $arch is checked FIRST and short-circuits to false before $gpu is even
-# looked at. This is what keeps the already-verified x86_64 path (RTX 4000 Ada
-# et al.) on the plain -server package, whatever GPU is passed (including
-# none). The device-ID -> open-only judgement itself is NOT duplicated here:
-# it delegates to Rex::GPU::Detect::open_kernel_module_required, so a future
-# Blackwell datacenter device ID needs updating in exactly one place (the
-# allowlist in Detect.pm), not a second hardcoded list in this module.
+# Pure predicate (karr #15, generalised in #16): given the detected GPU
+# hashref (Rex::GPU::Detect shape: name/device_id/...), should Ubuntu driver
+# selection pick the -open package variant instead of the default -server
+# one? True only for a device ID Rex::GPU::Detect::open_kernel_module_required
+# marks open-only (Blackwell architecture — no proprietary kernel module
+# exists for it). No CPU-architecture gate: an RTX 50xx or B200 on x86_64
+# needs -open exactly like the GB10 on arm64. The device-ID judgement is NOT
+# duplicated here — it lives in Detect.pm only. No GPU, a non-hashref, a
+# missing device_id or any non-Blackwell ID => false => -server as before.
 #
 # Pure (string/hash access only, no run/dpkg) so it is unit-testable offline,
 # like _nvidia_driver_present / _cuda_repo_arch.
 sub _ubuntu_needs_open_kernel_module {
-  my ($arch, $gpu) = @_;
-  return 0 unless defined $arch && $arch =~ /^(?:arm64|aarch64)$/;
+  my ($gpu) = @_;
   return 0 unless $gpu && ref $gpu eq 'HASH';
   return Rex::GPU::Detect::open_kernel_module_required($gpu->{device_id});
 }

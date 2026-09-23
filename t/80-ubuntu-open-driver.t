@@ -3,8 +3,8 @@ use warnings;
 use Test::More;
 
 # -----------------------------------------------------------------------------
-# Unit tests for the Ubuntu Blackwell/GB10 open-kernel-module driver selection
-# (karr #15, part 2 of #14).
+# Unit tests for the Ubuntu Blackwell open-kernel-module driver selection
+# (karr #15, part 2 of #14; generalised to every CPU architecture in #16).
 #
 # karr #14 made Rex::GPU::Detect classify the GB10 (10de:2e12, NVIDIA DGX
 # Spark, aarch64) as compute => 1 via a device-ID allowlist. That activated
@@ -17,15 +17,25 @@ use Test::More;
 # Both functions under test are pure (string/hash lookups only, no run/dpkg),
 # so they are unit-testable offline:
 #   * Rex::GPU::Detect::open_kernel_module_required   — the device-ID lookup
-#   * Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module — arch + GPU gate
+#   * Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module — GPU gate
 #
-# NOT covered here (needs a real Ubuntu arm64 Spark — none was available for
-# this change; see the t/10-detect.t header for the wider "what prove cannot
-# see"):
+# karr #16: Blackwell has no proprietary kernel module on x86_64 either
+# (GeForce RTX 50xx, RTX PRO Blackwell, B200/GB200). The arm64-only gate k15
+# had is gone; the decision keys on the PCI device ID alone, against the
+# Blackwell ranges in Detect.pm taken from NVIDIA's open-gpu-kernel-modules
+# supported-GPU table. The k15 assertion "amd64 + GB10 ID => not open (arch
+# gates first)" is deliberately REPLACED: the device ID decides, not the arch.
+# The non-regression claim is kept: a non-Blackwell GPU stays on -server.
+#
+# NOT covered here (needs a real Ubuntu Blackwell host — none was available
+# for k15 or k16; see the t/10-detect.t header for the wider "what prove
+# cannot see"):
 #   * that `apt-cache search '^nvidia-driver-[0-9].*-server-open$'` actually
 #     finds a candidate on a real host, or that the fallback
-#     "nvidia-driver-570-server-open" is installable (repo metadata checked,
-#     not exercised against apt).
+#     "nvidia-driver-570-server-open" is installable on amd64 or arm64 (repo
+#     metadata checked, not exercised against apt).
+#   * that the lspci lines below for RTX 5090 / B200 match a real host: they
+#     are built from the pci.ids naming pattern, not captured live.
 #   * that the -open package DKMS-builds against a stock Ubuntu kernel (cortex
 #     uses DGX-OS prebuilt modules, not this code path — see karr #15).
 #   * that the x86_64 RTX 4000 Ada install is unaffected end-to-end (only the
@@ -50,39 +60,90 @@ subtest 'open_kernel_module_required' => sub {
     'undef device id => 0');
 };
 
+subtest 'open_kernel_module_required — Blackwell device-ID ranges (karr #16)' => sub {
+  my $okm = \&Rex::GPU::Detect::open_kernel_module_required;
+  # Blackwell, from NVIDIA's open-gpu-kernel-modules supported-GPU table
+  is($okm->('2b85'), 1, 'GeForce RTX 5090 (2b85) => open');
+  is($okm->('2C02'), 1, 'GeForce RTX 5080 (2C02, uppercase) => open');
+  is($okm->('2d04'), 1, 'GeForce RTX 5060 Ti (2d04) => open');
+  is($okm->('2f04'), 1, 'GeForce RTX 5070 GB205 (2f04) => open');
+  is($okm->('2bb1'), 1, 'RTX PRO 6000 Blackwell Workstation (2bb1) => open');
+  is($okm->('2bb5'), 1, 'RTX PRO 6000 Blackwell Server Edition (2bb5) => open');
+  is($okm->('2901'), 1, 'B200 (2901) => open');
+  is($okm->('2941'), 1, 'GB200 (2941) => open');
+  is($okm->('3182'), 1, 'B300 SXM6 AC (3182) => open');
+  is($okm->('31c2'), 1, 'GB300 (31c2) => open');
+  is($okm->('2900'), 1, 'range floor 2900 => open (unlisted, post-Ada block)');
+  is($okm->('2fff'), 1, 'range ceiling 2fff => open (unlisted, post-Ada block)');
+  # Non-Blackwell: must keep today's -server selection
+  is($okm->('28f8'), 0, 'last Ada ID in the table (RTX 2000 Ada Embedded, 28f8) => 0');
+  is($okm->('2684'), 0, 'GeForce RTX 4090 (Ada, 2684) => 0');
+  is($okm->('26b9'), 0, 'L40S (Ada, 26b9) => 0');
+  is($okm->('2330'), 0, 'H100 SXM (Hopper, 2330) => 0');
+  is($okm->('2342'), 0, 'GH200 (Hopper, 2342) => 0');
+  is($okm->('20b0'), 0, 'A100 (Ampere, 20b0) => 0');
+  is($okm->('1eb0'), 0, 'Quadro RTX 5000 (Turing, 1eb0) => 0');
+  # Unknown / future IDs outside the ranges: no guess
+  is($okm->('3000'), 0, 'unknown 3000 (gap above the block) => 0');
+  is($okm->('3181'), 0, 'unknown 3181 (next to B300) => 0');
+  is($okm->('31c4'), 0, 'unknown 31c4 (next to GB300) => 0');
+  is($okm->('9999'), 0, 'unknown future 9999 => 0');
+  # Malformed input never reaches hex()
+  is($okm->('2b8'),   0, 'three hex digits => 0');
+  is($okm->('2b85x'), 0, 'trailing garbage => 0');
+  is($okm->('zzzz'),  0, 'non-hex => 0');
+  is($okm->(''),      0, 'empty string => 0');
+};
+
 #### Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module
 
 sub needs_open { Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module(@_) }
 
-subtest 'arm64 + GB10 => open' => sub {
-  my $gb10 = { name => 'Device', vendor => 'nvidia', pci_class => '0300',
-               compute => 1, device_id => '2e12' };
-  is(needs_open('arm64',   $gb10), 1, 'dpkg arch "arm64" + GB10 => open');
-  is(needs_open('aarch64', $gb10), 1, '"aarch64" spelling also recognised (defensive)');
+my $gb10 = { name => 'Device', vendor => 'nvidia', pci_class => '0300',
+             compute => 1, device_id => '2e12' };
+my $rtx4000 = { name => 'AD104GL [RTX 4000 SFF Ada Generation]', vendor => 'nvidia',
+                pci_class => '0302', compute => 1, device_id => '27b0' };
+
+subtest 'GB10 (aarch64 Spark) => still open' => sub {
+  is(needs_open($gb10), 1, 'GB10 device id => open');
 };
 
-subtest 'x86_64 path is unaffected, whatever the GPU (the non-regression point)' => sub {
-  my $gb10 = { name => 'Device', vendor => 'nvidia', pci_class => '0300',
-               compute => 1, device_id => '2e12' };
-  my $rtx4000 = { name => 'AD104GL [RTX 4000 SFF Ada Generation]', vendor => 'nvidia',
-                  pci_class => '0302', compute => 1, device_id => '27b0' };
-  is(needs_open('amd64',  $rtx4000), 0, 'x86_64 dpkg arch (amd64) + RTX 4000 Ada => not open');
-  is(needs_open('amd64',  $gb10),    0, 'x86_64 dpkg arch (amd64) + GB10 GPU => still not open (arch gates first)');
-  is(needs_open('x86_64', $rtx4000), 0, 'unexpected but non-arm arch string => not open');
+subtest 'Blackwell on x86_64, via the real lspci parser => open (karr #16)' => sub {
+  my $rtx5090 = Rex::GPU::Detect::_parse_nvidia_line(
+    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GB202 [GeForce RTX 5090] [10de:2b85] (rev a1)'
+  );
+  is($rtx5090->{compute},   1,      'RTX 5090 is compute (RTX name match)');
+  is($rtx5090->{device_id}, '2b85', 'device id parsed');
+  is(needs_open($rtx5090),  1,      'RTX 5090 => open');
+
+  my $b200 = Rex::GPU::Detect::_parse_nvidia_line(
+    '18:00.0 3D controller [0302]: NVIDIA Corporation GB100 [B200] [10de:2901] (rev a1)'
+  );
+  is($b200->{compute},  1, 'B200 is compute (class 0302)');
+  is(needs_open($b200), 1, 'B200 => open');
+
+  my $pro6000 = Rex::GPU::Detect::_parse_nvidia_line(
+    '41:00.0 3D controller [0302]: NVIDIA Corporation GB202GL [RTX PRO 6000 Blackwell Server Edition] [10de:2bb5] (rev a1)'
+  );
+  is(needs_open($pro6000), 1, 'RTX PRO 6000 Blackwell Server Edition => open');
 };
 
-subtest 'arm64 with a non-open-only GPU stays on -server' => sub {
-  my $rtx4000 = { name => 'AD104GL [RTX 4000 SFF Ada Generation]', vendor => 'nvidia',
-                  pci_class => '0302', compute => 1, device_id => '27b0' };
-  is(needs_open('arm64', $rtx4000), 0,
-    'arm64 + a GPU not in the open-only allowlist => not open');
+subtest 'non-Blackwell GPUs stay on -server (the non-regression point)' => sub {
+  is(needs_open($rtx4000), 0, 'RTX 4000 SFF Ada (27b0) => not open');
+  my $h100 = Rex::GPU::Detect::_parse_nvidia_line(
+    '17:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)'
+  );
+  is(needs_open($h100), 0, 'H100 (Hopper, 2330) => not open');
+  my $rtx4090 = Rex::GPU::Detect::_parse_nvidia_line(
+    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation AD102 [GeForce RTX 4090] [10de:2684] (rev a1)'
+  );
+  is(needs_open($rtx4090), 0, 'RTX 4090 (Ada, 2684) => not open');
 };
 
 subtest 'missing/malformed inputs default to false (safe: keeps -server)' => sub {
-  is(needs_open('arm64', undef),          0, 'no GPU passed (install_driver called without gpu =>) => not open');
-  is(needs_open('arm64', {}),             0, 'GPU hashref with no device_id => not open');
-  is(needs_open(undef,   { device_id => '2e12' }), 0, 'undef arch => not open');
-  is(needs_open('arm64', 'not-a-hashref'), 0, 'non-hashref $gpu => not open (no crash)');
+  is(needs_open(undef),           0, 'no GPU passed (install_driver called without gpu =>) => not open');
+  is(needs_open({}),              0, 'GPU hashref with no device_id => not open');
+  is(needs_open('not-a-hashref'), 0, 'non-hashref $gpu => not open (no crash)');
 };
 
 done_testing;

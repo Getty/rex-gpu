@@ -52,14 +52,18 @@ Revision history for Rex-GPU
     architecture-aware: aarch64 uses the "sbsa" tree (repos/rhelN/sbsa/),
     x86_64 is unchanged — the old hardcoded x86_64 pointed aarch64 at a
     nonexistent repo. gpu_setup now threads the detected GPU (name + PCI
-    device ID) through to install_driver's new optional gpu option; on Ubuntu
-    aarch64, for a GPU device ID the allowlist marks open-kernel-module-only
-    (currently only the GB10 — Blackwell-architecture silicon has no
-    proprietary kernel module at all), the -server-open package variant is
-    now selected instead of the default -server one, which the previous
-    auto-detect explicitly filtered *-open* candidates OUT of. The x86_64
-    path (RTX 4000 Ada et al.) picks -server exactly as before, whatever GPU
-    is passed. New pure, offline-testable predicates
+    device ID) through to install_driver's new optional gpu option; on
+    Ubuntu, on x86_64 and aarch64 alike, a Blackwell-architecture GPU
+    (B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell, GB10 — none has a
+    proprietary kernel module) now gets the -server-open package variant
+    instead of the default -server one, which the previous auto-detect
+    explicitly filtered *-open* candidates OUT of; before, an RTX 50xx or
+    B200 on x86_64 got a -server driver dpkg reports installed but whose
+    module never binds. Blackwell is recognised by PCI device ID (0x2900-
+    0x2FFF plus B300/GB300 3182, 31C2-31C3, per NVIDIA's open-gpu-kernel-
+    modules supported-GPU table); every other GPU, including an unknown
+    future ID, picks -server exactly as before (karr #16). New pure,
+    offline-testable predicates
     Rex::GPU::Detect::open_kernel_module_required and
     Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module drive the decision
     (new t/80-ubuntu-open-driver.t); the -server-open package name was
@@ -68,8 +72,8 @@ Revision history for Rex-GPU
     Ubuntu -open install has run on real hardware — cortex (the only GB10
     host) already has its driver loaded (DGX-OS prebuilt), so the karr #10
     idempotency short-circuit skips install_driver there entirely, and no
-    fresh Ubuntu/RHEL aarch64 Spark was available; a maintainer must confirm
-    both against one (karr #14/#15)
+    fresh Ubuntu/RHEL aarch64 Spark was available, nor any x86_64 Blackwell
+    host; a maintainer must confirm both against one (karr #14/#15/#16)
   - Make install_driver idempotent against a host that already has a working
     NVIDIA driver (e.g. provisioned via the NVIDIA CUDA apt/dnf repo, or a
     re-run of gpu_setup): a distro-neutral short-circuit now skips the driver
