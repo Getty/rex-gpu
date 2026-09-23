@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-23T03:03:47Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T03:03:47Z
+created: 2026-09-23T02:09:26Z
+id: 17
+priority: medium
+started: 2026-09-23T02:57:40Z
+status: done
+tags:
+- detection
+- nvidia
+- virtualization
+title: Virtual-GPU-Short-Circuit versteckt echte GPU bei Passthrough/Cloud-VM (blob-
+  statt zeilenweiser Match)
+updated: 2026-09-23T03:03:47Z
+---
+
+Detect.pm:96-99: if ($pci_output =~ $VIRTUAL_GPU_RE) { ... return $result; } bricht die gesamte detect()-Funktion ab, sobald IRGENDEINE 03xx-Zeile im lspci-Output zu virtio/QEMU/VMware/VirtualBox passt -- auch wenn eine andere Zeile im selben Output eine echte NVIDIA-Compute-GPU zeigt. Reales Szenario: GPU-Passthrough-Hosts (vfio-pci) und Cloud-GPU-VMs zeigen oft sowohl die echte durchgereichte Karte als auch ein emuliertes Konsolen-Display (QXL/Cirrus/virtio-vga) im selben Output. Aktuell wuerde ein solcher Host komplett leer zurueckgemeldet -- keine NVIDIA-GPU erkannt, kein Hinweis der 'kein GPU' von 'GPU durch virtuelles Display verdeckt' unterscheidet. Sichere Richtung (kein Fehl-Install, nur False Negative passend zur unknown-defaults-to-0-Philosophie), aber stiller Funktionsausfall ohne Diagnose-Spur -- bisher nirgends dokumentiert.
+
+Fix-Idee (grob): virtuelle-GPU-Erkennung pro Zeile/Device statt auf dem gesamten Blob matchen; nur short-circuiten wenn ALLE 03xx-Zeilen virtuell sind, oder virtuelle Zeilen aus der Iteration herausfiltern statt frueh komplett zurueckzugeben.
+
+Herkunft: Audit-Auftrag zur #14/#15-Fehlerklasse, Kandidat 2.
