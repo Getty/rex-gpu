@@ -1,3 +1,5 @@
+requires 'Moo';
+requires 'namespace::autoclean';
 requires 'perl', '5.014004';
 requires 'Rex', '1.14.0';
 

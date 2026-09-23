@@ -8,6 +8,7 @@ use warnings;
 use Rex::Commands::Pkg;
 use Rex::Commands::Run;
 use Rex::Logger;
+use Rex::GPU::NVIDIA::Requirement;
 
 require Rex::Exporter;
 use base qw(Rex::Exporter);
@@ -41,71 +42,18 @@ my $AMD_VENDOR_RE = qr/\[1002:[0-9a-f]{4}\]/i;
 # verified datacenter/compute IDs here; this does not change the unknown-model
 # default (still compute => 0).
 #
-# open_kernel_module (karr #15) marks an entry whose silicon has NO proprietary
-# kernel module at all — only NVIDIA's open GPU kernel modules build/load for
-# it, so Rex::GPU::NVIDIA's Ubuntu driver selection must pick the -open package
-# variant instead of the default -server one. This is a property of the
-# SILICON, not of "being in this allowlist": a future addition here that DOES
-# support the proprietary module (e.g. a Hopper-class part reachable only by
-# device ID) must NOT set it. Set it only for verified open-only parts.
+# This list only makes a device compute. Which driver it needs (open or
+# proprietary kernel module, which branches) is NOT kept here: that is the
+# generation table in Rex::GPU::NVIDIA::Requirement (karr #30), which also
+# holds the GB10 open-kernel-module row (karr #15) this entry used to flag.
 my %NVIDIA_COMPUTE_DEVICE_IDS = (
-  '2e12' => { name => 'GB10', open_kernel_module => 1 },
-  # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64; Blackwell
-  # architecture has no proprietary kernel module, open is the only option.
+  '2e12' => { name => 'GB10' },
+  # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64.
 );
 
-# Blackwell-architecture NVIDIA PCI device IDs (karr #16), inclusive ranges.
-# Blackwell has NO proprietary kernel module — NVIDIA's open GPU kernel
-# modules are the only ones that bind — on every architecture, x86_64
-# included. This is ONLY an open-kernel-module signal for
-# open_kernel_module_required; it does NOT make a device compute (a GPU still
-# has to pass _is_nvidia_compute by class 0302, the allowlist above or its
-# name) and it does not change the unknown-model default.
-#
-# Source: the supported-GPU table in NVIDIA's open-gpu-kernel-modules
-# README.md (github.com/NVIDIA/open-gpu-kernel-modules, driver 615.71.09).
-# In that table the last pre-Blackwell (Ada) ID is 28F8, and every listed ID
-# from 2901 up to 2F58 is Blackwell: B200 (2901, 2909), GB200 (2941), GeForce
-# RTX 50xx desktop/laptop and RTX PRO Blackwell (2B85..2F58), GB10 (2E12).
-# 0x2900-0x2FFF is therefore taken as a block: an unlisted ID inside it is
-# post-Ada silicon and gets the -open driver (which supports every GPU from
-# Turing on). Blackwell Ultra (B300 3182, GB300 31C2/31C3) is listed
-# explicitly, NOT as a block — whatever else lands at 0x3000+ is unknown.
-# Any ID outside these ranges (every Turing/Ampere/Ada/Hopper part, and any
-# future generation) returns false, i.e. today's -server selection.
-my @NVIDIA_BLACKWELL_DEVICE_ID_RANGES = (
-  [ 0x2900, 0x2fff ],   # GB100/GB102 (B200, GB200), GB20x (RTX 50xx, RTX PRO), GB10
-  [ 0x3182, 0x3182 ],   # B300 SXM6 AC
-  [ 0x31c2, 0x31c3 ]    # GB300
-);
-
-# Pre-Turing NVIDIA PCI device IDs (karr #26), inclusive ranges, with the
-# newest driver branch that still supports them. Interim hotfix table; epic
-# karr #25 folds it into a driver Requirement table. Like the Blackwell ranges
-# above it ONLY picks the driver — it never makes a device compute.
-#
-# Source: the legacy sections of NVIDIA's supportedchips README (driver
-# 615.71.09, us.download.nvidia.com/XFree86/Linux-x86_64/615.71.09/README/
-# supportedchips.html), checked 2026-09-23:
-#   * "current" list: lowest ID 1E02 (TITAN RTX, Turing). No current ID < 1E02.
-#   * 580.xx legacy list (Maxwell/Pascal/Volta): exactly 1340..1DF6, e.g.
-#     Tesla M60 13F2, M40 17FD, P100 15F7/15F8, P40 1B38, P4 1BB3, TITAN V
-#     1D81, V100 1DB1/1DB4-1DB6, V100S 1DF6. Proprietary kernel module only —
-#     the open module needs GSP, which these chips lack — and 580 is their last
-#     branch (595+ dropped them).
-#   * 470.xx list (Kepler): 0FC6..12BA. The 390.xx (Fermi) list interleaves
-#     with it (1040..1251) and goes down to 06C0; older legacy lists reach
-#     down to 0020. No list has an ID in 12BB..133F or 1DF7..1E01.
-# So every ID below 1340 is Kepler or older and no driver newer than 470
-# supports it: one block, not a Kepler-only range, so a Fermi Tesla (C2050
-# 06D1, M2090 1091) is rejected too instead of getting today's broken install.
-# 1340..1DF6 is taken as a block like the Blackwell one: an unlisted ID inside
-# it is Maxwell..Volta silicon. IDs from 1DF7 on (Turing and later, unknown)
-# return nothing here — today's selection, unchanged.
-my @NVIDIA_LEGACY_DEVICE_ID_RANGES = (
-  [ 0x0000, 0x133f, 'Kepler or older',      470 ],
-  [ 0x1340, 0x1df6, 'Maxwell/Pascal/Volta', 580 ]
-);
+# Rex::GPU::Detect::open_kernel_module_required and legacy_driver_requirement
+# below are wrappers over Rex::GPU::NVIDIA::Requirement, kept with their exact
+# return values for Rex::GPU::NVIDIA's install paths (epic karr #25).
 
 =head1 FUNCTIONS
 
@@ -247,13 +195,16 @@ option: every Blackwell-architecture part, on any CPU architecture. True for
 an ID in the Blackwell device-ID ranges taken from NVIDIA's
 open-gpu-kernel-modules supported-GPU table (C<2900>-C<2FFF>: B200, GB200,
 GeForce RTX 50xx, RTX PRO Blackwell, GB10; plus B300 C<3182> and GB300
-C<31C2>/C<31C3>), or for an entry of the C<%NVIDIA_COMPUTE_DEVICE_IDS>
-allowlist that sets its C<open_kernel_module> flag. Both lists live in this
-module only, so the driver installer carries no second hardcoded device
-list. Returns false for C<undef>, a malformed ID, and every ID outside those
-ranges — Turing/Ampere/Ada/Hopper parts and any future generation keep the
-default proprietary C<-server> selection. The ranges only choose the driver
-variant; they never make a GPU compute-capable.
+C<31C2>/C<31C3>). Returns false for C<undef>, a malformed ID, and every ID
+outside those ranges — Turing/Ampere/Ada/Hopper parts and any future
+generation keep the default proprietary C<-server> selection. The ranges only
+choose the driver variant; they never make a GPU compute-capable.
+
+A wrapper: true exactly when
+L<Rex::GPU::NVIDIA::Requirement/for_device_id> gives C<kernel_module> C<open>.
+The device-ID ranges live in that class's
+L<generations|Rex::GPU::NVIDIA::Requirement/generations> table only, so the
+driver installer carries no second hardcoded device list.
 
 Not in C<@EXPORT> — this is a C<Rex::GPU::NVIDIA>-internal lookup, not a
 Rexfile-facing command.
@@ -262,15 +213,8 @@ Rexfile-facing command.
 
 sub open_kernel_module_required {
   my ($device_id) = @_;
-  return 0 unless defined $device_id;
-  my $entry = $NVIDIA_COMPUTE_DEVICE_IDS{lc $device_id};
-  return 1 if $entry && ref $entry eq 'HASH' && $entry->{open_kernel_module};
-  return 0 unless $device_id =~ /^[0-9a-f]{4}$/i;
-  my $id = hex $device_id;
-  for my $range (@NVIDIA_BLACKWELL_DEVICE_ID_RANGES) {
-    return 1 if $id >= $range->[0] && $id <= $range->[1];
-  }
-  return 0;
+  return Rex::GPU::NVIDIA::Requirement->for_device_id($device_id)->kernel_module eq 'open'
+    ? 1 : 0;
 }
 
 =method legacy_driver_requirement
@@ -301,19 +245,19 @@ C<supportedchips> README (driver 615.71.09). Like
 L</open_kernel_module_required> this only chooses the driver; it never makes a
 GPU compute-capable.
 
+A wrapper over L<Rex::GPU::NVIDIA::Requirement/for_device_id>: a hashref of
+its C<generation> and C<max_branch> when the requirement has a
+C<max_branch>, C<undef> otherwise.
+
 Not in C<@EXPORT> — a C<Rex::GPU::NVIDIA>-internal lookup.
 
 =cut
 
 sub legacy_driver_requirement {
   my ($device_id) = @_;
-  return unless defined $device_id && $device_id =~ /^[0-9a-f]{4}$/i;
-  my $id = hex $device_id;
-  for my $range (@NVIDIA_LEGACY_DEVICE_ID_RANGES) {
-    return { generation => $range->[2], max_branch => $range->[3] }
-      if $id >= $range->[0] && $id <= $range->[1];
-  }
-  return;
+  my $req = Rex::GPU::NVIDIA::Requirement->for_device_id($device_id);
+  return unless defined $req->max_branch;
+  return { generation => $req->generation, max_branch => $req->max_branch };
 }
 
 sub _parse_amd_line {
