@@ -1,0 +1,16 @@
+---
+class: standard
+completed: 2026-09-23T16:49:18Z
+created: 2026-09-23T02:57:32Z
+id: 22
+priority: low
+started: 2026-09-23T16:49:18Z
+status: done
+title: 'Ubuntu: neuestes -server-open kann auf aelteren Releases < 570 sein (zu alt
+  fuer Blackwell)'
+updated: 2026-09-23T16:49:18Z
+---
+
+Aus #16: _install_driver_debian (Ubuntu) nimmt das hoechste per apt-cache search gefundene -server-open. Auf aelteren Ubuntu-Releases kann das < 570 sein -> installiert als ii, Modul bindet nicht. 570-Fallback greift nur bei leerem Suchergebnis. Pruefen, welche Versionen jammy/noble anbieten; ggf. Mindestversion fuer Blackwell erzwingen und laut scheitern.
+
+Aufgegangen im Epic (Treiber-Anforderungsmodell), siehe dort: Ubuntu-Mindestbranch ist ein Fall des fehlenden Generation->Treiber-Modells.
