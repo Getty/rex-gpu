@@ -57,7 +57,13 @@ open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers ove
 
 ## The driver matrix — one dispatch, three families
 
-`install_driver` branches on `is_debian` / `is_redhat` / `is_suse`, else dies. Each
+`install_driver` asks the overridable `Rex::GPU::NVIDIA->setup_class_for_os` first:
+Debian/Ubuntu run through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
+`Setup::Apt` → `Setup::Debian` / `Setup::Ubuntu`, experimental, epic #25) with the fixed
+flow `already_installed → plan → prepare_host → prepare_source → install_packages →
+verify_packages → post_install`. `plan` is host-read-only; `run_cmd` / `pkg_cmd` /
+`file_cmd` are the only routes to the host. RHEL/SUSE still use the old
+`is_redhat` / `is_suse` branches until T3; anything else dies. Each
 family has a trap that is already solved in the code; do not "simplify" these away:
 
 - **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
@@ -93,6 +99,8 @@ directly, then verify with `dpkg -l | grep '^ii'` / `rpm -q`. **Not `pkg`.**
 initramfs regeneration routinely exit non-zero on success. `pkg` is fine only for
 inert helpers (`pciutils`, `curl`, `gnupg`, `epel-release`). Route a real driver package
 through `pkg` and every install "fails" on a working host.
+In the Setup classes the bypass lives in `Setup::Apt::install_packages`; `pkg_cmd` is for
+inert helpers only.
 
 Two more resilience rules baked into every apt path, both for **fresh-boot** Hetzner
 hosts where cloud-init/unattended-upgrades still hold the dpkg lock:
@@ -132,7 +140,7 @@ nouveau; without it the NVIDIA module can't bind. `verify_nvidia` (module loaded
 ## Housekeeping
 
 `$VERSION` is repeated in every module under `lib/` (`GPU.pm`, `Detect.pm`, `NVIDIA.pm`,
-`NVIDIA/Requirement.pm`, and each new Setup class) — bump them together
+`NVIDIA/Requirement.pm`, `NVIDIA/Setup.pm` and every `NVIDIA/Setup/*.pm`) — bump them together
 (`grep -rn 'our \$VERSION' lib/`). A change to what a Rexfile author sees (a new option, a
 detection outcome, a package choice) wants a `Changes` `{{$NEXT}}` entry naming the effect
 and its POD updated in the same edit. Perl house style and dist mechanics: skills

@@ -11,10 +11,9 @@ use Rex::Commands::Pkg;
 use Rex::Commands::Run;
 use Rex::Logger;
 
-# () — load only; Rex::GPU::Detect::open_kernel_module_required is called
-# fully-qualified below and is deliberately NOT in this module's own @EXPORT
-# (it is an internal lookup, not a Rexfile-facing command).
-use Rex::GPU::Detect ();
+use Rex::GPU::NVIDIA::Setup;
+use Rex::GPU::NVIDIA::Setup::Debian;
+use Rex::GPU::NVIDIA::Setup::Ubuntu;
 
 require Rex::Exporter;
 use base qw(Rex::Exporter);
@@ -132,50 +131,48 @@ selection.
 sub install_driver {
   my (%opts) = @_;
 
-  # Idempotency short-circuit (distro-neutral, BEFORE per-distro package
-  # selection): if a working NVIDIA driver is already loaded and functional, do
-  # NOT install a second driver source. A host provisioned via the NVIDIA CUDA
-  # package repo (cuda-drivers / unversioned nvidia-driver userspace), or a
-  # re-run of gpu_setup, already has the module bound; the per-distro
-  # auto-selection would otherwise pick a DIFFERENT (possibly lower) version
-  # whose versioned libs Conflict with the installed userspace — apt/dnf/zypper
-  # then refuse and the install-verify seam dies. nvidia-smi -L lists a "GPU N:"
-  # device only when the module is loaded and functional, so it is the safe,
-  # OS-neutral signal. nouveau is already displaced by the loaded module, so the
-  # blacklist and reboot are skipped too — a clean no-op on such a host.
-  my $smi = run "nvidia-smi -L 2>&1", auto_die => 0;
-  chomp $smi if defined $smi;
-  if (_nvidia_driver_present($smi)) {
-    Rex::Logger::info("NVIDIA driver already present and working — skipping driver install ($smi)");
-    return;
-  }
-
-  # Kepler or older (karr #26): no driver newer than the EOL 470 branch
-  # supports it. Die here — after the short-circuit above, so a host whose
-  # operator installed 470 by hand still passes, and before anything on the
-  # host is changed, on every distro.
-  _reject_unsupported_legacy_gpu($opts{gpu});
-
-  my $os = operating_system();
-  my $running_kernel = run "uname -r";
-  chomp $running_kernel;
-
-  Rex::Logger::info("Installing NVIDIA drivers on $os (kernel $running_kernel)");
-
-  if (is_debian()) {
-    _install_driver_debian($os, $running_kernel, $opts{gpu});
-  }
-  elsif (is_redhat()) {
-    _install_driver_redhat($os, $running_kernel, $opts{gpu});
-  }
-  elsif (is_suse()) {
-    _install_driver_suse($os, $running_kernel, $opts{gpu});
+  # Debian and Ubuntu run through their Setup class (epic karr #25, T2): the
+  # already-installed short-circuit, the Kepler rejection, package selection,
+  # install, verification and the nouveau blacklist are its steps. RHEL and
+  # openSUSE still run the code below until they move too (T3).
+  my $setup_class = Rex::GPU::NVIDIA->setup_class_for_os;
+  if ($setup_class) {
+    return unless $setup_class->new(gpu => $opts{gpu})->install;
   }
   else {
-    die "Unsupported OS for NVIDIA driver installation: $os\n";
-  }
+    # Idempotency short-circuit (distro-neutral, BEFORE per-distro package
+    # selection): if a working NVIDIA driver is already loaded and functional,
+    # do NOT install a second driver source — see
+    # Rex::GPU::NVIDIA::Setup->already_installed.
+    my $smi = run "nvidia-smi -L 2>&1", auto_die => 0;
+    chomp $smi if defined $smi;
+    if (_nvidia_driver_present($smi)) {
+      Rex::Logger::info("NVIDIA driver already present and working — skipping driver install ($smi)");
+      return;
+    }
 
-  _blacklist_nouveau();
+    # Kepler or older (karr #26): die after the short-circuit above and
+    # before anything on the host is changed.
+    _reject_unsupported_legacy_gpu($opts{gpu});
+
+    my $os = operating_system();
+    my $running_kernel = run "uname -r";
+    chomp $running_kernel;
+
+    Rex::Logger::info("Installing NVIDIA drivers on $os (kernel $running_kernel)");
+
+    if (is_redhat()) {
+      _install_driver_redhat($os, $running_kernel, $opts{gpu});
+    }
+    elsif (is_suse()) {
+      _install_driver_suse($os, $running_kernel, $opts{gpu});
+    }
+    else {
+      die "Unsupported OS for NVIDIA driver installation: $os\n";
+    }
+
+    _blacklist_nouveau();
+  }
 
   if ($opts{reboot}) {
     _reboot_and_wait();
@@ -189,51 +186,46 @@ sub install_driver {
   Rex::Logger::info("NVIDIA driver installation complete");
 }
 
-# Pure predicate for the install_driver idempotency short-circuit: given the
-# output of `nvidia-smi -L`, is a working NVIDIA driver already loaded? Only a
-# functional, module-bound driver lists a "GPU N:" device line; every failure
-# form (NVML init error, "No devices were found", "command not found") does not
-# match. Same signal verify_nvidia() uses to confirm nvidia-smi works. Pure
-# (regex only, no run/dpkg) so it is unit-testable offline.
+=method setup_class_for_os
+
+  my $class = Rex::GPU::NVIDIA->setup_class_for_os;
+
+B<Experimental.> The L<Rex::GPU::NVIDIA::Setup> class L</install_driver> uses
+on this host: L<Rex::GPU::NVIDIA::Setup::Ubuntu> on Ubuntu,
+L<Rex::GPU::NVIDIA::Setup::Debian> on every other Debian-family host, and
+C<undef> elsewhere (RHEL and openSUSE are still installed without a Setup
+class). There is no option yet to choose a class of your own.
+
+=cut
+
+# Ubuntu is recognised by its OS name exactly as the old $os eq 'Ubuntu'
+# branch of install_driver did; every other is_debian host (Debian,
+# derivatives) gets the Debian class (epic karr #25; user selection is T5).
+sub setup_class_for_os {
+  my ( $class ) = @_;
+  return unless is_debian();
+  return operating_system() eq 'Ubuntu'
+    ? 'Rex::GPU::NVIDIA::Setup::Ubuntu'
+    : 'Rex::GPU::NVIDIA::Setup::Debian';
+}
+
+# The helpers below moved into the Setup classes (karr #31). The old private
+# names stay as thin wrappers: the RHEL/SUSE paths and t/ call them.
+
 sub _nvidia_driver_present {
-  my ($smi) = @_;
-  return 0 unless defined $smi;
-  return $smi =~ /GPU \d+:/ ? 1 : 0;
+  Rex::GPU::NVIDIA::Setup->_driver_present(@_);
 }
 
-# Pure (karr #26): the pre-Turing requirement for the detected GPU hashref, or
-# undef — see Rex::GPU::Detect::legacy_driver_requirement, which owns the
-# device-ID ranges. No GPU, a non-hashref, no device_id, or any Turing-or-later
-# / unknown ID => undef => the default selection on every distro, unchanged.
 sub _legacy_driver_requirement {
-  my ($gpu) = @_;
-  return unless $gpu && ref $gpu eq 'HASH';
-  return Rex::GPU::Detect::legacy_driver_requirement($gpu->{device_id});
+  Rex::GPU::NVIDIA::Setup->_legacy_requirement(@_);
 }
 
-# Pure (karr #26): die for a GPU no installable branch supports — Kepler or
-# older, max_branch 470. Maintainer decision (epic karr #25): reject loudly
-# instead of installing the EOL 470 driver. Returns quietly for every other
-# GPU, Maxwell/Pascal/Volta (580) included.
 sub _reject_unsupported_legacy_gpu {
-  my ($gpu) = @_;
-  my $legacy = _legacy_driver_requirement($gpu);
-  return unless $legacy && $legacy->{max_branch} < 580;
-  die "NVIDIA GPU '" . ($gpu->{name} // 'unknown') . "' (10de:$gpu->{device_id}) is "
-    . "$legacy->{generation} silicon: no driver newer than the end-of-life "
-    . "$legacy->{max_branch} branch supports it, and Rex::GPU does not install "
-    . "that. Nothing was changed on the host. Install the driver yourself; once "
-    . "`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
+  Rex::GPU::NVIDIA::Setup->_reject_unsupported_gpu(@_);
 }
 
-# Pure (karr #26): does `apt-cache policy PKG` output (LC_ALL=C) show an
-# installation candidate? An unknown package prints nothing; a known one with
-# nothing installable prints "Candidate: (none)".
 sub _apt_candidate_present {
-  my ($policy) = @_;
-  return 0 unless defined $policy;
-  my ($candidate) = $policy =~ /^\s*Candidate:\s*(\S+)/m;
-  return (defined $candidate && $candidate ne '(none)') ? 1 : 0;
+  Rex::GPU::NVIDIA::Setup::Apt->_apt_candidate_present(@_);
 }
 
 # Pure (karr #26): is this `rpm -q --qf '%{VERSION}'` output a version of
@@ -432,447 +424,30 @@ sub verify_nvidia {
 }
 
 # ============================================================
-#  Debian / Ubuntu
+#  Debian / Ubuntu — Rex::GPU::NVIDIA::Setup::Debian / ::Ubuntu
 # ============================================================
 
-sub _install_driver_debian {
-  my ($os, $running_kernel, $gpu) = @_;
+# Thin wrappers over the pure helpers that moved into the Setup classes
+# (karr #31); t/ calls them by these names.
 
-  my $arch = run "dpkg --print-architecture", auto_die => 0;
-  chomp $arch;
-
-  # Debian + Blackwell (karr #18): no Debian-packaged driver supports Blackwell
-  # (bookworm 535, trixie/sid 550; Blackwell needs >= 570 AND the open kernel
-  # module), so this install comes from NVIDIA's CUDA apt repo instead. Decided
-  # BEFORE anything is written to the host: an unsupported Debian release or
-  # architecture dies here, untouched. Undef for every non-Blackwell GPU (and
-  # always on Ubuntu) — the Debian non-free path below is then unchanged; the
-  # release is only read (one more remote file read) when it can matter.
-  my $cuda_repo = ($os ne 'Ubuntu' && _ubuntu_needs_open_kernel_module($gpu))
-    ? _debian_nvidia_cuda_repo($gpu, Rex::Commands::Gather::operating_system_release(), $arch)
-    : undef;
-
-  # Ensure non-free repos are enabled (Debian only, Ubuntu has restricted by
-  # default). Not on the CUDA-repo path: its package set resolves from NVIDIA's
-  # repo plus Debian main alone, and Debian's own nvidia packages must not be
-  # mixed in.
-  if ($os ne 'Ubuntu' && !$cuda_repo) {
-    _enable_debian_nonfree();
-  }
-
-  my @packages = ("linux-headers-$running_kernel");
-  my $ubuntu_legacy_pkg;
-
-  if ($os eq 'Ubuntu') {
-    push @packages, "linux-headers-generic";
-    # Ubuntu: use server variant for K8s, auto-detect latest available version.
-    # Do NOT add nvidia-smi: on Ubuntu 24.04 it is a virtual package with no
-    # installation candidate — it is pulled in automatically by the driver metapackage.
-    #
-    # Blackwell-architecture silicon (B200/GB200, GeForce RTX 50xx, RTX PRO
-    # Blackwell, the GB10 / DGX Spark) ships with NO proprietary kernel module
-    # at all — only the -open variant binds, on x86_64 as on arm64 (karr
-    # #14/#15/#16). _ubuntu_needs_open_kernel_module keys on the detected PCI
-    # device ID only; for any non-Blackwell GPU (RTX 4000 Ada et al.), or no
-    # GPU passed, it returns false and this branch behaves exactly as before.
-    #
-    # Pre-Turing (Maxwell/Pascal/Volta, e.g. V100) (karr #26): the newest
-    # -server is a branch that no longer supports them, so pin the last one
-    # that does, proprietary (the open module never binds on them). Its
-    # candidate is checked after apt-get update below — fail loud, never a
-    # silent fallback to another branch.
-    $ubuntu_legacy_pkg = _ubuntu_legacy_driver_package($gpu);
-    if ($ubuntu_legacy_pkg) {
-      Rex::Logger::info("  Pre-Turing GPU — pinning the proprietary $ubuntu_legacy_pkg");
-      push @packages, $ubuntu_legacy_pkg;
-    }
-    else {
-      my $open = _ubuntu_needs_open_kernel_module($gpu);
-      if ($open) {
-        Rex::Logger::info("  Blackwell-class GPU on $arch — selecting the open-kernel-module driver");
-      }
-      my $search_pattern = $open
-        ? '^nvidia-driver-[0-9].*-server-open$'
-        : '^nvidia-driver-[0-9].*-server$';
-      my $latest = run "apt-cache search '$search_pattern' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
-        auto_die => 0;
-      chomp $latest if $latest;
-      unless ($open) {
-        # Filter out *-open variants from auto-detect (use regular server driver)
-        $latest = undef if $latest && $latest =~ /-open$/;
-      }
-      push @packages, ($latest || ($open ? "nvidia-driver-570-server-open" : "nvidia-driver-570-server"));
-    }
-  }
-  elsif ($cuda_repo) {
-    # Debian + Blackwell: NVIDIA's compute-only (headless) open-module set
-    # from the CUDA repo. nvidia-driver-cuda provides nvidia-smi itself.
-    Rex::Logger::info("  Blackwell-class GPU on Debian — using NVIDIA's CUDA repo "
-      . "($cuda_repo->{distro}/$cuda_repo->{arch}), open kernel module");
-    push @packages, @{ $cuda_repo->{packages} };
-  }
-  else {
-    # Debian: just the running kernel's headers (sufficient for DKMS) + driver
-    # Do NOT install linux-headers-$arch meta-package — it pulls in a new kernel
-    # image whose post-install scripts (grub, initramfs) can return non-zero
-    push @packages, "nvidia-driver", "nvidia-smi";
-  }
-
-  Rex::Logger::info("  Installing: " . join(", ", @packages));
-  # Stop automatic apt services before installing — on a fresh Hetzner boot,
-  # unattended-upgrades and apt-daily hold /var/lib/dpkg/lock-frontend, which
-  # causes apt-get to fail immediately even with DPkg::Lock::Timeout set.
-  run "systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true",
-    auto_die => 0;
-  _add_nvidia_cuda_apt_repo($cuda_repo) if $cuda_repo;
-  run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
-
-  if ($ubuntu_legacy_pkg) {
-    my $policy = run "LC_ALL=C apt-cache policy $ubuntu_legacy_pkg 2>/dev/null", auto_die => 0;
-    die "$ubuntu_legacy_pkg has no installation candidate on this $os host — it is the "
-      . "newest driver that supports this pre-Turing GPU and no other branch is "
-      . "substituted; no driver was installed\n"
-      unless _apt_candidate_present($policy);
-  }
-
-  # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
-  # post-install scripts (DKMS build, grub update, initramfs). Verify via dpkg -l.
-  my $pkg_str = join(" ", @packages);
-  run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y $pkg_str", auto_die => 0;
-
-  # On Ubuntu the driver package is e.g. nvidia-driver-590-server (or, for
-  # Blackwell-architecture GPUs, nvidia-driver-590-server-open); on Debian it
-  # is nvidia-driver. Check whichever name we actually installed. On the
-  # Debian CUDA-repo path, NOT nvidia-driver: that name exists in Debian
-  # non-free too, so a leftover Debian 535/550 install would pass it. Both
-  # packages of the open set are checked instead — nvidia-kernel-open-dkms
-  # exists only in NVIDIA's repo. A DKMS build that fails in postinst leaves
-  # the package half-configured (not ii), so this still dies on it.
-  my @verify = $cuda_repo              ? @{ $cuda_repo->{packages} }
-             : ($os eq 'Ubuntu')       ? ($packages[-1])
-             :                           ('nvidia-driver');
-  for my $driver_pkg (@verify) {
-    my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
-    die "$driver_pkg not installed after apt-get install — check apt output\n"
-      if $? != 0;
-  }
-}
-
-# Pure selection (karr #18): should this Debian (non-Ubuntu) install come from
-# NVIDIA's CUDA apt repo instead of Debian non-free, and with what parameters?
-#
-#   $gpu     — detected GPU hashref (Rex::GPU::Detect shape), may be undef
-#   $release — operating_system_release(): /etc/debian_version, e.g. "13.1",
-#              "12.11", "trixie/sid" (NOT operating_system_version(), which
-#              strips the dots: "12.11" -> "1211")
-#   $arch    — `dpkg --print-architecture`: amd64 / arm64
-#
-# Returns undef unless the GPU needs the open kernel module (Blackwell, see
-# Rex::GPU::Detect::open_kernel_module_required; the "_ubuntu_" predicate is
-# distro-neutral despite its name) — the caller then keeps the Debian
-# non-free path, unchanged. Otherwise returns { distro, arch, keyring_url,
-# packages }.
-#
-# Dies — fail loud, before any change on the host — for a Blackwell GPU on a
-# Debian release NVIDIA publishes no repo for (only debian12/debian13 exist;
-# 11, 14, testing/sid "forky/sid", a derivative's own version) or on an
-# architecture other than amd64/arm64. Falling back to Debian non-free there
-# would install a driver that dpkg reports as ii but whose module never binds
-# — exactly the bug this path fixes; guessing a neighbouring repo would mix
-# a foreign distro's libc/dkms into the host.
 sub _debian_nvidia_cuda_repo {
-  my ($gpu, $release, $arch) = @_;
-  return unless _ubuntu_needs_open_kernel_module($gpu);
-
-  my $major = _os_major_version($release // '');
-  die "Blackwell-class NVIDIA GPU on Debian release '" . ($release // '') . "': "
-    . "Debian's own nvidia packages cannot drive it and NVIDIA's CUDA repo only "
-    . "covers Debian 12 and 13 — install the driver manually\n"
-    unless $major == 12 || $major == 13;
-
-  $arch //= '';
-  die "Blackwell-class NVIDIA GPU on Debian architecture '$arch': NVIDIA's CUDA "
-    . "repo only covers amd64 and arm64\n"
-    unless $arch eq 'amd64' || $arch eq 'arm64';
-
-  my $distro    = "debian$major";
-  my $repo_arch = _cuda_repo_arch($arch);   # arm64 -> sbsa, amd64 -> x86_64
-  return {
-    distro      => $distro,
-    arch        => $repo_arch,
-    keyring_url => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/$repo_arch/cuda-keyring_1.1-1_all.deb",
-    packages    => [ 'nvidia-driver-cuda', 'nvidia-kernel-open-dkms' ]
-  };
+  Rex::GPU::NVIDIA::Setup::Debian->nvidia_cuda_repo(@_);
 }
 
-# Register NVIDIA's CUDA apt repo via its cuda-keyring package (installs the
-# signing key and the sources.list.d entry). curl is an inert helper, so pkg
-# is fine for it; the keyring itself goes through apt-get (lock timeout) like
-# every other package here. Dies if the keyring did not end up installed —
-# without it the following apt-get install can only fail with a misleading
-# "unable to locate package".
-sub _add_nvidia_cuda_apt_repo {
-  my ($repo) = @_;
-  Rex::Logger::info("  Adding NVIDIA CUDA repo ($repo->{distro}/$repo->{arch})...");
-  pkg ["curl"], ensure => "present";
-  run q{t=$(mktemp -d) && curl -fsSL -o "$t/cuda-keyring.deb" }
-    . $repo->{keyring_url}
-    . q{ && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y "$t/cuda-keyring.deb"; rm -rf "$t"},
-    auto_die => 0;
-  my $check = run "dpkg -l cuda-keyring 2>/dev/null | grep -q '^ii'", auto_die => 0;
-  die "cuda-keyring not installed — cannot add NVIDIA's CUDA repo ($repo->{keyring_url})\n"
-    if $? != 0;
-}
-
-# Pure predicate (karr #15, generalised in #16): given the detected GPU
-# hashref (Rex::GPU::Detect shape: name/device_id/...), should Ubuntu driver
-# selection pick the -open package variant instead of the default -server
-# one? True only for a device ID Rex::GPU::Detect::open_kernel_module_required
-# marks open-only (Blackwell architecture — no proprietary kernel module
-# exists for it). No CPU-architecture gate: an RTX 50xx or B200 on x86_64
-# needs -open exactly like the GB10 on arm64. The device-ID judgement is NOT
-# duplicated here — it lives in Detect.pm only. No GPU, a non-hashref, a
-# missing device_id or any non-Blackwell ID => false => -server as before.
-#
-# Pure (string/hash access only, no run/dpkg) so it is unit-testable offline,
-# like _nvidia_driver_present / _cuda_repo_arch.
 sub _ubuntu_needs_open_kernel_module {
-  my ($gpu) = @_;
-  return 0 unless $gpu && ref $gpu eq 'HASH';
-  return Rex::GPU::Detect::open_kernel_module_required($gpu->{device_id});
+  Rex::GPU::NVIDIA::Setup->_needs_open_kernel_module(@_);
 }
 
-# Pure (karr #26): the pinned Ubuntu driver package for a pre-Turing GPU —
-# "nvidia-driver-580-server" (proprietary: the -open variant does not support
-# these chips) — or undef for every other GPU, which keeps the newest -server
-# (or -server-open for Blackwell). A Kepler-or-older GPU never gets here:
-# install_driver rejected it already.
 sub _ubuntu_legacy_driver_package {
-  my ($gpu) = @_;
-  my $legacy = _legacy_driver_requirement($gpu);
-  return unless $legacy;
-  return "nvidia-driver-$legacy->{max_branch}-server";
+  Rex::GPU::NVIDIA::Setup::Ubuntu->legacy_driver_package(@_);
 }
 
-sub _enable_debian_nonfree {
-  # Both formats may be present on one host (a leftover or comment-only
-  # sources.list next to deb822 debian.sources), so both are handled, classic
-  # first.
-  my $classic = _enable_debian_nonfree_sources_list();
-  my $deb822  = _enable_debian_nonfree_deb822();
-  Rex::Logger::info("  No Debian archive entry recognised in /etc/apt/sources.list or "
-    . "/etc/apt/sources.list.d/*.sources — non-free was not enabled, Debian's "
-    . "nvidia-driver may have no installation candidate", 'warn')
-    unless $classic || $deb822;
-}
-
-# Classic one-line format, /etc/apt/sources.list (karr #40): read with cat,
-# the edit computed in Perl (_sources_list_enable_nonfree, pure) and a changed
-# file written back with `file`, like the deb822 path below. Returns the
-# number of Debian archive "deb" lines recognised (edited or already
-# complete); 0 for a missing, empty or comment-only file.
-sub _enable_debian_nonfree_sources_list {
-  my $path    = '/etc/apt/sources.list';
-  my $content = run "cat $path 2>/dev/null", auto_die => 0;
-  return 0 if $? != 0 || !defined $content || $content eq '';
-  my ($new, $matched) = _sources_list_enable_nonfree($content);
-  if (defined $new) {
-    Rex::Logger::info("  Enabling non-free repos for NVIDIA drivers ($path)");
-    file $path, content => $new, mode => 644;
-  }
-  return $matched;
-}
-
-# Pure (karr #40): add the components contrib non-free non-free-firmware —
-# only those missing, after the last component — to every one-line "deb"
-# entry that is a Debian archive. $content is sources.list as `run "cat ..."`
-# returns it (last newline chomped). Returns ($new_content, $matched) exactly
-# like _deb822_enable_nonfree: $new_content undef when nothing changed
-# (idempotent), $matched the Debian archive lines seen. Every other line —
-# comments, deb-src, third-party entries, unparseable lines — is kept byte for
-# byte; an edited line keeps its options, spacing and trailing # comment.
-#
-# A line is a Debian archive — and edited — only if ALL of:
-#   * it is an active "deb" line (not "deb-src", not commented out), in the
-#     form  deb [ options ] URI suite component...  (options optional);
-#   * its components include "main";
-#   * its URI is Debian's (_debian_archive_uri: the same rules as deb822);
-#   * a signed-by= option, if present, names only debian-archive-* keyrings
-#     (_debian_archive_keyring).
-# The Debian 12 installer writes "deb ... bookworm main non-free-firmware";
-# the check this replaces (the file mentions /non-free/ anywhere → skip) took
-# non-free-firmware for non-free and never enabled non-free there.
 sub _sources_list_enable_nonfree {
-  my ($content) = @_;
-  return (undef, 0) unless defined $content && length $content;
-
-  my @lines = split /^/m, $content;
-  $lines[-1] .= "\n" unless $lines[-1] =~ /\n\z/;
-
-  my ($changed, $matched) = (0, 0);
-  for my $line (@lines) {
-    my ($body, $eol) = $line =~ /\A(.*?)(\r?\n)\z/s;
-    next unless $body =~ /\A[ \t]*deb[ \t]+
-      (?:\[([^\]]*)\][ \t]*)?            # 1: options
-      (\S+)[ \t]+(\S+)                   # 2: URI  3: suite
-      ((?:[ \t]+[^\s\#]+)*)              # 4: components
-      ([ \t]*(?:\#.*)?)\z                 # 5: trailing space, comment
-    /x;
-    my ($opts, $uri, $comps, $rest) = ($1 // '', $2, $4, $5);
-    my @comps = split ' ', $comps;
-    next unless grep { $_ eq 'main' } @comps;
-    next unless _debian_archive_uri($uri);
-    my @signed_by = map { /^signed-by=(.*)$/i ? ($1) : () } split ' ', $opts;
-    next if @signed_by && !_debian_archive_keyring(map { split /,/ } @signed_by);
-    $matched++;
-
-    my %have    = map { $_ => 1 } @comps;
-    my @missing = grep { !$have{$_} } qw( contrib non-free non-free-firmware );
-    next unless @missing;
-    my $head = substr($body, 0, length($body) - length($rest));
-    $line = $head.' '.join(' ', @missing).$rest.$eol;
-    $changed++;
-  }
-  return ($changed ? join('', @lines) : undef, $matched);
+  Rex::GPU::NVIDIA::Setup::Debian->_sources_list_enable_nonfree(@_);
 }
 
-# deb822 format (karr #36): /etc/apt/sources.list.d/*.sources, the default on
-# Debian 13 and on Debian's cloud images (debian.sources). Files are read with
-# cat, the edit is computed in Perl (_deb822_enable_nonfree, pure) and a
-# changed file is written back with `file` — exec-channel only under
-# Rex::LibSSH, no SFTP. Only names apt itself reads are considered (letters,
-# digits, _ . - ending in .sources), which also keeps them shell-safe.
-# Returns the number of Debian archive stanzas recognised (edited or already
-# complete).
-sub _enable_debian_nonfree_deb822 {
-  my $dir = '/etc/apt/sources.list.d';
-  my @names = grep { /^[A-Za-z0-9_.-]+\.sources$/ }
-    split /\n/, (run "ls -1 $dir/ 2>/dev/null", auto_die => 0) // '';
-
-  my $recognised = 0;
-  for my $name (@names) {
-    my $path    = "$dir/$name";
-    my $content = run "cat $path 2>/dev/null", auto_die => 0;
-    next if $? != 0 || !defined $content || $content eq '';
-    my ($new, $matched) = _deb822_enable_nonfree($content);
-    $recognised += $matched;
-    next unless defined $new;
-    Rex::Logger::info("  Enabling non-free repos for NVIDIA drivers ($path)");
-    file $path, content => $new, mode => 644;
-  }
-  return $recognised;
-}
-
-# Pure (karr #36): add the components contrib non-free non-free-firmware —
-# only those missing — to the Components: field of every deb822 stanza that
-# is a Debian archive. $content is a .sources file as `run "cat ..."` returns
-# it (last newline chomped). Returns ($new_content, $matched) — $new_content
-# undef when nothing changed (idempotent: a second pass returns undef),
-# $matched the number of Debian archive stanzas seen, edited or not. Every
-# line not rewritten is kept byte for byte, comments included.
-#
-# A stanza is a Debian archive — and edited — only if ALL of:
-#   * Types: lists "deb" (deb-src-only stanzas are left, like the classic
-#     sed that only touches "deb " lines), and Enabled: is not "no";
-#   * Components: lists "main" (third-party repos rarely do, Debian always);
-#   * every URIs: entry is Debian's: a host *.debian.org (deb., security.,
-#     ftp.xx., ...), Hetzner's Debian mirror (mirror.hetzner.com|de under
-#     /debian/), or the mirror+file:/etc/apt/mirrors/debian[-security].list
-#     indirection of Debian's cloud images. A stanza mixing in any other URI
-#     is left alone;
-#   * Signed-By:, if present, names a debian-archive-* keyring file under
-#     /usr/share/keyrings (an inline key or any other keyring means a
-#     third-party repo).
-# Suites are deliberately not matched against codenames: the URI and key
-# already pin the archive, and a codename list would miss the next release.
-# An unknown mirror (apt-cacher, a corporate mirror) is therefore NOT edited:
-# the caller then warns, and the driver install dies at its dpkg check as
-# before, rather than this editing a repository it cannot identify.
 sub _deb822_enable_nonfree {
-  my ($content) = @_;
-  return (undef, 0) unless defined $content && length $content;
-
-  my @lines = split /^/m, $content;
-  $lines[-1] .= "\n" unless $lines[-1] =~ /\n\z/;
-
-  # Stanzas: runs of lines separated by blank lines. Per stanza, per field
-  # (lower-cased name): its value and the index of its last line.
-  my (@stanzas, $cur, $field);
-  for my $i (0 .. $#lines) {
-    my $l = $lines[$i];
-    if ($l =~ /^\s*$/) { undef $cur; undef $field; next }
-    unless ($cur) { $cur = {}; push @stanzas, $cur }
-    next if $l =~ /^#/;
-    if ($l =~ /^([A-Za-z0-9][A-Za-z0-9_-]*):[ \t]*(.*?)\s*$/) {
-      $field = lc $1;
-      $cur->{$field} = { value => $2, last => $i };
-    }
-    elsif ($field && $l =~ /^[ \t]+(.*?)\s*$/) {
-      $cur->{$field}{value} .= ' '.$1;
-      $cur->{$field}{last}   = $i;
-    }
-  }
-
-  my ($changed, $matched) = (0, 0);
-  for my $s (@stanzas) {
-    next unless _deb822_is_debian_archive($s);
-    $matched++;
-    my %have    = map { $_ => 1 } split ' ', $s->{components}{value};
-    my @missing = grep { !$have{$_} } qw( contrib non-free non-free-firmware );
-    next unless @missing;
-    my $i = $s->{components}{last};
-    $lines[$i] =~ s/[ \t]*(\r?\n)\z/' '.join(' ', @missing).$1/e;
-    $changed++;
-  }
-  return ($changed ? join('', @lines) : undef, $matched);
-}
-
-sub _deb822_is_debian_archive {
-  my ($s) = @_;
-  my $tokens = sub { my $f = $s->{$_[0]}; $f ? split(' ', $f->{value}) : () };
-
-  return 0 unless grep { $_ eq 'deb' } $tokens->('types');
-  return 0 if $s->{enabled} && lc $s->{enabled}{value} eq 'no';
-  return 0 unless grep { $_ eq 'main' } $tokens->('components');
-
-  my @uris = $tokens->('uris');
-  return 0 unless @uris;
-  for my $uri (@uris) {
-    return 0 unless _debian_archive_uri($uri);
-  }
-
-  return 0 if $s->{'signed-by'}
-    && !_debian_archive_keyring(split /[\s,]+/, $s->{'signed-by'}{value});
-  return 1;
-}
-
-# Shared by both formats (karr #36, #40): is $uri one of Debian's archives —
-# a host *.debian.org (deb., security., ftp.xx., ...), Hetzner's Debian mirror
-# (mirror.hetzner.com|de under /debian/), or the mirror+file:
-# /etc/apt/mirrors/debian[-security].list indirection of Debian's cloud
-# images? An unknown mirror (apt-cacher, a corporate or university mirror)
-# is not.
-sub _debian_archive_uri {
-  my ($uri) = @_;
-  return 1 if $uri =~ m{^mirror\+file:(?://)?/etc/apt/mirrors/debian(?:-security)?\.list$};
-  return 0 unless $uri =~ m{^(?:[a-z0-9]+\+)?(?:https?|ftp)://([^/:\s]+)(?::\d+)?(/\S*)?$}i;
-  my ($host, $path) = (lc $1, $2 // '/');
-  return 1 if $host eq 'debian.org' || $host =~ /\.debian\.org$/;
-  return 1 if $host =~ /^mirror\.hetzner\.(?:com|de)$/ && $path =~ m{^/debian/};
-  return 0;
-}
-
-# Shared by both formats: true if a Signed-By / signed-by= value names at
-# least one key and every key is a debian-archive-* keyring file under
-# /usr/share/keyrings (an inline key or any other keyring means a third-party
-# repo).
-sub _debian_archive_keyring {
-  my @keys = grep { length } @_;
-  return 0 unless @keys;
-  for my $key (@keys) {
-    return 0 unless $key =~ m{^/usr/share/keyrings/debian-archive-[A-Za-z0-9_.-]+\.(?:gpg|pgp|asc)$};
-  }
-  return 1;
+  Rex::GPU::NVIDIA::Setup::Debian->_deb822_enable_nonfree(@_);
 }
 
 # ============================================================
@@ -1010,21 +585,16 @@ sub _rhel_legacy_driver_plan {
 # libnvidia-container toolkit repo uses "aarch64" for the same machine, so do
 # NOT reuse this helper for the toolkit path.
 sub _cuda_repo_arch {
-  my ($machine) = @_;
-  $machine //= '';
-  return 'sbsa' if $machine eq 'aarch64' || $machine eq 'arm64';
-  return 'x86_64';
+  Rex::GPU::NVIDIA::Setup->_cuda_repo_arch(@_);
 }
 
 sub _os_major_version {
-  # Rex::Commands::Gather::operating_system_version() strips dots,
-  # so "10.1" becomes "101". Use the raw operating_system_release() string
-  # and extract the major version ourselves. An explicit $release may be
-  # passed so callers stay pure and unit-testable.
+  # Rex::Commands::Gather::operating_system_version() strips dots, so "10.1"
+  # becomes "101": the raw operating_system_release() string is read instead.
+  # An explicit $release may be passed so callers stay pure and unit-testable.
   my ($release) = @_;
   $release //= Rex::Commands::Gather::operating_system_release();
-  my ($major) = $release =~ /^(\d+)/;
-  return ($major // 0) + 0;
+  return Rex::GPU::NVIDIA::Setup->_major_version($release);
 }
 
 # ============================================================
@@ -1604,6 +1174,11 @@ C<[signed-by=...]> (if set) names only C<debian-archive-*> keyrings. Third-party
 sources and unknown mirrors are left untouched, and a file with nothing to
 add is not rewritten; if no Debian archive entry is recognised in either
 format, a warning is logged.
+
+On Debian and Ubuntu the install is done by
+L<Rex::GPU::NVIDIA::Setup::Debian> and L<Rex::GPU::NVIDIA::Setup::Ubuntu>
+(experimental classes, see L<Rex::GPU::NVIDIA::Setup>); the steps and
+commands are the ones described here.
 
 The package choice also depends on the GPU generation, read from the PCI
 device ID of the GPU passed as C<gpu> to L</install_driver>
