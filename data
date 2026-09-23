@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T02:22:08Z
+claimed_by: claude
+class: standard
+completed: 2026-09-23T02:22:08Z
+created: 2026-09-23T02:21:08Z
+id: 20
+priority: high
+started: 2026-09-23T02:21:23Z
+status: done
+tags:
+- tooling
+- dzil
+- changes
+title: 'dzil build/test schlaegt seit k13 fehl: woertliches {{ template "base" . }}
+  im Changes-Eintrag bricht Bundle-Templating'
+updated: 2026-09-23T02:22:12Z
+---
+
+Reproduzierbar auf main (und jedem Branch, der main enthaelt) seit Commit 325fe1a (k13): 'dzil build' und 'dzil test' brechen mit 'syntax error at template line 7, near "#line 7 template template \"base\""' ab. Root Cause verifiziert: Changes-Zeile 7 (im k13-Bulletpoint) enthaelt woertlich das Go-html/template-Snippet `{{ template "base" . }}` als Beispieltext in der Prosa. Irgendein Plugin in der @Author::GETTY-Bundle-Kette (Kandidaten: PodWeaver, NextRelease/{{$NEXT}}-Expansion, oder GitHub::CreateRelease -- dessen notes_from=ChangeLog laut skill getty-perl-release-author-getty die {{$NEXT}}-Sektion einliest) parst die Changes-{{$NEXT}}-Sektion durch etwas, das "template"/"base" als eigene Direktive interpretiert -- die exakte Uebereinstimmung mit der echten Datei-Zeilennummer 7 wurde durch gezieltes Ersetzen des Literals und erneutes 'dzil build' bestaetigt (Fehler verschwindet vollstaendig, Build laeuft durch). Betrifft NICHT lib/-Verhalten, blockiert aber die in CLAUDE.md geforderte 'dzil build'/'dzil test'-Verifikation fuer JEDE Aenderung an diesem Repo, inkl. rex-gpu-release-checker-Audits. Fix: Formulierung in Changes so aendern, dass keine woertlichen {{ }}-Template-Delimiter mehr vorkommen (Wording-Fix, kein Verhalten betroffen -- vom Orchestrator direkt gemacht, keine Delegation noetig). Empfehlung fuer die Zukunft: Changes-Prosa sollte Template-Syntax-Beispiele (Go, TT, Mustache, ...) nie woertlich mit {{ }} zitieren, sondern umschreiben oder in andere Klammerung setzen.
+
+Gefixt direkt auf main, Commit 2a154b7: Changes-Zeile umformuliert, keine woertlichen {{ }}-Delimiter mehr. dzil build + dzil test beide gruen verifiziert (vorher: syntax error at template line 7; danach: BUILD SUCCESSFUL, 10/40 Tests gruen). Wording-only, kein Verhalten betroffen -- direkt vom Orchestrator gemacht (Changes zaehlt nicht als behavior-relevant).
