@@ -40,8 +40,18 @@ my $AMD_VENDOR_RE = qr/\[1002:[0-9a-f]{4}\]/i;
 # always present in lspci output regardless of pci.ids freshness. Add ONLY
 # verified datacenter/compute IDs here; this does not change the unknown-model
 # default (still compute => 0).
+#
+# open_kernel_module (karr #15) marks an entry whose silicon has NO proprietary
+# kernel module at all — only NVIDIA's open GPU kernel modules build/load for
+# it, so Rex::GPU::NVIDIA's Ubuntu driver selection must pick the -open package
+# variant instead of the default -server one. This is a property of the
+# SILICON, not of "being in this allowlist": a future addition here that DOES
+# support the proprietary module (e.g. a Hopper-class part reachable only by
+# device ID) must NOT set it. Set it only for verified open-only parts.
 my %NVIDIA_COMPUTE_DEVICE_IDS = (
-  '2e12' => 'GB10',   # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64
+  '2e12' => { name => 'GB10', open_kernel_module => 1 },
+  # NVIDIA GB10 (Grace-Blackwell, DGX Spark) — verified on aarch64; Blackwell
+  # architecture has no proprietary kernel module, open is the only option.
 );
 
 =head1 FUNCTIONS
@@ -64,6 +74,7 @@ hashref describing one detected GPU:
         vendor    => "nvidia",
         pci_class => "0302",   # "0300" = VGA controller, "0302" = 3D controller
         compute   => 1,        # 1 if CUDA-capable, 0 otherwise
+        device_id => "27b0",  # [10de:XXXX]; undef if lspci printed no vendor:device pair
       }
     ],
     amd => [
@@ -131,6 +142,7 @@ sub _parse_nvidia_line {
     vendor    => 'nvidia',
     pci_class => $pci_class,
     compute   => $compute,
+    device_id => $device_id,   # e.g. "2e12"; undef if the line had no [10de:XXXX]
   };
 }
 
@@ -160,6 +172,34 @@ sub _is_nvidia_compute {
   # Unknown — safe default
   Rex::Logger::info("    Unknown NVIDIA GPU model: $name — not in compute list", "warn");
   return 0;
+}
+
+=method open_kernel_module_required
+
+  Rex::GPU::Detect::open_kernel_module_required($device_id);
+
+Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, lowercase or
+uppercase), returns true if that device is known to have B<no> proprietary
+kernel module at all — NVIDIA's I<open> GPU kernel modules are the only
+option (currently the GB10 / NVIDIA DGX Spark; Blackwell-architecture parts in
+general). Looks up the same C<%NVIDIA_COMPUTE_DEVICE_IDS> allowlist
+C<_is_nvidia_compute> uses, so a future compute device ID added there only
+needs to set its C<open_kernel_module> flag once, in this one place, rather
+than a second hardcoded device list in the driver installer. Returns false for
+C<undef>, an unlisted ID, or a listed ID that does not set the flag (e.g. a
+future Hopper-class ID reachable only by device ID, which does support the
+proprietary module).
+
+Not in C<@EXPORT> — this is a C<Rex::GPU::NVIDIA>-internal lookup, not a
+Rexfile-facing command.
+
+=cut
+
+sub open_kernel_module_required {
+  my ($device_id) = @_;
+  return 0 unless defined $device_id;
+  my $entry = $NVIDIA_COMPUTE_DEVICE_IDS{lc $device_id};
+  return ($entry && ref $entry eq 'HASH' && $entry->{open_kernel_module}) ? 1 : 0;
 }
 
 sub _parse_amd_line {
@@ -248,6 +288,13 @@ Unrecognised NVIDIA GPU models default to C<compute =E<gt> 0> and emit a
 warning. The device-ID allowlist is a positive-only override and never changes
 that default. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
 implemented.
+
+Each detected NVIDIA GPU also carries its raw C<device_id> (the C<[10de:XXXX]>
+field, or C<undef> if lspci printed none). L<Rex::GPU> passes the whole GPU
+hashref through to L<Rex::GPU::NVIDIA/install_driver>, which uses
+L</open_kernel_module_required> on the device ID to pick the correct Ubuntu
+driver package variant for Blackwell-class silicon (the GB10) that has no
+proprietary kernel module at all.
 
 =head1 SEE ALSO
 

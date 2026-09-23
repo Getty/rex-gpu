@@ -65,6 +65,12 @@ Detect GPUs and run the full installation pipeline: NVIDIA driver, Container
 Toolkit, CDI spec generation, and containerd runtime configuration. This is
 the single call needed to make a node GPU-ready for Kubernetes.
 
+The detected GPU (name and PCI device ID) is passed through to
+L<Rex::GPU::NVIDIA/install_driver>, which uses it on Ubuntu to pick the
+C<-open> driver package variant instead of the default C<-server> one for
+Blackwell-class silicon (the GB10 / NVIDIA DGX Spark) that has no proprietary
+kernel module at all; every other distro/GPU combination is unaffected.
+
 AMD GPUs are detected and logged but not yet supported (a warning is emitted).
 
   gpu_setup(
@@ -146,7 +152,10 @@ sub gpu_setup {
     my @compute = grep { $_->{compute} } @{$gpus->{nvidia}};
     if (@compute) {
       Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $compute[0]->{name});
-      Rex::GPU::NVIDIA::install_driver(reboot => ($opts{reboot} ? 1 : 0));
+      Rex::GPU::NVIDIA::install_driver(
+        reboot => ($opts{reboot} ? 1 : 0),
+        gpu    => $compute[0],
+      );
       Rex::GPU::NVIDIA::install_container_toolkit();
       Rex::GPU::NVIDIA::generate_cdi_specs();
 

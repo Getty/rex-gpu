@@ -11,6 +11,11 @@ use Rex::Commands::Pkg;
 use Rex::Commands::Run;
 use Rex::Logger;
 
+# () — load only; Rex::GPU::Detect::open_kernel_module_required is called
+# fully-qualified below and is deliberately NOT in this module's own @EXPORT
+# (it is an internal lookup, not a Rexfile-facing command).
+use Rex::GPU::Detect ();
+
 require Rex::Exporter;
 use base qw(Rex::Exporter);
 
@@ -58,10 +63,22 @@ Rebooting is required on the first deployment when the C<nouveau>
 open-source driver was previously loaded, because nouveau must be
 unloaded before the NVIDIA kernel module can bind to the device.
 
+=item C<gpu>
+
+Optional hashref — the detected GPU this driver install is for, in the same
+shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
+(C<name>, C<device_id>, ...). L<Rex::GPU> passes C<< $compute[0] >> here.
+Currently used only on Ubuntu: C<device_id> selects the C<-open> driver
+package variant instead of the default C<-server> one for Blackwell-class
+silicon (the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module at
+all. Every other OS branch, and the Ubuntu x86_64 path, ignore it. Omit it (or
+pass C<undef>) to keep the previous, GPU-agnostic package selection.
+
 =back
 
   install_driver();              # install only, load module without reboot
   install_driver(reboot => 1);   # install, reboot, verify
+  install_driver(gpu => $gpus->{nvidia}[0]);   # thread GPU identity through
 
 =cut
 
@@ -93,7 +110,7 @@ sub install_driver {
   Rex::Logger::info("Installing NVIDIA drivers on $os (kernel $running_kernel)");
 
   if (is_debian()) {
-    _install_driver_debian($os, $running_kernel);
+    _install_driver_debian($os, $running_kernel, $opts{gpu});
   }
   elsif (is_redhat()) {
     _install_driver_redhat($os, $running_kernel);
@@ -322,7 +339,7 @@ sub verify_nvidia {
 # ============================================================
 
 sub _install_driver_debian {
-  my ($os, $running_kernel) = @_;
+  my ($os, $running_kernel, $gpu) = @_;
 
   my $arch = run "dpkg --print-architecture", auto_die => 0;
   chomp $arch;
@@ -339,12 +356,30 @@ sub _install_driver_debian {
     # Ubuntu: use server variant for K8s, auto-detect latest available version.
     # Do NOT add nvidia-smi: on Ubuntu 24.04 it is a virtual package with no
     # installation candidate — it is pulled in automatically by the driver metapackage.
-    my $latest = run "apt-cache search '^nvidia-driver-[0-9].*-server\$' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
+    #
+    # Blackwell-class datacenter silicon (the GB10 / NVIDIA DGX Spark, aarch64)
+    # ships with NO proprietary kernel module at all — only the -open variant
+    # builds/loads for it (karr #14/#15; the plain x86_64 -server path below is
+    # correct for the already-verified RTX 4000 Ada and stays untouched).
+    # _ubuntu_needs_open_kernel_module is scoped to arm64 + a GPU device ID
+    # Detect.pm's allowlist marks open-only, so it returns false — and this
+    # branch behaves exactly as before — for every x86_64 host regardless of
+    # which GPU is installed.
+    my $open = _ubuntu_needs_open_kernel_module($arch, $gpu);
+    if ($open) {
+      Rex::Logger::info("  Blackwell-class GPU on $arch — selecting the open-kernel-module driver");
+    }
+    my $search_pattern = $open
+      ? '^nvidia-driver-[0-9].*-server-open$'
+      : '^nvidia-driver-[0-9].*-server$';
+    my $latest = run "apt-cache search '$search_pattern' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
       auto_die => 0;
     chomp $latest if $latest;
-    # Filter out *-open variants from auto-detect (use regular server driver)
-    $latest = undef if $latest && $latest =~ /-open$/;
-    push @packages, ($latest || "nvidia-driver-570-server");
+    unless ($open) {
+      # Filter out *-open variants from auto-detect (use regular server driver)
+      $latest = undef if $latest && $latest =~ /-open$/;
+    }
+    push @packages, ($latest || ($open ? "nvidia-driver-570-server-open" : "nvidia-driver-570-server"));
   }
   else {
     # Debian: just the running kernel's headers (sufficient for DKMS) + driver
@@ -366,12 +401,36 @@ sub _install_driver_debian {
   my $pkg_str = join(" ", @packages);
   run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y $pkg_str", auto_die => 0;
 
-  # On Ubuntu the driver package is e.g. nvidia-driver-590-server; on Debian it is
-  # nvidia-driver. Check whichever name we actually installed.
+  # On Ubuntu the driver package is e.g. nvidia-driver-590-server (or, for
+  # Blackwell-class aarch64 GPUs, nvidia-driver-590-server-open); on Debian it
+  # is nvidia-driver. Check whichever name we actually installed.
   my $driver_pkg = ($os eq 'Ubuntu') ? $packages[-1] : 'nvidia-driver';
   my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
   die "$driver_pkg not installed after apt-get install — check apt output\n"
     if $? != 0;
+}
+
+# Pure predicate (karr #15): given the dpkg-reported architecture and the
+# detected GPU hashref (Rex::GPU::Detect shape: name/device_id/...), should
+# Ubuntu driver selection pick the -open package variant instead of the
+# default -server one? Scoped deliberately narrow: Blackwell-class silicon
+# such as the GB10 (NVIDIA DGX Spark) has NO proprietary kernel module at all,
+# and currently ships only on the aarch64 builds dpkg reports as "arm64" — so
+# $arch is checked FIRST and short-circuits to false before $gpu is even
+# looked at. This is what keeps the already-verified x86_64 path (RTX 4000 Ada
+# et al.) on the plain -server package, whatever GPU is passed (including
+# none). The device-ID -> open-only judgement itself is NOT duplicated here:
+# it delegates to Rex::GPU::Detect::open_kernel_module_required, so a future
+# Blackwell datacenter device ID needs updating in exactly one place (the
+# allowlist in Detect.pm), not a second hardcoded list in this module.
+#
+# Pure (string/hash access only, no run/dpkg) so it is unit-testable offline,
+# like _nvidia_driver_present / _cuda_repo_arch.
+sub _ubuntu_needs_open_kernel_module {
+  my ($arch, $gpu) = @_;
+  return 0 unless defined $arch && $arch =~ /^(?:arm64|aarch64)$/;
+  return 0 unless $gpu && ref $gpu eq 'HASH';
+  return Rex::GPU::Detect::open_kernel_module_required($gpu->{device_id});
 }
 
 sub _enable_debian_nonfree {
@@ -1008,6 +1067,16 @@ and the initramfs is regenerated to prevent it from loading at boot.
 
 On Debian, C<contrib>, C<non-free>, and C<non-free-firmware> components
 are added to C</etc/apt/sources.list> automatically if not already present.
+
+On Ubuntu, the newest available C<nvidia-driver-NNN-server> package is
+auto-detected and installed. On aarch64 (C<dpkg --print-architecture>
+C<arm64>) for a GPU whose PCI device ID L<Rex::GPU::Detect> marks
+open-kernel-module-only — the GB10 / NVIDIA DGX Spark, which has no
+proprietary kernel module at all — the C<-server-open> variant is selected
+instead. This requires the caller (L<Rex::GPU/gpu_setup> does this
+automatically) to pass the detected GPU via the C<gpu> option to
+L</install_driver>; without it, or on x86_64, the plain C<-server> package is
+used exactly as before.
 
 On RHEL/Rocky/AlmaLinux/CentOS Stream, the NVIDIA CUDA repository is added
 and the open-kernel DKMS variant is used. For RHEL 10+ the module streams

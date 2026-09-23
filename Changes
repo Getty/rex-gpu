@@ -40,19 +40,36 @@ Revision history for Rex-GPU
     at the driver step, karr #7); a maintainer must confirm on a real node with
     nvidia-cdi-refresh installed that /etc/cdi stays empty, /run/cdi/nvidia.yaml
     is fresh, and the CDI consumer loads nvidia.com/gpu exactly once (karr #11)
-  - aarch64 / NVIDIA DGX Spark (GB10) support, part 1 (detection + RHEL repo).
-    Detection now classifies the GB10 (PCI 10de:2e12) as compute via a
-    known-compute device-ID allowlist: it enumerates as a VGA controller
-    [0300] and, on a host whose pci.ids predates the silicon, lspci prints
-    only "Device" with no marketing name, so the name-token rules classified
-    it compute => 0 and gpu_setup skipped the whole pipeline on a Spark
-    (verified live on cortex). The allowlist is positive-only and does not
-    change the unknown-model default (still 0). The RHEL/Rocky/Alma CUDA
-    repository URL is now architecture-aware: aarch64 uses the "sbsa" tree
-    (repos/rhelN/sbsa/), x86_64 is unchanged — the old hardcoded x86_64
-    pointed aarch64 at a nonexistent repo. NB: the Ubuntu driver path on a
-    Blackwell Spark (open kernel modules) still needs a fresh-install test on
-    real hardware; it is not yet changed here (karr #14)
+  - aarch64 / NVIDIA DGX Spark (GB10) support, part 1 (detection + RHEL repo)
+    and part 2 (Ubuntu open-kernel-module driver selection). Detection
+    classifies the GB10 (PCI 10de:2e12) as compute via a known-compute
+    device-ID allowlist: it enumerates as a VGA controller [0300] and, on a
+    host whose pci.ids predates the silicon, lspci prints only "Device" with
+    no marketing name, so the name-token rules classified it compute => 0 and
+    gpu_setup skipped the whole pipeline on a Spark (verified live on cortex).
+    The allowlist is positive-only and does not change the unknown-model
+    default (still 0). The RHEL/Rocky/Alma CUDA repository URL is
+    architecture-aware: aarch64 uses the "sbsa" tree (repos/rhelN/sbsa/),
+    x86_64 is unchanged — the old hardcoded x86_64 pointed aarch64 at a
+    nonexistent repo. gpu_setup now threads the detected GPU (name + PCI
+    device ID) through to install_driver's new optional gpu option; on Ubuntu
+    aarch64, for a GPU device ID the allowlist marks open-kernel-module-only
+    (currently only the GB10 — Blackwell-architecture silicon has no
+    proprietary kernel module at all), the -server-open package variant is
+    now selected instead of the default -server one, which the previous
+    auto-detect explicitly filtered *-open* candidates OUT of. The x86_64
+    path (RTX 4000 Ada et al.) picks -server exactly as before, whatever GPU
+    is passed. New pure, offline-testable predicates
+    Rex::GPU::Detect::open_kernel_module_required and
+    Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module drive the decision
+    (new t/80-ubuntu-open-driver.t); the -server-open package name was
+    confirmed published for arm64 against Ubuntu's Launchpad archive, not
+    against a live apt-cache. NB: NEITHER the RHEL aarch64 install NOR this
+    Ubuntu -open install has run on real hardware — cortex (the only GB10
+    host) already has its driver loaded (DGX-OS prebuilt), so the karr #10
+    idempotency short-circuit skips install_driver there entirely, and no
+    fresh Ubuntu/RHEL aarch64 Spark was available; a maintainer must confirm
+    both against one (karr #14/#15)
   - Make install_driver idempotent against a host that already has a working
     NVIDIA driver (e.g. provisioned via the NVIDIA CUDA apt/dnf repo, or a
     re-run of gpu_setup): a distro-neutral short-circuit now skips the driver
