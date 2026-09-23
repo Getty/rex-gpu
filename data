@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-23T03:03:55Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T03:03:55Z
+created: 2026-09-23T02:09:34Z
+id: 19
+priority: low
+started: 2026-09-23T02:53:23Z
+status: done
+tags:
+- cdi
+- nvidia
+- research
+title: 'Recherche: CDI-Generierung bei MIG-partitionierten Datacenter-GPUs (A100/H100/B200)
+  ungeprueft'
+updated: 2026-09-23T03:03:55Z
+---
+
+NVIDIA.pm:862-897 generate_cdi_specs: reines 'nvidia-ctk cdi generate --output=...' ohne Modus-Flags. A100/H100/B200-Klasse-GPUs sind schon heute ueber Detect.pm:153 ([AHLVP]\d{1,3}-Regex) bzw. PCI-Klasse 0302 erreichbar, ganz ohne Allowlist-Erweiterung. Unklar (nicht recherchiert), ob nvidia-ctk cdi generate MIG-Instanzen ohne zusaetzliche Flags korrekt enumeriert. Reine Rechercheempfehlung, keine belegte Aussage -- niedrigste Prioritaet, spekulativ.
+
+Herkunft: Audit-Auftrag zur #14/#15-Fehlerklasse, Kandidat 7 (spekulativ).
+
+Recherche (Upstream-Source nvidia-container-toolkit + k8s-device-plugin, keine Hardware): nvidia-ctk cdi generate enthaelt MIG-Instanzen per Default (Namen gpu=<gpu>:<mig>, MIG-enabled GPU ohne Full-GPU-Eintrag). Luecke: Spec wird bei MIG-Rekonfiguration nicht neu generiert, auch nvidia-cdi-refresh nicht (Path-Unit beobachtet nur modules.dep + nvidia-ctk). Betrifft nur direkte nvidia.com/gpu=-CDI-Nutzung; Device-Plugin/GPU-Operator erzeugen eigene Specs. Kein Code-Fix sinnvoll -> README-Abschnitt MIG ergaenzt; POD-Hinweis in generate_cdi_specs folgt ueber Worker. Optionaler Follow-up bei Bedarf: oeffentlicher refresh_cdi_specs-Helper.
