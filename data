@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T17:32:21Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T17:32:21Z
+created: 2026-09-23T16:49:02Z
+id: 26
+priority: high
+started: 2026-09-23T17:23:12Z
+status: done
+title: Pre-Turing-GPUs (Maxwell/Pascal/Volta, z.B. V100/P100) bekommen auf Ubuntu/RHEL/SUSE
+  einen Treiber, der sie nicht unterstuetzt
+updated: 2026-09-23T17:32:21Z
+---
+
+Recherche 2026-09-23 (615-README legacy + 580 kernel_open): Maxwell/Pascal/Volta (10de 1340-1DF6) nur proprietaer und nur bis Branch 580; open-Modul geht nie (kein GSP). Heute: Ubuntu waehlt neuestes -server = 595 (unterstuetzt sie nicht mehr); RHEL 8/9/10 installiert unpinned open (615); Leap 15 G06-open (Branch ok, Flavor falsch); Leap 16 G07 (595 open, beides falsch). Debian (535/550 non-free) funktioniert. Kepler (<=470) scheitert ueberall. Folge: Paket installiert, Modul bindet nicht -- V100 sind in Rechenzentren verbreitet, Klasse 0302 = compute. Loesung laut Epic als T6 (Pre-Turing-Zeile proprietary, max 580: Ubuntu nvidia-driver-580-server, RHEL Stream 580-dkms / rhel10 versionlock, SUSE nvidia-driver-G06-kmp-meta). Entscheidung: Hotfix vorab im heutigen Code oder erst nach Epic T4. Nicht auf Hardware verifiziert.
