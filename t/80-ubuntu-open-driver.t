@@ -19,8 +19,9 @@ use Test::More;
 #   * which source Rex::GPU::NVIDIA::Setup::Ubuntu's plan picks for a GPU
 #     (karr #33: the requirement-driven selection replaced the
 #     _ubuntu_needs_open_kernel_module gate; same claims, asserted on the
-#     chosen source now). The host is faked by overriding run_cmd, so the
-#     apt-cache search answers with a canned package name.
+#     chosen source now). The host is faked by overriding run_cmd; since
+#     karr #35 plan does not run the apt-cache search (it runs after
+#     apt-get update, in resolve_plan), so only the source is asserted.
 #
 # karr #16: Blackwell has no proprietary kernel module on x86_64 either
 # (GeForce RTX 50xx, RTX PRO Blackwell, B200/GB200). The arm64-only gate k15
@@ -34,9 +35,9 @@ use Test::More;
 # for k15 or k16; see the t/10-detect.t header for the wider "what prove
 # cannot see"):
 #   * that `apt-cache search '^nvidia-driver-[0-9].*-server-open$'` actually
-#     finds a candidate on a real host, or that the fallback
-#     "nvidia-driver-570-server-open" is installable on amd64 or arm64 (repo
-#     metadata checked, not exercised against apt).
+#     finds a candidate on a real host (repo metadata checked, not exercised
+#     against apt); since karr #35 an empty search dies instead of falling
+#     back to "nvidia-driver-570-server-open".
 #   * that the lspci lines below for RTX 5090 / B200 match a real host: they
 #     are built from the pci.ids naming pattern, not captured live.
 #   * that the -open package DKMS-builds against a stock Ubuntu kernel (cortex

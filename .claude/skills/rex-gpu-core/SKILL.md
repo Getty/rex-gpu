@@ -59,9 +59,12 @@ conflict (`conflicts` lists without dying). The table **never** makes a GPU comp
 **Selection is data, not branches** (k33): each Setup class has ordered `sources`
 (`{name, kernel_module, branch | branch_at_least, packages, verify, unavailable, …}`);
 `plan` rejects Kepler (any GPU), builds `requirement` (intersection of **all** GPUs; conflict
-dies untouched), then `select_source` takes the first candidate `satisfied_by` accepts —
-after `resolve_source` (Ubuntu's read-only `apt-cache search`) and a re-check — else dies
-listing every candidate + reason. `branch_at_least N` = "repo's newest, known ≥ N": passes
+dies untouched), then `select_source` takes the first candidate `satisfied_by` accepts on
+its *declared* keys (no package index read) — else dies listing every candidate + reason.
+The concrete package comes later (k35): `resolve_plan`, after `prepare_source`'s
+`apt-get update`, runs `resolve_source` (Ubuntu's `apt-cache search` / `apt-cache policy`)
+and re-checks it; `unavailable` or no fit dies before any install, no other candidate is
+tried. Override `resolve_source` to choose packages another way (k42 `ubuntu-drivers`). `branch_at_least N` = "repo's newest, known ≥ N": passes
 a min bound up to N, **never** a max bound; no branch at all passes only an unbounded
 requirement. Don't invent a branch number for a "latest" source; give the floor the repo
 provably carries.
@@ -78,7 +81,7 @@ only if it has none. `requirement =>` → Setup `extra_requirement`, **intersect
 replacing: it tightens, a conflict dies in `plan`. Reboot/`modprobe`/`verify_nvidia` stay
 in `install_driver` (connection + toolkit check). Every family runs through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
 `Setup::Apt` → `Setup::Debian` / `Setup::Ubuntu`; `Setup::Rpm` → `Setup::RHEL` /
-`Setup::SUSE`; experimental, epic #25) with the fixed flow `already_installed → plan → prepare_host → prepare_source → install_packages →
+`Setup::SUSE`; experimental, epic #25) with the fixed flow `already_installed → plan → prepare_host → prepare_source → resolve_plan → install_packages →
 verify_packages → post_install`. `plan` is host-read-only; `run_cmd` / `pkg_cmd` /
 `file_cmd` are the only routes to the host. No class for the OS ⇒ `install_driver`
 still probes `nvidia-smi` and rejects Kepler, then dies. Each
@@ -93,7 +96,8 @@ family has a trap that is already solved in the code; do not "simplify" these aw
   metapackage — it pulls a new kernel whose grub/initramfs post-install returns non-zero.
 - **Ubuntu** — sources `-server` (newest via `apt-cache search`, `-open` filtered, ≥580),
   `-server-open` (≥580; Blackwell), pinned `nvidia-driver-580-server` (pre-Turing, candidate
-  checked after `apt-get update`); empty search falls back to 570, re-checked. **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
+  checked after `apt-get update`); search runs after `apt-get update`, empty ⇒ die (no 570
+  fallback: the search matches 570 too). **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
   virtual package with no install candidate and the driver metapackage pulls it anyway.
 - **RHEL/Rocky/Alma/CentOS** — EPEL + `crb`(≥9)/`powertools`(<9) + the CUDA repo. **v10+
   has no module streams**: install `kmod-nvidia-open-dkms` + `nvidia-driver` +

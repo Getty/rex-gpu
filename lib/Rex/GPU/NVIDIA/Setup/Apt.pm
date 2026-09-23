@@ -56,16 +56,14 @@ sub kernel_packages {
 
 =method prepare_host
 
-Logs the package list and stops C<unattended-upgrades>, C<apt-daily> and
-C<apt-daily-upgrade>: on a fresh boot they hold
-C</var/lib/dpkg/lock-frontend> and C<apt-get> fails at once even with a lock
-timeout.
+Stops C<unattended-upgrades>, C<apt-daily> and C<apt-daily-upgrade>: on a
+fresh boot they hold C</var/lib/dpkg/lock-frontend> and C<apt-get> fails at
+once even with a lock timeout.
 
 =cut
 
 sub prepare_host {
   my ( $self, $plan ) = @_;
-  Rex::Logger::info('  Installing: '.join(', ', @{ $plan->{packages} }));
   $self->run_cmd('systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true',
     auto_die => 0);
 }
@@ -73,7 +71,9 @@ sub prepare_host {
 =method prepare_source
 
 C<apt-get update>, with C<auto_die =E<gt> 0>: it exits non-zero on snap/PPA
-repository warnings that are no real failure.
+repository warnings that are no real failure. Whether it actually refreshed
+the index shows in the next step, L<Rex::GPU::NVIDIA::Setup/resolve_plan>:
+a driver source that reads the index finds nothing and dies there.
 
 =cut
 
@@ -84,7 +84,8 @@ sub prepare_source {
 
 =method install_packages
 
-C<apt-get install -y> of C<< $plan->{packages} >> through L<Rex::GPU::NVIDIA::Setup/run_cmd> with
+Logs the package list, then C<apt-get install -y> of
+C<< $plan->{packages} >> through L<Rex::GPU::NVIDIA::Setup/run_cmd> with
 C<auto_die =E<gt> 0> -- B<never> L<Rex::Commands::Pkg/pkg>. C<Rex::Pkg::Apt>
 dies on any non-zero exit, and a DKMS module build, grub update or initramfs
 regeneration routinely exits non-zero on success. Whether the install worked
@@ -94,6 +95,7 @@ is decided by L</verify_packages>, not by this exit code.
 
 sub install_packages {
   my ( $self, $plan ) = @_;
+  Rex::Logger::info('  Installing: '.join(', ', @{ $plan->{packages} }));
   my $pkg_str = join(' ', @{ $plan->{packages} });
   $self->run_cmd('DEBIAN_FRONTEND=noninteractive '.$self->apt_get.' install -y '.$pkg_str, auto_die => 0);
 }

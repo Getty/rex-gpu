@@ -18,6 +18,10 @@ use lib "$Bin/lib";
 #     Blackwell on a Debian release without a CUDA repo dies inside plan, and
 #     the RHEL plan does not read `uname -m` (it runs after EPEL/CRB);
 #   * a failed pre-Turing module-stream enable dies before any dnf install;
+#   * Ubuntu's plan does not read the apt index (karr #35): resolve_plan,
+#     after apt-get update, picks the package, checks it against the
+#     requirement again and dies on nothing found or a branch that does not
+#     fit; a subclass can replace resolve_source and keep that check;
 #   * facts passed to new() are not read from the host;
 #   * run_cmd is the seam: a subclass that overrides it sees every command;
 #   * a subclass overriding one step changes exactly that step;
@@ -106,7 +110,19 @@ for my $os (qw( debian-12 debian-13 ubuntu-22.04 ubuntu-24.04 )) {
       code => sub { $plan = $class->new(gpu => gpu_fixture($g))->plan });
     is($rec->{error}, undef, "$os + $g: plan lives");
     is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], "$os + $g: plan emits only read-only probes");
-    ok(@{ $plan->{packages} } && @{ $plan->{verify} }, "$os + $g: packages and verify filled");
+    # karr #35: Ubuntu's -server/-server-open sources are resolved from the
+    # package index only after apt-get update (resolve_plan), so their plan
+    # has the kernel headers and no driver package yet -- and plan must not
+    # read the (possibly stale) index at all.
+    if ($plan->{source}{search}) {
+      is_deeply([ grep { /apt-cache/ } @{ $rec->{lines} } ], [], "$os + $g: plan does not read the apt index");
+      is_deeply($plan->{verify}, [], "$os + $g: driver package left to resolve_plan");
+      is_deeply([ grep { !/^linux-headers-/ } @{ $plan->{packages} } ], [],
+        "$os + $g: plan packages are the kernel headers only");
+    }
+    else {
+      ok(@{ $plan->{packages} } && @{ $plan->{verify} }, "$os + $g: packages and verify filled");
+    }
   }
 }
 
@@ -211,12 +227,90 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
   local *Rex::Logger::info = sub { };
   my $s = My::FakeHost->new(os => 'Ubuntu', release => '24.04', arch => 'amd64', kernel => '6.8.0-1');
   my $plan = $s->plan;
+  is(scalar @{ $s->seen }, 0, 'plan ran no command: the apt index is not read before apt-get update (karr #35)');
+  is($plan->{source}{name}, 'ubuntu-server', '... but the source is chosen');
+  $s->resolve_plan($plan);
   is_deeply($plan->{packages},
     [ 'linux-headers-6.8.0-1', 'linux-headers-generic', 'nvidia-driver-595-server' ],
-    'overridden run_cmd feeds the apt-cache search');
+    'overridden run_cmd feeds the apt-cache search in resolve_plan');
   is_deeply($plan->{verify}, [ 'nvidia-driver-595-server' ], 'the chosen driver is verified');
-  is(scalar @{ $s->seen }, 1, 'plan ran exactly one command through run_cmd');
+  is($plan->{source}{branch}, 595, 'the exact branch is recorded');
+  is(scalar @{ $s->seen }, 1, 'resolve_plan ran exactly one command through run_cmd');
   like($s->seen->[0], qr/^apt-cache search /, '... the search');
+}
+
+#### resolve_plan: what the refreshed index offers is checked again (karr #35)
+
+{
+  package My::Index;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  has answer => ( is => 'ro', default => '' );
+  sub run_cmd { my ( $self, $cmd ) = @_; $? = 0; return $cmd =~ /^apt-cache search / ? $self->answer : '' }
+
+  # the shape an `ubuntu-drivers list` based setup (karr #42) would take:
+  # only the package choice is replaced, the requirement check stays
+  package My::Chooser;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  has pick => ( is => 'ro' );
+  sub run_cmd { $? = 0; return '' }
+  sub resolve_source {
+    my ( $self, $source ) = @_;
+    my ($branch) = $self->pick =~ /-(\d+)-/;
+    return { %$source, packages => [ $self->pick ], verify => [ $self->pick ], branch => $branch };
+  }
+
+  package My::Static;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  sub run_cmd { $? = 0; return '' }
+  sub resolve_source { my ( $self, $source ) = @_; return $source }
+}
+
+{
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { };
+  my %facts = ( os => 'Ubuntu', release => '24.04', arch => 'amd64', kernel => '6.8.0-1' );
+
+  my $s = My::Index->new(%facts, gpu => gpu_fixture('ada'));
+  my $plan = $s->plan;
+  my @before = @{ $plan->{packages} };
+  ok(!eval { $s->resolve_plan($plan); 1 }, 'empty search after apt-get update dies (no 570 fallback)');
+  like($@, qr/^The NVIDIA driver source ubuntu-server chosen for .* has nothing to install on this Ubuntu 24\.04 host: apt-cache search '\^nvidia-driver-\[0-9\]\.\*-server\$' finds no package after apt-get update.*No driver package was installed/,
+    '... naming the source, the search and that nothing was installed');
+  is_deeply($plan->{packages}, \@before, '... and the plan is left as it was');
+
+  $s = My::Index->new(%facts, gpu => gpu_fixture('b300'), answer => 'nvidia-driver-570-server-open');
+  $plan = $s->plan;
+  is($plan->{source}{name}, 'ubuntu-server-open', 'B300 plans -server-open (at least 580 claimed)');
+  ok(!eval { $s->resolve_plan($plan); 1 }, 'the index only has 570: dies');
+  like($@, qr/ubuntu-server-open chosen for .*: branch 570 is older than 580\./, '... with the requirement reason');
+
+  $s = My::Index->new(%facts, gpu => gpu_fixture('b300'), answer => 'nvidia-driver-590-server-open');
+  $plan = $s->plan;
+  $s->resolve_plan($plan);
+  is_deeply($plan->{verify}, [ 'nvidia-driver-590-server-open' ], 'the index has 590: taken');
+
+  $s = My::Chooser->new(%facts, gpu => gpu_fixture('ada'), pick => 'nvidia-driver-590-server');
+  $plan = $s->plan;
+  $s->resolve_plan($plan);
+  is_deeply($plan->{packages}, [ 'linux-headers-6.8.0-1', 'linux-headers-generic', 'nvidia-driver-590-server' ],
+    'a subclass replacing resolve_source picks the package');
+
+  $s = My::Chooser->new(%facts, gpu => gpu_fixture('volta'), pick => 'nvidia-driver-590-server');
+  $plan = $s->plan;
+  ok(!eval { $s->resolve_plan($plan); 1 }, '... and a pick the GPU cannot use still dies');
+  like($@, qr/branch 590 is newer than 580/, '... with the requirement reason');
+
+  # a source that is final at plan time (the base resolve_source) is untouched
+  $s = My::Static->new(%facts, gpu => gpu_fixture('volta'));
+  $plan = $s->plan;
+  my $source = $plan->{source};
+  $s->resolve_plan($plan);
+  is($plan->{source}, $source, 'unchanged source: the same reference stays in the plan');
+  is_deeply($plan->{packages}, [ 'linux-headers-6.8.0-1', 'linux-headers-generic', 'nvidia-driver-580-server' ],
+    '... with the packages plan gave it');
 }
 
 #### Step order and the already-installed short-circuit
@@ -228,7 +322,7 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
   has log       => ( is => 'ro', default => sub { [] } );
   has installed => ( is => 'ro', default => 0 );
   sub already_installed { my ( $s ) = @_; push @{ $s->log }, 'already_installed'; $s->installed }
-  for my $step (qw( prepare_host prepare_source install_packages verify_packages post_install )) {
+  for my $step (qw( prepare_host prepare_source resolve_plan install_packages verify_packages post_install )) {
     no strict 'refs';
     *{$step} = sub { my ( $s, $plan ) = @_; push @{ $s->log }, $step.'('.$plan->{tag}.')' };
   }
@@ -239,7 +333,7 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
   my $s = My::Steps->new;
   is($s->install, 1, 'install returns 1 after an install');
   is_deeply($s->log, [ 'already_installed', 'plan', 'prepare_host(p)', 'prepare_source(p)',
-    'install_packages(p)', 'verify_packages(p)', 'post_install(p)' ],
+    'resolve_plan(p)', 'install_packages(p)', 'verify_packages(p)', 'post_install(p)' ],
     'steps run in the fixed order, each handed the plan');
 
   $s = My::Steps->new(installed => 1);

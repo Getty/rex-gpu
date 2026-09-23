@@ -281,6 +281,7 @@ Runs the fixed sequence, each step a method a subclass can override:
   plan               -> host-read-only; dies before any change
   prepare_host($plan)
   prepare_source($plan)
+  resolve_plan($plan) -> fixes the packages; dies before any install
   install_packages($plan)
   verify_packages($plan)
   post_install($plan)
@@ -306,6 +307,7 @@ sub install {
   my $plan = $self->plan;
   $self->prepare_host($plan);
   $self->prepare_source($plan);
+  $self->resolve_plan($plan);
   $self->install_packages($plan);
   $self->verify_packages($plan);
   $self->post_install($plan);
@@ -342,8 +344,11 @@ Decides what to install and returns it as a hashref: C<source> (the chosen
 driver source, see L</sources>), C<packages> (arrayref, in install order:
 L</kernel_packages>, then the source's) and C<verify> (the source's
 packages that must be installed afterwards); a subclass adds keys for its
-own later steps. Must only B<read> the host: every "this cannot work here"
-dies from here, before anything is changed:
+own later steps. A source whose packages are known only once its
+repository is refreshed (see L</resolve_source>) has none here yet;
+L</resolve_plan> adds them. Must only B<read> the host: every "this cannot
+work here" that is known without a refreshed package index dies from here,
+before anything is changed:
 
 =over
 
@@ -383,7 +388,7 @@ L<Rex::GPU::NVIDIA::Requirement/satisfied_by> for how each counts); or
 neither when the branch is unknown.
 
 =item * C<packages>, C<verify> -- as in L</plan>. May be filled only by
-L</resolve_source>.
+L</resolve_source>, after the repository is refreshed.
 
 =item * C<unavailable> -- a reason: this source does not exist on this host
 (no repository for the release or architecture). Skipped with that reason.
@@ -400,20 +405,41 @@ ones.
   my $source = $self->select_source(@candidates);
 
 The first candidate L</requirement> accepts
-(L<Rex::GPU::NVIDIA::Requirement/satisfied_by>), after
-L</resolve_source> -- which is checked again, so a resolved branch that does
-not fit moves on to the next candidate. Dies when none fits, naming the
-GPUs, what they need and every rejected candidate with its reason; nothing
-has been changed on the host then.
+(L<Rex::GPU::NVIDIA::Requirement/satisfied_by>) on what it declares --
+C<kernel_module>, C<branch> or C<branch_at_least>, C<unavailable>. Called
+by L</plan>, so it must only read the host, and it does not look at a
+package index: on a fresh host that index is stale or empty until
+L</prepare_source> refreshes it. Dies when none fits, naming the GPUs, what
+they need and every rejected candidate with its reason; nothing has been
+changed on the host then.
+
+=method resolve_plan
+
+  $self->resolve_plan($plan);
+
+The step between L</prepare_source> and L</install_packages>: passes the
+chosen source through L</resolve_source>, now that its repository is
+refreshed, and checks the result against L</requirement> again. If
+L</resolve_source> returned a new source, it goes into C<$plan>: C<source>,
+C<packages> (the plan's other packages, then the resolved source's) and
+C<verify>. Dies, before any driver package is installed, when the resolved
+source is C<unavailable> or no longer fits; the source L</plan> chose is not
+swapped for another candidate then. A plan without a source is left alone.
 
 =method resolve_source
 
   my $resolved = $self->resolve_source($source);
 
-Turns a chosen candidate into a concrete one: the base class returns it
-unchanged; L<Rex::GPU::NVIDIA::Setup::Ubuntu> asks C<apt-cache search> for
-the newest package and records its branch. Only for a candidate that
-already fits; must only read the host.
+Turns the chosen source into a concrete one, called by L</resolve_plan>
+after L</prepare_source> has refreshed the package index. The base class
+returns it unchanged (the same reference: nothing to do);
+L<Rex::GPU::NVIDIA::Setup::Ubuntu> asks C<apt-cache search> for the newest
+package and records its branch. Returns a new hashref with C<packages>,
+C<verify> and, if known, the exact C<branch> -- or with C<unavailable> set
+to the reason when the repository has nothing to install. May read the
+host, must not change it. Override it to pick the package some other way (a
+site index, C<ubuntu-drivers list>); L</resolve_plan> checks whatever it
+returns against the requirement.
 
 =cut
 
@@ -454,12 +480,8 @@ sub select_source {
   for my $candidate (@candidates) {
     my $why = $candidate->{unavailable} // $requirement->why_not($candidate);
     unless (defined $why) {
-      my $resolved = $self->resolve_source($candidate);
-      $why = $requirement->why_not($resolved);
-      unless (defined $why) {
-        Rex::Logger::info('  Driver source: '.$resolved->{name});
-        return $resolved;
-      }
+      Rex::Logger::info('  Driver source: '.$candidate->{name});
+      return $candidate;
     }
     push @rejected, $candidate->{name}.': '.$why;
   }
@@ -467,6 +489,31 @@ sub select_source {
     .$requirement->who.' ('.$requirement->describe.') -- '.join('; ', @rejected)
     .'. Nothing was changed on the host. Install the driver yourself; once '
     ."`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
+}
+
+sub resolve_plan {
+  my ( $self, $plan ) = @_;
+  my $source = $plan->{source} or return;
+  # After prepare_source (karr #35): the package index is fresh now, so a
+  # source that picks its package from it (Ubuntu's apt-cache search) sees
+  # what the repository carries, not a fresh image's stale or empty lists.
+  my $resolved = $self->resolve_source($source);
+  my $requirement = $self->requirement;
+  my $why = $resolved->{unavailable} // $requirement->why_not($resolved);
+  die 'The NVIDIA driver source '.$source->{name}.' chosen for '.$requirement->who
+    .' ('.$requirement->describe.') has nothing to install on this '.$self->os.' '
+    .( $self->release // '' ).' host: '.$why.'. No driver package was installed, '
+    .'only the package sources were prepared. Install the driver yourself; once '
+    ."`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n"
+    if defined $why;
+  return if $resolved == $source;
+  my %old = map { $_ => 1 } @{ $source->{packages} // [] };
+  $plan->{source}   = $resolved;
+  $plan->{packages} = [ ( grep { !$old{$_} } @{ $plan->{packages} } ),
+    @{ $resolved->{packages} // [] } ];
+  $plan->{verify}   = [ @{ $resolved->{verify} // [] } ];
+  Rex::Logger::info('  Driver packages: '.join(', ', @{ $resolved->{packages} // [] }));
+  return;
 }
 
 =method prepare_host
@@ -486,8 +533,9 @@ Installs C<< $plan->{packages} >>.
 Dies unless every package in C<< $plan->{verify} >> ended up installed. That
 check, not the package manager's exit code, is the evidence of an install.
 
-Each of these four takes the C<$plan> from L</plan> and does nothing in the
-base class; the packaging layer (L<Rex::GPU::NVIDIA::Setup::Apt>,
+Each of these four takes the C<$plan> from L</plan> (completed by
+L</resolve_plan> before L</install_packages>) and does nothing in the base
+class; the packaging layer (L<Rex::GPU::NVIDIA::Setup::Apt>,
 L<Rex::GPU::NVIDIA::Setup::Rpm>) and the distro classes fill them.
 
 =cut
@@ -649,7 +697,7 @@ tried.
 An Ada or a B200 gets the pinned open driver; a V100 (proprietary only)
 rejects it and gets the built-in C<nvidia-driver-580-server>.
 C<check_candidate> is a key L<Rex::GPU::NVIDIA::Setup::Ubuntu> reads in its
-C<prepare_source>; which extra keys a source may carry depends on the class
+C<resolve_source>, after C<apt-get update>; which extra keys a source may carry depends on the class
 you extend.
 
 =head2 Changing a step

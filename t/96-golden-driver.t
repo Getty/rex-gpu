@@ -24,7 +24,9 @@ use lib "$Bin/lib";
 # Several GPUs (karr #33): install_driver(gpus => [...]) must emit exactly
 # what the most constrained GPU gets alone, and a V100 next to a B200 or a K80
 # anywhere must die after the probe only. Every "no driver source fits" case
-# must die with only read-only probes before it.
+# must die with only read-only probes before it. Ubuntu's package search
+# runs after apt-get update (karr #35); when it finds nothing, the die comes
+# after the update and before any install command.
 #
 # NOT covered -- none of this runs without a real GPU host, and a green prove
 # is NOT evidence that a driver installs:
@@ -152,13 +154,20 @@ golden_is(
     'ubuntu-24.04 + V100 without candidate: no install command emitted');
 }
 
-# Ubuntu, apt-cache search finds nothing: the hard-coded 570 fallback.
-golden_is(
-  driver_on(host_profile('ubuntu-24.04', responses => [
+# Ubuntu, apt-cache search finds nothing even after apt-get update (karr
+# #35): dies naming the search, before any install. The hard-coded 570
+# fallback this golden recorded before is gone -- the search matches 570 too,
+# so an empty answer means apt-get could not install it either.
+{
+  my $rec = driver_on(host_profile('ubuntu-24.04', responses => [
     [ qr{^apt-cache search } => '', 0 ]
-  ]), gpu_fixture('ada')),
-  'driver/ubuntu-24.04--ada--empty-search'
-);
+  ]), gpu_fixture('ada'));
+  like($rec->{error}, qr/ubuntu-server chosen for .*finds no package after apt-get update.*No driver package was installed/,
+    'ubuntu-24.04 + Ada, empty search: dies, no fallback package');
+  is_deeply([ grep { / install / } @{ $rec->{lines} } ], [],
+    '... no install command emitted');
+  golden_is($rec, 'driver/ubuntu-24.04--ada--empty-search');
+}
 
 # deb822 (karr #36): debian.sources already carries every component -- read,
 # not rewritten (no file: line).
@@ -296,14 +305,18 @@ is_deeply(driver_for(host_profile('debian-12'))->{lines},
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
   golden_is($rec, 'driver/debian-14--volta');
 
-  # Ubuntu, B300 (580 or newer), apt-cache search empty: the 570 fallback of
-  # -server-open is resolved and rejected, the pinned 580 is proprietary.
+  # Ubuntu, B300 (580 or newer), apt-cache search empty after apt-get update
+  # (karr #35): -server-open is chosen in plan and the empty search makes it
+  # die before any install. Deliberately REPLACED claim: this used to die in
+  # plan with only read-only probes, because the search ran against the
+  # un-refreshed index; now the apt timers are stopped and apt-get update
+  # runs first -- still no package is installed.
   $rec = driver_on(host_profile('ubuntu-24.04', responses => [
     [ qr{^apt-cache search } => '', 0 ]
   ]), gpu_fixture('b300'));
-  like($rec->{error}, qr/ubuntu-server-open: branch 570 is older than 580/,
-    'ubuntu-24.04 + B300, empty search: the resolved fallback is rejected');
-  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
+  like($rec->{error}, qr/ubuntu-server-open chosen for .*finds no package after apt-get update/,
+    'ubuntu-24.04 + B300, empty search: dies naming the search');
+  is_deeply([ grep { / install / } @{ $rec->{lines} } ], [], '... no install command emitted');
   golden_is($rec, 'driver/ubuntu-24.04--b300--empty-search');
 }
 

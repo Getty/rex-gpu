@@ -28,23 +28,25 @@ package, which is also the one verified:
 
 =item * C<ubuntu-server> -- the newest C<nvidia-driver-NNN-server>
 (proprietary kernel module) that C<apt-cache search> finds (C<-open>
-filtered out), else C<nvidia-driver-570-server>.
+filtered out).
 
 =item * C<ubuntu-server-open> -- the newest
-C<nvidia-driver-NNN-server-open> (open kernel module), else
-C<nvidia-driver-570-server-open>.
+C<nvidia-driver-NNN-server-open> (open kernel module).
 
 =item * C<ubuntu-server-580> -- C<nvidia-driver-580-server>, proprietary,
 branch 580 exactly. Its installation candidate is checked after
-C<apt-get update> (L</prepare_source>); no other branch is substituted.
+C<apt-get update> (L</resolve_source>); no other branch is substituted.
 
 =back
 
-Before the search, the first two count as "newest branch, at least 580":
-580 is in the archive of every supported release, so they fit a GPU that
-needs 570 or 580 or newer but never one that stops at 580. The search
-(L</resolve_source>) then gives the exact branch, which is checked again: an
-empty search falls back to 570, which a GPU needing 580 or newer rejects.
+L<Rex::GPU::NVIDIA::Setup/plan> chooses among them without a package index:
+the first two count as "newest branch, at least 580" -- 580 is in the
+archive of every supported release -- so they fit a GPU that needs 570 or
+580 or newer but never one that stops at 580. Which package that is, and
+its exact branch, is looked up only after C<apt-get update>
+(L</resolve_source>) and checked again; nothing found, or a branch the GPU
+cannot use, dies before any driver package is installed. There is no
+hard-coded fallback package, and no other source is tried then.
 
 So a GPU without constraints (Turing to Hopper, no GPU) gets
 C<ubuntu-server>, Blackwell C<ubuntu-server-open>, Maxwell/Pascal/Volta
@@ -57,8 +59,9 @@ candidate, and the driver metapackage pulls it in anyway.
 
 # 580 is published for jammy and noble (Launchpad, source
 # nvidia-graphics-drivers-580-server, checked 2026-09-23: 580.178.04 on both,
-# next to 590 and 595). The apt-cache search runs in plan, against the index
-# of the last `apt-get update` -- stale on a fresh host (karr #35).
+# next to 590 and 595). The apt-cache search runs in resolve_source, after
+# `apt-get update` -- before it, a fresh image's index is stale or empty
+# (karr #35).
 sub sources {
   my ( $self ) = @_;
   return (
@@ -66,15 +69,13 @@ sub sources {
       name            => 'ubuntu-server',
       kernel_module   => 'proprietary',
       branch_at_least => 580,
-      search          => '^nvidia-driver-[0-9].*-server$',
-      fallback        => 'nvidia-driver-570-server'
+      search          => '^nvidia-driver-[0-9].*-server$'
     },
     {
       name            => 'ubuntu-server-open',
       kernel_module   => 'open',
       branch_at_least => 580,
-      search          => '^nvidia-driver-[0-9].*-server-open$',
-      fallback        => 'nvidia-driver-570-server-open'
+      search          => '^nvidia-driver-[0-9].*-server-open$'
     },
     {
       name            => 'ubuntu-server-580',
@@ -89,48 +90,56 @@ sub sources {
 
 =method resolve_source
 
-For a source with a C<search> pattern: runs C<apt-cache search> (read-only)
-for the newest matching package, else takes the C<fallback>, and returns the
-source with that one package and the branch in its name.
+Runs after the apt layer's C<apt-get update>
+(L<Rex::GPU::NVIDIA::Setup/resolve_plan>), read-only:
+
+=over
+
+=item * a source with a C<search> pattern: C<apt-cache search> for the
+newest matching package; returns the source with that one package (installed
+and verified) and the exact branch from its name. Nothing found, or a name
+without a branch, makes it C<unavailable> -- there is no fallback package:
+if the refreshed index does not list one, C<apt-get install> could not
+install it either.
+
+=item * a source with C<check_candidate>: C<apt-cache policy> must show an
+installation candidate for that package, else the source is
+C<unavailable>. No other package is substituted.
+
+=back
+
+Any other source is returned unchanged. A subclass that picks the package
+another way overrides this method; the requirement check after it stays.
 
 =cut
 
 sub resolve_source {
   my ( $self, $source ) = @_;
-  return $source unless defined $source->{search};
-  my $latest = $self->run_cmd("apt-cache search '$source->{search}' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
-    auto_die => 0);
-  chomp $latest if $latest;
-  # Filter out *-open variants from auto-detect (use regular server driver)
-  $latest = undef if $latest && $source->{kernel_module} ne 'open' && $latest =~ /-open$/;
-  my $pkg = $latest || $source->{fallback};
-  my ($branch) = $pkg =~ /^nvidia-driver-(\d+)-server/;
-  return {
-    %$source,
-    packages => [ $pkg ],
-    verify   => [ $pkg ],
-    defined $branch ? ( branch => $branch ) : ()
-  };
-}
-
-=method prepare_source
-
-After the apt layer's C<apt-get update>, for a source with
-C<check_candidate> (C<ubuntu-server-580>): dies unless C<apt-cache policy>
-shows an installation candidate for it. No other branch is substituted and
-nothing has been installed yet.
-
-=cut
-
-sub prepare_source {
-  my ( $self, $plan ) = @_;
-  $self->SUPER::prepare_source($plan);
-  my $pinned = $plan->{source} && $plan->{source}{check_candidate} or return;
-  my $policy = $self->run_cmd("LC_ALL=C apt-cache policy $pinned 2>/dev/null", auto_die => 0);
-  die "$pinned has no installation candidate on this ".$self->os." host — it is the "
-    . "newest driver that supports this pre-Turing GPU and no other branch is "
-    . "substituted; no driver was installed\n"
-    unless $self->_apt_candidate_present($policy);
+  if (defined $source->{search}) {
+    my $latest = $self->run_cmd("apt-cache search '$source->{search}' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
+      auto_die => 0);
+    chomp $latest if $latest;
+    # Filter out *-open variants from auto-detect (use regular server driver)
+    $latest = undef if $latest && $source->{kernel_module} ne 'open' && $latest =~ /-open$/;
+    return { %$source, unavailable => "apt-cache search '".$source->{search}."' finds no "
+      .'package after apt-get update (did the update fail, or is the restricted '
+      .'component missing from the apt sources?)' }
+      unless $latest;
+    my ($branch) = $latest =~ /^nvidia-driver-(\d+)-server/;
+    return { %$source, unavailable => 'no driver branch in the package name '.$latest }
+      unless defined $branch;
+    my %resolved = ( %$source, packages => [ $latest ], verify => [ $latest ], branch => $branch );
+    delete $resolved{branch_at_least};
+    return \%resolved;
+  }
+  if (defined $source->{check_candidate}) {
+    my $pinned = $source->{check_candidate};
+    my $policy = $self->run_cmd("LC_ALL=C apt-cache policy $pinned 2>/dev/null", auto_die => 0);
+    return { %$source, unavailable => $pinned.' has no installation candidate after '
+      .'apt-get update, and no other package is substituted' }
+      unless $self->_apt_candidate_present($policy);
+  }
+  return $source;
 }
 
 1;

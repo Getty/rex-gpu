@@ -1220,7 +1220,9 @@ L</install_driver> dies before changing the host.
 See the C<gpu> option of L</install_driver> for the exact packages.
 
 On Ubuntu, the newest available C<nvidia-driver-NNN-server> package is
-auto-detected and installed by default.
+auto-detected and installed by default. It is looked up after C<apt-get
+update>; if the refreshed index lists none, C<install_driver> dies before
+installing a driver package.
 
 On RHEL/Rocky/AlmaLinux/CentOS Stream, the NVIDIA CUDA repository is added
 and the open-kernel DKMS variant is used by default. For RHEL 10+ the module

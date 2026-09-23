@@ -36,8 +36,8 @@ sub sources {
   );
 }
 
-# The mirror goes in before the inherited step runs `apt-get update` (and the
-# candidate check of check_candidate above).
+# The mirror goes in before the inherited step runs `apt-get update`; the
+# candidate check of check_candidate above runs after it (resolve_source).
 sub prepare_source {
   my ( $self, $plan ) = @_;
   if ($self->has_apt_line) {

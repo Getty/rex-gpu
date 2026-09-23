@@ -19,6 +19,14 @@ Revision history for Rex-GPU
     a failed zypper install was reported as success. openSUSE is unverified
     and unsupported; this can newly die there. Not hardware-verified
     (karr #27)
+  - Ubuntu: the newest nvidia-driver-NNN-server(-open) package is looked up
+    after apt-get update, not before, so a fresh image with stale or empty
+    package lists no longer gets an old branch. If the refreshed index lists
+    no such package, install_driver and gpu_setup die before installing a
+    driver package; the silent nvidia-driver-570-server(-open) fallback is
+    gone. Setup classes gain the step resolve_plan (after prepare_source),
+    where resolve_source now runs; override resolve_source to choose the
+    package another way. Not hardware-verified (karr #35)
   - Use your own driver setup class: gpu_setup / install_driver take
     setup => 'My::GPU::Setup' (or an object), and
     `set gpu_nvidia_setup => 'My::GPU::Setup'` in the Rexfile does the same
