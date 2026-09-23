@@ -375,7 +375,9 @@ my @READ_ONLY = (
   qr{${RUN}cat \S+ 2>/dev/null$},
   qr{${RUN}ls -1 \S+ 2>/dev/null$},
   qr{${RUN}(?:LC_ALL=C )?apt-cache (?:search|policy) },
-  qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$},
+  qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^(?:ii|\[hi\]i)'$},
+  qr{${RUN}nvidia-ctk --version 2>&1$},
+  qr{${RUN}test -s \S+$},
   qr{${RUN}rpm -q },
   qr{${RUN}lsmod },
   qr{^can_run: }

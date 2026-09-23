@@ -1,6 +1,17 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_container_toolkit skips an installed toolkit (nvidia-ctk
+    --version runs and dpkg/rpm lists nvidia-container-toolkit), e.g. on a
+    re-run or a DGX OS image. A re-run therefore no longer upgrades the
+    toolkit; do that with the package manager. On Debian/Ubuntu the apt
+    timers are stopped first and curl/gnupg install via apt-get with the
+    dpkg lock timeout instead of Rex::Pkg, so the dpkg lock held after the
+    first-deploy reboot no longer fails the install. The repository key is
+    replaced on every install (a rotated key is picked up), and a failed
+    download or dearmor dies instead of being ignored. openSUSE now checks
+    the install with rpm -q and dies if the package is missing. Not
+    hardware-verified (karr #37, #38, #42, #27)
   - Use your own driver setup class: gpu_setup / install_driver take
     setup => 'My::GPU::Setup' (or an object), and
     `set gpu_nvidia_setup => 'My::GPU::Setup'` in the Rexfile does the same

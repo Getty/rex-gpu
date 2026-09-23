@@ -1,7 +1,8 @@
-# golden: toolkit/debian-13
+# golden: toolkit/ubuntu-24.04--ctk-broken
 # Host interactions Rex::GPU emits, in order. Regenerate with
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 can_run: nvidia-ctk
+run: nvidia-ctk --version 2>&1
 run: systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y --no-upgrade curl gnupg
 run: dpkg -l curl 2>/dev/null | grep -q '^ii'

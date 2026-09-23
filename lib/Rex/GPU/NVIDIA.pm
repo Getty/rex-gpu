@@ -17,6 +17,7 @@ use Module::Runtime qw( is_module_name module_notional_filename use_module );
 use Scalar::Util qw( blessed );
 
 use Rex::GPU::NVIDIA::Setup;
+use Rex::GPU::NVIDIA::Setup::Apt;
 use Rex::GPU::NVIDIA::Setup::Debian;
 use Rex::GPU::NVIDIA::Setup::RHEL;
 use Rex::GPU::NVIDIA::Setup::SUSE;
@@ -388,11 +389,35 @@ Install the NVIDIA Container Toolkit (C<nvidia-container-toolkit> package)
 from the official NVIDIA package repository at
 L<https://nvidia.github.io/libnvidia-container/>.
 
-The repository GPG key is imported and the package repository is registered
-before installing. On Debian/Ubuntu the signed APT source list is written;
-on RHEL the C<.repo> file is fetched via C<curl>; on openSUSE Leap the
-base repository URL is added directly (zypper cannot parse RPM C<.repo>
-files directly).
+B<Already installed toolkit.> If C<nvidia-ctk --version> runs and the
+package manager lists C<nvidia-container-toolkit> as installed (C<dpkg -l>
+C<ii>/C<hi>, or C<rpm -q>) -- a re-run, or an image that ships the toolkit,
+such as NVIDIA DGX OS -- C<install_container_toolkit> logs this and returns
+without touching the repository, the key or the package. The trade-off: a
+re-run no longer upgrades an installed toolkit to the repository's newest
+version; upgrade it with the package manager (C<apt-get install
+--only-upgrade nvidia-container-toolkit>, C<dnf upgrade
+nvidia-container-toolkit>, C<zypper update nvidia-container-toolkit>). An
+C<nvidia-ctk> that the package manager does not know about (e.g. unpacked by
+the GPU Operator) does not count: the package is installed, because
+L</configure_containerd> relies on the packaged
+C</usr/bin/nvidia-container-runtime>.
+
+Otherwise the repository GPG key is imported and the package repository is
+registered before installing. On Debian/Ubuntu the apt timers
+(C<unattended-upgrades>, C<apt-daily>, C<apt-daily-upgrade>) are stopped
+first and every C<apt-get> -- the C<curl>/C<gnupg> helpers included -- waits
+up to 120 seconds for the dpkg lock, as in L</install_driver>; the key is
+downloaded and dearmored to a temporary file that replaces
+C</usr/share/keyrings/nvidia-container-toolkit-keyring.gpg> only when it is
+non-empty, so a re-run refreshes a rotated key, and a failed download or
+dearmor dies. Then the signed APT source list is written. On RHEL the
+C<.repo> file is fetched via C<curl>; on openSUSE Leap the base repository
+URL is added directly (zypper cannot parse RPM C<.repo> files directly).
+
+The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
+through L<Rex::Commands::Pkg/pkg>, and the result is checked with C<dpkg -l>
+(C<ii>) or C<rpm -q> on every distro, openSUSE included.
 
 Dies if the OS is not supported or if installation fails.
 
@@ -401,19 +426,24 @@ Dies if the OS is not supported or if installation fails.
 sub install_container_toolkit {
   my $os = operating_system();
 
+  my $family = is_debian() ? 'debian'
+    : is_redhat() ? 'redhat'
+    : is_suse() ? 'suse'
+    : undef;
+  die "Unsupported OS for NVIDIA Container Toolkit: $os\n" unless $family;
+
+  return if _toolkit_present($family);
+
   Rex::Logger::info("Installing NVIDIA Container Toolkit");
 
-  if (is_debian()) {
+  if ($family eq 'debian') {
     _install_toolkit_debian();
   }
-  elsif (is_redhat()) {
+  elsif ($family eq 'redhat') {
     _install_toolkit_redhat();
   }
-  elsif (is_suse()) {
-    _install_toolkit_suse();
-  }
   else {
-    die "Unsupported OS for NVIDIA Container Toolkit: $os\n";
+    _install_toolkit_suse();
   }
 
   Rex::Logger::info("NVIDIA Container Toolkit installed");
@@ -610,20 +640,83 @@ sub _os_major_version {
 #  Container toolkit installation
 # ============================================================
 
-sub _install_toolkit_debian {
-  pkg ["curl", "gnupg"], ensure => "present";
+# karr #42: a toolkit that is already there -- a re-run, or an image that
+# ships it (DGX OS installs it from NVIDIA's apt repository) -- is left as it
+# is. Both signals are required: nvidia-ctk runs, AND the package manager has
+# the package. nvidia-ctk alone is not enough: configure_containerd points
+# containerd at /usr/bin/nvidia-container-runtime, which only the package
+# guarantees, and a copy unpacked outside the package manager (the GPU
+# Operator's /usr/local/nvidia/toolkit) must still get the package. dpkg
+# 'hi' (held, installed) counts as installed.
+sub _toolkit_present {
+  my ($family) = @_;
+  return 0 unless can_run("nvidia-ctk");
+  my $version = run "nvidia-ctk --version 2>&1", auto_die => 0;
+  return 0 if $? != 0;
+  ($version) = split /\n/, ($version // '');
+  $version //= 'nvidia-ctk';
+  run(($family eq 'debian'
+      ? "dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^[hi]i'"
+      : "rpm -q nvidia-container-toolkit 2>&1"),
+    auto_die => 0);
+  if ($? != 0) {
+    Rex::Logger::info("nvidia-ctk runs ($version) but the nvidia-container-toolkit package is not installed — installing it");
+    return 0;
+  }
+  Rex::Logger::info("NVIDIA Container Toolkit already present — skipping repository setup and install ($version)");
+  return 1;
+}
 
-  run "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null",
-    auto_die => 0;
+sub _install_toolkit_debian {
+  my $keyring = '/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg';
+
+  # The driver path's apt layer (karr #37): the apt timers stopped before the
+  # first apt-get, DPkg::Lock::Timeout on every one, install run directly and
+  # dpkg -l ^ii as the only evidence. After the first-deploy reboot
+  # apt-daily/cloud-init hold the dpkg lock; Rex::Pkg (pkg) has no lock
+  # timeout and stopping the timers does not release a lock cloud-init holds,
+  # so curl/gnupg go through apt-get too. --no-upgrade keeps pkg's
+  # ensure => present meaning: an installed curl or gnupg is not upgraded.
+  my $apt = Rex::GPU::NVIDIA::Setup::Apt->new;
+  $apt->prepare_host({ packages => [ 'curl', 'gnupg', 'nvidia-container-toolkit' ] });
+  $apt->run_cmd('DEBIAN_FRONTEND=noninteractive '.$apt->apt_get.' install -y --no-upgrade curl gnupg',
+    auto_die => 0);
+  $apt->verify_packages({ verify => [ 'curl', 'gnupg' ] });
+
+  _install_toolkit_keyring($keyring);
 
   file "/etc/apt/sources.list.d/nvidia-container-toolkit.list",
-    content => 'deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
+    content => 'deb [signed-by='.$keyring.'] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /' . "\n";
 
-  run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
-  # DPkg::Lock::Timeout=120: wait for apt-daily.timer lock that fires after reboot.
-  run "DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y nvidia-container-toolkit", auto_die => 0;
-  my $check = run "dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'", auto_die => 0;
-  die "nvidia-container-toolkit not installed\n" if $? != 0;
+  $apt->prepare_source({});
+  $apt->install_packages({ packages => [ 'nvidia-container-toolkit' ] });
+  $apt->verify_packages({ verify => [ 'nvidia-container-toolkit' ] });
+}
+
+# karr #38: gpg --dearmor -o on an existing file without --yes fails with no
+# TTY, so a re-run kept the old key forever and the error was swallowed. The
+# key is dearmored to a temporary file that replaces the keyring only when it
+# is non-empty (gpg can leave an empty file on bad input), readable by apt's
+# _apt sandbox user; any failure dies instead of carrying on to an apt-get
+# update that cannot verify the repository.
+sub _install_toolkit_keyring {
+  my ($keyring) = @_;
+  my $asc = "$keyring.asc.tmp";
+  my $tmp = "$keyring.tmp";
+
+  run "curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey -o $asc", auto_die => 0;
+  if ($? != 0) {
+    run "rm -f $asc", auto_die => 0;
+    die "Could not download the NVIDIA Container Toolkit GPG key (https://nvidia.github.io/libnvidia-container/gpgkey)\n";
+  }
+  run "gpg --batch --yes --dearmor -o $tmp $asc && test -s $tmp && chmod 0644 $tmp && mv -f $tmp $keyring",
+    auto_die => 0;
+  my $failed = $? != 0;
+  run "rm -f $asc $tmp", auto_die => 0;
+  die "Could not dearmor the NVIDIA Container Toolkit GPG key into $keyring\n" if $failed;
+
+  run "test -s $keyring", auto_die => 0;
+  die "NVIDIA Container Toolkit keyring $keyring is missing or empty\n" if $? != 0;
 }
 
 sub _install_toolkit_redhat {
@@ -650,7 +743,10 @@ sub _install_toolkit_suse {
   run "zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>/dev/null",
     auto_die => 0;
 
+  # zypper's exit code is not the evidence (karr #27): rpm -q is, as on RHEL.
   run "zypper install -y nvidia-container-toolkit", auto_die => 0;
+  my $check = run "rpm -q nvidia-container-toolkit 2>&1", auto_die => 0;
+  die "nvidia-container-toolkit not installed\n" if $? != 0;
 }
 
 # ============================================================

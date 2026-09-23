@@ -262,7 +262,9 @@ via DKMS for kernel-version independence. Nouveau is blacklisted and the
 initramfs is regenerated.
 
 =item 3. B<NVIDIA Container Toolkit> — Installs C<nvidia-container-toolkit>
-from the official NVIDIA repository for all supported distributions.
+from the official NVIDIA repository for all supported distributions, unless
+it is already installed (then it is left as it is, not upgraded; see
+L<Rex::GPU::NVIDIA/install_container_toolkit>).
 
 =item 4. B<CDI spec generation> — Writes C</etc/cdi/nvidia.yaml> so the
 Kubernetes device plugin can enumerate GPU resources without privileged
