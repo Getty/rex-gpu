@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T20:26:45Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:26:45Z
+created: 2026-09-23T16:49:06Z
+id: 27
+priority: medium
+started: 2026-09-23T20:21:20Z
+status: done
+title: 'SUSE: Treiber- und Toolkit-Install ohne rpm -q-Verifikation (Fehlschlag wird
+  als Erfolg gemeldet)'
+updated: 2026-09-23T20:26:45Z
+---
+
+Aus dem Architektur-Review (Epic): _install_driver_suse und der SUSE-Toolkit-Install pruefen nicht per rpm -q, anders als Debian/RHEL. SUSE ist laut README unverified/unsupported. Kann nach Fix neu sterben. Im Epic als T6.
