@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-23T20:13:31Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:13:31Z
+created: 2026-09-23T17:23:08Z
+id: 34
+priority: medium
+started: 2026-09-23T20:03:44Z
+status: done
+title: 'T5: setup => / set gpu_nvidia_setup / Custom-Klassen aus Projekt-lib, POD
+  + eg/ (Teil von #25)'
+updated: 2026-09-23T20:13:31Z
+---
+
+Siehe Epic #25 (Architektur, Migrationsschritte, Entscheidungen). T0-T3 und T5 verhaltensneutral bzw. rein additiv; Golden-Sequenzen aus T0 muessen exakt passen.
+
+Aus T3: reboot/modprobe/verify_nvidia bleiben in install_driver -- verify_nvidia ist exportiert und prueft auch das Toolkit, _reboot_and_wait braucht die Live-Connection. Beim Design von setup => auch reboot-Attribut + Verschieben der Treiber-Haelfte von verify_nvidia in Setup klaeren. Veraltete Kommentare: t/10 (_blacklist_nouveau), t/20 (_install_driver_suse).
