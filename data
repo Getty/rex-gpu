@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T20:26:41Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:26:41Z
+created: 2026-09-23T17:42:03Z
+id: 38
+priority: low
+started: 2026-09-23T20:21:10Z
+status: done
+title: 'Toolkit-Keyring: gpg --dearmor ohne --yes scheitert beim Re-Run still, rotierter
+  NVIDIA-Key wird nie erneuert'
+updated: 2026-09-23T20:26:41Z
+---
+
+Aus T0 (#29): gpg --dearmor -o ...keyring.gpg ohne --yes schlaegt fehl, wenn die Datei existiert (kein TTY); Fehler wird geschluckt.
