@@ -1,0 +1,19 @@
+# golden: driver/leap-16.0--blackwell
+# Host interactions Rex::GPU emits, in order. Regenerate with
+# REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
+run: nvidia-smi -L 2>&1
+run(auto_die=default): uname -r
+run: rpm -e $(rpm -qa | grep -E '^(nvidia|libnvidia)' | grep -v 'container') 2>/dev/null || true
+run: zypper rr nvidia-gfx 2>/dev/null || true
+run: zypper addrepo --refresh https://download.nvidia.com/opensuse/leap/16.0/ nvidia-gfx 2>/dev/null
+run: zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null
+run: zypper install -y nvidia-open-driver-G07-signed-kmp-meta
+run: zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true
+file: /etc/modprobe.d/blacklist-nouveau.conf
+  | blacklist nouveau
+  | options nouveau modeset=0
+run: dracut --force 2>/dev/null
+run: modprobe nvidia
+run: lsmod | grep '^nvidia '
+run: nvidia-smi -L 2>&1
+can_run: nvidia-ctk

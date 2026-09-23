@@ -1,0 +1,11 @@
+# golden: toolkit/debian-12--not-installed
+# Host interactions Rex::GPU emits, in order. Regenerate with
+# REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
+pkg: curl gnupg ensure=present
+run: curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg 2>/dev/null
+file: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+  | deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /
+run: apt-get -o DPkg::Lock::Timeout=120 update -q
+run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y nvidia-container-toolkit
+run: dpkg -l nvidia-container-toolkit 2>/dev/null | grep -q '^ii'
+DIE: nvidia-container-toolkit not installed
