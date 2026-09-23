@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-23T20:03:29Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:03:29Z
+created: 2026-09-23T17:23:04Z
+id: 33
+priority: medium
+started: 2026-09-23T19:48:40Z
+status: done
+title: 'T4: requirement-getriebenes plan + Multi-GPU-Schnittmenge ersetzt k16/k18/k26-Helper
+  (Teil von #25)'
+updated: 2026-09-23T20:03:29Z
+---
+
+Siehe Epic #25 (Architektur, Migrationsschritte, Entscheidungen). T0-T3 und T5 verhaltensneutral bzw. rein additiv; Golden-Sequenzen aus T0 muessen exakt passen.
+
+Aus T1: Branch-Untergrenzen (Blackwell 570, Blackwell Ultra 580, GB10 570) sind recherchiert, aber erst ab T4 wirksam -- GB10-Floor vorher pruefen (DGX Spark liefert 580; open-README listet 2E12 erst ab 580.126.09). Requirement->intersect liefert members + describe() fuer Fehlermeldungen.
+
+Hinweise aus T2: plan muss read-only bleiben -- Ubuntu-Candidate-Check geht erst nach apt-get update (derzeit prepare_source); apt-cache search in plan liest veraltete Indizes (#35). Wrapper in NVIDIA.pm (Literal-Klassennamen) mit dem Umschreiben von t/80/90/95 entfernen. Debian non-free kann bei bewusster Golden-Regeneration in einen Source-Schritt wandern.
+
+Hinweise aus T3: RHEL-plan-Keys (major, legacy) und SUSE (repo_url) sind die Andockpunkte fuer sources. RHEL/SUSE haben keinen eigenen Blackwell-Zweig (laufen ueber den Default-open-Pfad). Rpm hat kein Lock-Timeout-Aequivalent.
