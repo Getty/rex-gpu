@@ -3,8 +3,8 @@ Revision history for Rex-GPU
 {{$NEXT}}
   - configure_containerd (rke2/k3s) now heals an EARLIER containerd clobber: a
     host set up by the 0.001 release carries a stale full-config
-    config.toml.tmpl (the bare imports=... + version=2 template, no
-    `{{ template "base" . }}`) that replaced the RKE2/K3s base config. RKE2/K3s
+    config.toml.tmpl (the bare imports=... + version=2 template, missing the
+    Go-template include of the RKE2/K3s base config) that replaced it. RKE2/K3s
     render that stale template, so the generated config.toml already shows an
     nvidia runtime and the "already-wired" no-op that karr #9 added left the
     clobber — missing SystemdCgroup / pinned sandbox image / certs.d — in place.
