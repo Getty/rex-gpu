@@ -1,6 +1,21 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver on Debian installs a Blackwell GPU's driver (B200/GB200/
+    B300, GeForce RTX 50xx, RTX PRO Blackwell, GB10) from NVIDIA's CUDA apt
+    repository: cuda-keyring for debian12/debian13 (x86_64, or sbsa on
+    arm64), then nvidia-driver-cuda + nvidia-kernel-open-dkms, with Debian
+    non-free left alone. It used to install Debian's nvidia-driver (535 on
+    bookworm, 550 on trixie). Those versions cannot drive Blackwell, so dpkg
+    reported the driver installed but the module never bound. Both open-set
+    packages must be ii afterwards. A leftover Debian nvidia-driver no longer
+    passes that check. A Blackwell GPU on any other Debian release or
+    architecture now dies before the host is touched. Every other GPU on
+    Debian is unchanged. Package names and the dependency closure were
+    checked against the repository indexes. The install has not run on
+    hardware (karr #18)
+  - generate_cdi_specs POD: the CDI spec captures the MIG layout at generation
+    time; say how to regenerate it after MIG reconfiguration (karr #19)
   - configure_containerd (rke2/k3s) now heals an EARLIER containerd clobber: a
     host set up by the 0.001 release carries a stale full-config
     config.toml.tmpl (the bare imports=... + version=2 template, missing the

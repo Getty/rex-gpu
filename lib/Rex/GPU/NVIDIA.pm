@@ -68,14 +68,31 @@ unloaded before the NVIDIA kernel module can bind to the device.
 Optional hashref — the detected GPU this driver install is for, in the same
 shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
 (C<name>, C<device_id>, ...). L<Rex::GPU> passes C<< $compute[0] >> here.
-Currently used only on Ubuntu: C<device_id> selects the C<-open> driver
-package variant instead of the default C<-server> one for
-Blackwell-architecture silicon (B200/GB200/B300, GeForce RTX 50xx, RTX PRO
-Blackwell, the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module
-at all, on any CPU architecture (see
-L<Rex::GPU::Detect/open_kernel_module_required>). Every other GPU keeps the
-C<-server> package; every other OS branch ignores the option. Omit it (or pass
-C<undef>) to keep the previous, GPU-agnostic package selection.
+Used on Debian and Ubuntu to recognise Blackwell-architecture silicon
+(B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell, the GB10 / NVIDIA DGX
+Spark) by its C<device_id>. Blackwell has no proprietary kernel module at all,
+on any CPU architecture (see
+L<Rex::GPU::Detect/open_kernel_module_required>):
+
+=over
+
+=item * On Ubuntu it selects the C<-open> driver package variant instead of
+the default C<-server> one.
+
+=item * On Debian no Debian-packaged driver supports Blackwell (bookworm
+ships 535, trixie 550), so the driver comes from NVIDIA's CUDA apt repository
+instead of Debian C<non-free>: the C<cuda-keyring> package for C<debian12> or
+C<debian13> (C<x86_64> for amd64, C<sbsa> for arm64) is installed, then the
+compute-only open-module set C<nvidia-driver-cuda> +
+C<nvidia-kernel-open-dkms>. Debian C<non-free> is not enabled on that path.
+A Blackwell GPU on any other Debian release (11, testing/sid, a derivative's
+own version) or architecture B<dies> before anything is changed on the host.
+
+=back
+
+Every other GPU keeps the previous selection (Ubuntu C<-server>, Debian
+C<non-free> C<nvidia-driver>); RHEL and openSUSE ignore the option. Omit it
+(or pass C<undef>) to keep the previous, GPU-agnostic package selection.
 
 =back
 
@@ -347,8 +364,22 @@ sub _install_driver_debian {
   my $arch = run "dpkg --print-architecture", auto_die => 0;
   chomp $arch;
 
-  # Ensure non-free repos are enabled (Debian only, Ubuntu has restricted by default)
-  if ($os ne 'Ubuntu') {
+  # Debian + Blackwell (karr #18): no Debian-packaged driver supports Blackwell
+  # (bookworm 535, trixie/sid 550; Blackwell needs >= 570 AND the open kernel
+  # module), so this install comes from NVIDIA's CUDA apt repo instead. Decided
+  # BEFORE anything is written to the host: an unsupported Debian release or
+  # architecture dies here, untouched. Undef for every non-Blackwell GPU (and
+  # always on Ubuntu) — the Debian non-free path below is then unchanged; the
+  # release is only read (one more remote file read) when it can matter.
+  my $cuda_repo = ($os ne 'Ubuntu' && _ubuntu_needs_open_kernel_module($gpu))
+    ? _debian_nvidia_cuda_repo($gpu, Rex::Commands::Gather::operating_system_release(), $arch)
+    : undef;
+
+  # Ensure non-free repos are enabled (Debian only, Ubuntu has restricted by
+  # default). Not on the CUDA-repo path: its package set resolves from NVIDIA's
+  # repo plus Debian main alone, and Debian's own nvidia packages must not be
+  # mixed in.
+  if ($os ne 'Ubuntu' && !$cuda_repo) {
     _enable_debian_nonfree();
   }
 
@@ -382,6 +413,13 @@ sub _install_driver_debian {
     }
     push @packages, ($latest || ($open ? "nvidia-driver-570-server-open" : "nvidia-driver-570-server"));
   }
+  elsif ($cuda_repo) {
+    # Debian + Blackwell: NVIDIA's compute-only (headless) open-module set
+    # from the CUDA repo. nvidia-driver-cuda provides nvidia-smi itself.
+    Rex::Logger::info("  Blackwell-class GPU on Debian — using NVIDIA's CUDA repo "
+      . "($cuda_repo->{distro}/$cuda_repo->{arch}), open kernel module");
+    push @packages, @{ $cuda_repo->{packages} };
+  }
   else {
     # Debian: just the running kernel's headers (sufficient for DKMS) + driver
     # Do NOT install linux-headers-$arch meta-package — it pulls in a new kernel
@@ -395,6 +433,7 @@ sub _install_driver_debian {
   # causes apt-get to fail immediately even with DPkg::Lock::Timeout set.
   run "systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true",
     auto_die => 0;
+  _add_nvidia_cuda_apt_repo($cuda_repo) if $cuda_repo;
   run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
 
   # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
@@ -404,10 +443,85 @@ sub _install_driver_debian {
 
   # On Ubuntu the driver package is e.g. nvidia-driver-590-server (or, for
   # Blackwell-architecture GPUs, nvidia-driver-590-server-open); on Debian it
-  # is nvidia-driver. Check whichever name we actually installed.
-  my $driver_pkg = ($os eq 'Ubuntu') ? $packages[-1] : 'nvidia-driver';
-  my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
-  die "$driver_pkg not installed after apt-get install — check apt output\n"
+  # is nvidia-driver. Check whichever name we actually installed. On the
+  # Debian CUDA-repo path, NOT nvidia-driver: that name exists in Debian
+  # non-free too, so a leftover Debian 535/550 install would pass it. Both
+  # packages of the open set are checked instead — nvidia-kernel-open-dkms
+  # exists only in NVIDIA's repo. A DKMS build that fails in postinst leaves
+  # the package half-configured (not ii), so this still dies on it.
+  my @verify = $cuda_repo              ? @{ $cuda_repo->{packages} }
+             : ($os eq 'Ubuntu')       ? ($packages[-1])
+             :                           ('nvidia-driver');
+  for my $driver_pkg (@verify) {
+    my $check = run "dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0;
+    die "$driver_pkg not installed after apt-get install — check apt output\n"
+      if $? != 0;
+  }
+}
+
+# Pure selection (karr #18): should this Debian (non-Ubuntu) install come from
+# NVIDIA's CUDA apt repo instead of Debian non-free, and with what parameters?
+#
+#   $gpu     — detected GPU hashref (Rex::GPU::Detect shape), may be undef
+#   $release — operating_system_release(): /etc/debian_version, e.g. "13.1",
+#              "12.11", "trixie/sid" (NOT operating_system_version(), which
+#              strips the dots: "12.11" -> "1211")
+#   $arch    — `dpkg --print-architecture`: amd64 / arm64
+#
+# Returns undef unless the GPU needs the open kernel module (Blackwell, see
+# Rex::GPU::Detect::open_kernel_module_required; the "_ubuntu_" predicate is
+# distro-neutral despite its name) — the caller then keeps the Debian
+# non-free path, unchanged. Otherwise returns { distro, arch, keyring_url,
+# packages }.
+#
+# Dies — fail loud, before any change on the host — for a Blackwell GPU on a
+# Debian release NVIDIA publishes no repo for (only debian12/debian13 exist;
+# 11, 14, testing/sid "forky/sid", a derivative's own version) or on an
+# architecture other than amd64/arm64. Falling back to Debian non-free there
+# would install a driver that dpkg reports as ii but whose module never binds
+# — exactly the bug this path fixes; guessing a neighbouring repo would mix
+# a foreign distro's libc/dkms into the host.
+sub _debian_nvidia_cuda_repo {
+  my ($gpu, $release, $arch) = @_;
+  return unless _ubuntu_needs_open_kernel_module($gpu);
+
+  my $major = _os_major_version($release // '');
+  die "Blackwell-class NVIDIA GPU on Debian release '" . ($release // '') . "': "
+    . "Debian's own nvidia packages cannot drive it and NVIDIA's CUDA repo only "
+    . "covers Debian 12 and 13 — install the driver manually\n"
+    unless $major == 12 || $major == 13;
+
+  $arch //= '';
+  die "Blackwell-class NVIDIA GPU on Debian architecture '$arch': NVIDIA's CUDA "
+    . "repo only covers amd64 and arm64\n"
+    unless $arch eq 'amd64' || $arch eq 'arm64';
+
+  my $distro    = "debian$major";
+  my $repo_arch = _cuda_repo_arch($arch);   # arm64 -> sbsa, amd64 -> x86_64
+  return {
+    distro      => $distro,
+    arch        => $repo_arch,
+    keyring_url => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/$repo_arch/cuda-keyring_1.1-1_all.deb",
+    packages    => [ 'nvidia-driver-cuda', 'nvidia-kernel-open-dkms' ]
+  };
+}
+
+# Register NVIDIA's CUDA apt repo via its cuda-keyring package (installs the
+# signing key and the sources.list.d entry). curl is an inert helper, so pkg
+# is fine for it; the keyring itself goes through apt-get (lock timeout) like
+# every other package here. Dies if the keyring did not end up installed —
+# without it the following apt-get install can only fail with a misleading
+# "unable to locate package".
+sub _add_nvidia_cuda_apt_repo {
+  my ($repo) = @_;
+  Rex::Logger::info("  Adding NVIDIA CUDA repo ($repo->{distro}/$repo->{arch})...");
+  pkg ["curl"], ensure => "present";
+  run q{t=$(mktemp -d) && curl -fsSL -o "$t/cuda-keyring.deb" }
+    . $repo->{keyring_url}
+    . q{ && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y "$t/cuda-keyring.deb"; rm -rf "$t"},
+    auto_die => 0;
+  my $check = run "dpkg -l cuda-keyring 2>/dev/null | grep -q '^ii'", auto_die => 0;
+  die "cuda-keyring not installed — cannot add NVIDIA's CUDA repo ($repo->{keyring_url})\n"
     if $? != 0;
 }
 
@@ -911,6 +1025,15 @@ first-deploy reboot even though the refresh unit owns CDI from then on.
 This step must be run after L</install_container_toolkit> (which provides
 C<nvidia-ctk> and the refresh unit) and, on first deploy, after the reboot that
 activates the NVIDIA kernel module (so the tool can enumerate physical devices).
+
+B<MIG.> The spec reflects the MIG layout at the time it is generated (MIG
+instances are included by default). Neither the static C</etc/cdi/nvidia.yaml>
+nor C<nvidia-cdi-refresh> regenerates it when MIG mode or instances are
+reconfigured. After changing MIG, run
+C<systemctl restart nvidia-cdi-refresh.service>, or on a host without that unit
+C<nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml>. The MIG strategy
+Kubernetes exposes (C<single> / C<mixed>) is configured in the NVIDIA device
+plugin or GPU Operator, not here.
 
 =cut
 
