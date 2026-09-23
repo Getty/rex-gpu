@@ -9,7 +9,12 @@ use Rex::Commands::File;
 use Rex::Commands::Gather;
 use Rex::Commands::Pkg;
 use Rex::Commands::Run;
+use Rex::Config ();
 use Rex::Logger;
+
+use Carp qw( croak );
+use Module::Runtime qw( is_module_name module_notional_filename use_module );
+use Scalar::Util qw( blessed );
 
 use Rex::GPU::NVIDIA::Setup;
 use Rex::GPU::NVIDIA::Setup::Debian;
@@ -81,9 +86,39 @@ older) next to a B200 (open module only) -- naming the GPUs on each side.
 A single GPU hashref: C<< gpu => $g >> is C<< gpus => [ $g ] >>. Kept for
 callers from before C<gpus>; passing both dies.
 
+=item C<setup>
+
+B<Experimental.> A L<Rex::GPU::NVIDIA::Setup> class name or object to
+install with, instead of the class for the OS. Chosen in this order: this
+option, then C<set gpu_nvidia_setup =E<gt> ...> in the Rexfile, then
+L</setup_class_for_os> (see L</setup_for>). A class name is loaded from
+C<@INC> -- Rex puts the C<lib/> directory next to the Rexfile there --
+unless the package is already defined, e.g. in the Rexfile itself. An
+object is used as it is, except that one without GPUs of its own gets
+C<gpus> (see L<Rex::GPU::NVIDIA::Setup/adopt>). A module that is missing
+or does not compile, or a class that is not a Setup, dies before anything
+touches the host. One object serves one host: build it inside the task (it
+caches that host's facts); a second install with it dies. With a class of
+your own, an OS without a built-in class is no longer refused. How to write
+one:
+L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>.
+
+=item C<requirement>
+
+B<Experimental.> An extra constraint on the driver: a hashref with any of
+C<kernel_module> (C<open>, C<proprietary>, C<either>), C<min_branch>,
+C<max_branch>, or a L<Rex::GPU::NVIDIA::Requirement> object. It is
+B<intersected> with what C<gpus> need, never replaces it: C<< { kernel_module
+=E<gt> 'open' } >> moves an Ada to the open driver, but on a V100
+(proprietary only) makes C<install_driver> die before anything on the host
+is changed, and a Kepler is refused whatever it says. An unknown key or a
+bad value dies before the host is touched. See
+L<Rex::GPU::NVIDIA::Setup/extra_requirement>.
+
 =back
 
-Omit both (or pass C<undef>) to keep the GPU-agnostic package selection.
+Omit C<gpus> and C<gpu> (or pass C<undef>) to keep the GPU-agnostic
+package selection.
 
 Each distro's L<Rex::GPU::NVIDIA::Setup> class has an ordered list of
 driver sources; the first that fits the requirement is installed, and if
@@ -135,6 +170,8 @@ proprietary 580 one (Ubuntu C<nvidia-driver-580-server>).
   install_driver(reboot => 1);   # install, reboot, verify
   install_driver(gpus => [ grep { $_->{compute} } @{ $gpus->{nvidia} } ]);
   install_driver(gpu => $gpus->{nvidia}[0]);   # one GPU, the older form
+  install_driver(gpus => \@compute, setup => 'My::GPU::Setup');
+  install_driver(gpus => \@compute, requirement => { min_branch => 580 });
 
 =cut
 
@@ -147,21 +184,23 @@ sub install_driver {
   die "install_driver: gpus must be an arrayref of GPU hashrefs\n"
     unless ref $gpus eq 'ARRAY';
 
-  # Every supported OS runs through its Setup class (epic karr #25, T2/T3): the
+  # Every supported OS runs through a Setup class (epic karr #25, T2/T3): the
   # already-installed short-circuit, the Kepler rejection, the multi-GPU
   # requirement, package selection, install, verification and the nouveau
-  # blacklist are its steps.
-  my $setup_class = Rex::GPU::NVIDIA->setup_class_for_os;
-  unless ($setup_class) {
+  # blacklist are its steps. Which class: setup =>, set gpu_nvidia_setup, or
+  # the OS (karr #34) -- resolved before anything touches the host.
+  my @extra = defined $opts{requirement} ? ( extra_requirement => $opts{requirement} ) : ();
+  my $setup = Rex::GPU::NVIDIA->setup_for(gpus => $gpus, setup => $opts{setup}, @extra);
+  unless ($setup) {
     # No class for this OS. Same order as before the move: a working driver
     # still short-circuits and a Kepler or a GPU conflict still gets its own
     # message (both via the base class, read-only), then the OS is refused.
-    my $setup = Rex::GPU::NVIDIA::Setup->new(gpus => $gpus);
-    return if $setup->already_installed;
-    $setup->plan;
-    die "Unsupported OS for NVIDIA driver installation: ".$setup->os."\n";
+    my $probe = Rex::GPU::NVIDIA::Setup->new(gpus => $gpus, @extra);
+    return if $probe->already_installed;
+    $probe->plan;
+    die "Unsupported OS for NVIDIA driver installation: ".$probe->os."\n";
   }
-  return unless $setup_class->new(gpus => $gpus)->install;
+  return unless $setup->install;
 
   if ($opts{reboot}) {
     _reboot_and_wait();
@@ -184,8 +223,8 @@ on this host: L<Rex::GPU::NVIDIA::Setup::Ubuntu> on Ubuntu,
 L<Rex::GPU::NVIDIA::Setup::Debian> on every other Debian-family host,
 L<Rex::GPU::NVIDIA::Setup::RHEL> on the RHEL family,
 L<Rex::GPU::NVIDIA::Setup::SUSE> on openSUSE, and C<undef> elsewhere
-(L</install_driver> then dies). There is no option yet to choose a class of
-your own.
+(L</install_driver> then dies). Asked only when neither the C<setup> option
+nor C<set gpu_nvidia_setup> chose a class (see L</setup_for>).
 
 =cut
 
@@ -204,6 +243,124 @@ sub setup_class_for_os {
   return 'Rex::GPU::NVIDIA::Setup::RHEL' if is_redhat();
   return 'Rex::GPU::NVIDIA::Setup::SUSE' if is_suse();
   return;
+}
+
+=method setup_for
+
+  my $setup = Rex::GPU::NVIDIA->setup_for(
+    gpus              => \@gpus,
+    setup             => 'My::GPU::Setup',   # optional
+    extra_requirement => { ... },            # optional
+  );
+
+B<Experimental.> The L<Rex::GPU::NVIDIA::Setup> object L</install_driver>
+runs, chosen in this order:
+
+=over
+
+=item 1. C<setup> -- a class name or an object (L</install_driver>'s
+C<setup> option);
+
+=item 2. C<set gpu_nvidia_setup =E<gt> ...> in the Rexfile -- a class name
+only: the setting is shared by every host, an object holds one host's
+facts;
+
+=item 3. L</setup_class_for_os>.
+
+=back
+
+A class is loaded (L</custom_setup>) and built with C<gpus> and
+C<extra_requirement>; an object gets them through
+L<Rex::GPU::NVIDIA::Setup/adopt>. Returns C<undef> only when nothing chose
+a class and the OS has none. Reads nothing from the host.
+
+=method custom_setup
+
+  my $class_or_object = Rex::GPU::NVIDIA->custom_setup($setup_option);
+
+B<Experimental.> The setup the user chose -- C<$setup_option> if defined,
+else C<set gpu_nvidia_setup> -- validated, or C<undef> for "choose by OS".
+A class name is loaded with L<Module::Runtime/use_module> unless the package
+is already defined (e.g. written into the Rexfile itself), from C<@INC>,
+where Rex puts the C<lib/> directory next to the Rexfile and in the current
+directory. Croaks, before anything touches the host, if the name is not a
+package name, the module cannot be found or does not compile, or the class
+or object is not a L<Rex::GPU::NVIDIA::Setup>.
+
+=cut
+
+sub setup_for {
+  my ( $class, %opt ) = @_;
+  my $gpus  = $opt{gpus} // [];
+  my @extra = defined $opt{extra_requirement}
+    ? ( extra_requirement => $opt{extra_requirement} ) : ();
+  my $chosen = $class->custom_setup($opt{setup});
+  Rex::Logger::info('NVIDIA driver setup: '.( ref $chosen ? ref($chosen).' object' : $chosen ))
+    if $chosen;
+  return $chosen->adopt(gpus => $gpus, @extra) if blessed $chosen;
+  my $setup_class = $chosen // $class->setup_class_for_os // return;
+  return $setup_class->new(gpus => $gpus, @extra);
+}
+
+sub custom_setup {
+  my ( $class, $setup ) = @_;
+  my $origin = 'setup =>';
+  unless ($class->_setup_given($setup)) {
+    $setup  = Rex::Config->get('gpu_nvidia_setup');
+    $origin = 'set gpu_nvidia_setup';
+    return unless $class->_setup_given($setup);
+  }
+  my $base = 'Rex::GPU::NVIDIA::Setup';
+  # The setting is shared by every host of the Rexfile; an object caches one
+  # host's facts (os, kernel, GPUs), so only a class name is taken there.
+  croak 'set gpu_nvidia_setup takes a class name, not '.$setup.': the setting '
+    .'is shared by every host, and a setup object holds the facts of one. Pass '
+    .'the object per call as setup => instead. Nothing was changed on the host'
+    if ref $setup && $origin ne 'setup =>';
+  if (ref $setup) {
+    croak 'NVIDIA driver setup from '.$origin.' must be a class name or a '.$base
+      .' object, not '.$setup.'. Nothing was changed on the host'
+      unless blessed($setup) && $setup->isa($base);
+    return $setup;
+  }
+  croak "NVIDIA driver setup from $origin: '$setup' is not a Perl package name. "
+    .'Nothing was changed on the host'
+    unless is_module_name($setup);
+  $class->_load_setup_class($setup, $origin) unless $class->_package_defined($setup);
+  croak 'NVIDIA driver setup from '.$origin.': '.$setup.' is not a subclass of '.$base
+    .' (extends it, or one of the ::Setup::* classes). Nothing was changed on the host'
+    unless $setup->isa($base);
+  return $setup;
+}
+
+sub _setup_given {
+  my ( $class, $setup ) = @_;
+  return ref $setup || ( defined $setup && $setup ne '' ) ? 1 : 0;
+}
+
+# Is the package there already -- written into the Rexfile, or loaded? Then
+# it is not looked up as a file (the Rexfile's own package has none).
+sub _package_defined {
+  my ( $class, $package ) = @_;
+  return 1 if $INC{ module_notional_filename($package) };
+  no strict 'refs';
+  return 0 unless %{ $package.'::' };
+  return 1 if @{ $package.'::ISA' };
+  return ( grep { !/::\z/ && defined &{ $package.'::'.$_ } } keys %{ $package.'::' } ) ? 1 : 0;
+}
+
+sub _load_setup_class {
+  my ( $class, $package, $origin ) = @_;
+  return if eval { use_module($package); 1 };
+  my $error = $@;
+  my $file  = module_notional_filename($package);
+  croak 'NVIDIA driver setup from '.$origin.': '.$package.' not found -- no '.$file
+    .' in @INC. Put it at lib/'.$file.' next to your Rexfile (Rex adds that lib/ to '
+    .'@INC) or define the package in the Rexfile. Nothing was changed on the host'
+    if $error =~ /^Can't locate \Q$file\E in \@INC/;
+  $error =~ s/\s+\z//;
+  croak 'NVIDIA driver setup from '.$origin.': loading '.$package.' failed: '.$error
+    .' -- Nothing was changed on the host';
 }
 
 # The helpers below moved into the Setup classes (karr #31, #32). The old
@@ -934,7 +1091,9 @@ The install is done by L<Rex::GPU::NVIDIA::Setup::Debian>,
 L<Rex::GPU::NVIDIA::Setup::Ubuntu>, L<Rex::GPU::NVIDIA::Setup::RHEL> and
 L<Rex::GPU::NVIDIA::Setup::SUSE> (experimental classes, see
 L<Rex::GPU::NVIDIA::Setup>); the steps and commands are the ones described
-here.
+here. A subclass of your own replaces them through the C<setup> option of
+L</install_driver> or C<set gpu_nvidia_setup> -- see
+L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>.
 
 The package choice also depends on the GPU generation, read from the PCI
 device ID of the GPU passed as C<gpu> to L</install_driver>

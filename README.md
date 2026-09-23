@@ -52,6 +52,22 @@ GPUs tested include the **NVIDIA RTX 4000 SFF Ada Generation** (PCI class `0302`
 
 The CDI spec captures the MIG layout as it was when the spec was generated. Neither the static `/etc/cdi/nvidia.yaml` nor the `nvidia-cdi-refresh` unit regenerates it when MIG is reconfigured. After changing MIG mode or instances, regenerate the spec: run `systemctl restart nvidia-cdi-refresh.service`, or on hosts without that unit, `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`. The MIG strategy that Kubernetes exposes (`single` / `mixed`) is configured in the NVIDIA device plugin or GPU Operator, which writes its own CDI spec. MIG has not been tested on hardware with Rex::GPU.
 
+## Your own driver setup (experimental)
+
+The driver install is a Moo class per distro (`Rex::GPU::NVIDIA::Setup::Debian`, `::Ubuntu`, `::RHEL`, `::SUSE`). To change it — pin a driver package, add a local mirror, support another distro — subclass one and put it in your project's `lib/` next to the Rexfile (Rex puts that directory on `@INC`); Rex::GPU needs no patch:
+
+```perl
+# lib/My/GPU/Setup.pm
+package My::GPU::Setup;
+use Moo;
+extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+sub sources { my ( $self ) = @_; return ( { name => 'pinned-580-open', kernel_module => 'open', branch => 580,
+  packages => [ 'nvidia-driver-580-server-open' ], verify => [ 'nvidia-driver-580-server-open' ] }, $self->SUPER::sources ) }
+1;
+```
+
+Choose it per call with `gpu_setup(setup => 'My::GPU::Setup')` (a class name or an object), or for the whole Rexfile with `set gpu_nvidia_setup => 'My::GPU::Setup'`, which also applies to Rex::Rancher's `gpu => 1`. Without either, Rex::GPU chooses the class by OS. The detected GPUs' requirements still apply: a source the GPUs cannot use is skipped. `gpu_setup(requirement => { kernel_module => 'open', min_branch => 580 })` narrows the choice further, but cannot override what the GPUs need. See `eg/custom-setup/` and the `WRITING YOUR OWN SETUP` section of `Rex::GPU::NVIDIA::Setup`.
+
 ## Requirements
 
 This module requires [Rex::LibSSH](https://metacpan.org/pod/Rex::LibSSH) (or SFTP) on the connection backend. Hetzner servers don't enable SFTP by default:

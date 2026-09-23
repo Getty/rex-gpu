@@ -128,7 +128,33 @@ Rebooting is required on the first deployment if the C<nouveau> open-source
 driver was previously loaded, because nouveau must be unloaded before the
 NVIDIA driver can bind to the GPU.
 
+=item C<setup>
+
+B<Experimental.> The L<Rex::GPU::NVIDIA::Setup> class (a name) or object
+that installs the driver, instead of the one Rex::GPU picks for the OS --
+typically a subclass of one of the built-in ones, kept in your project's
+C<lib/> (see L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>). Without
+it, C<set gpu_nvidia_setup =E<gt> 'My::GPU::Setup'> in the Rexfile does the
+same for every call; this option wins over it. A class that cannot be loaded
+or is not a Setup makes C<gpu_setup> die before anything is done on the
+host, even on a host without a GPU. Passed to
+L<Rex::GPU::NVIDIA/install_driver>.
+
+=item C<requirement>
+
+B<Experimental.> An extra constraint on the driver, e.g.
+C<< { kernel_module =E<gt> 'open', min_branch =E<gt> 580 } >> (keys
+C<kernel_module>, C<min_branch>, C<max_branch>), B<intersected> with what
+the detected GPUs need: it can narrow the choice but never override a
+GPU's hard limit. If no driver meets both, C<gpu_setup> dies before the
+driver install changes the host. Passed to
+L<Rex::GPU::NVIDIA/install_driver>.
+
 =back
+
+Neither option changes anything for a caller that does not pass it; in
+particular L<Rex::Rancher>'s C<gpu =E<gt> 1> passes neither, and picks up a
+custom setup through C<set gpu_nvidia_setup>.
 
 Returns the result of L<Rex::GPU::Detect/detect> — a hashref with C<nvidia>
 and C<amd> array keys.
@@ -158,6 +184,11 @@ sub gpu_setup {
 
   _check_connection();
 
+  # A custom setup (setup => / set gpu_nvidia_setup, karr #34) that cannot be
+  # loaded dies here, before detection installs pciutils -- on every host, not
+  # only on one with a GPU.
+  Rex::GPU::NVIDIA->custom_setup($opts{setup});
+
   my $gpus = gpu_detect();
 
   if ($gpus->{nvidia} && @{$gpus->{nvidia}}) {
@@ -168,6 +199,7 @@ sub gpu_setup {
       Rex::GPU::NVIDIA::install_driver(
         reboot => ($opts{reboot} ? 1 : 0),
         gpus   => \@compute,
+        ( map { defined $opts{$_} ? ( $_ => $opts{$_} ) : () } qw( setup requirement ) ),
       );
       Rex::GPU::NVIDIA::install_container_toolkit();
       Rex::GPU::NVIDIA::generate_cdi_specs();

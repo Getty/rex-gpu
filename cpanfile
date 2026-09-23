@@ -1,3 +1,4 @@
+requires 'Module::Runtime';
 requires 'Moo';
 requires 'namespace::autoclean';
 requires 'perl', '5.014004';

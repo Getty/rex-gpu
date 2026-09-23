@@ -10,6 +10,7 @@ use Rex::Commands::Pkg ();
 use Rex::Commands::Run ();
 use Rex::Logger ();
 use Rex::GPU::NVIDIA::Requirement ();
+use Scalar::Util qw( blessed );
 use namespace::autoclean;
 
 # No `use utf8` here, on purpose: the die messages carry UTF-8 em dashes as
@@ -32,7 +33,7 @@ Passing both croaks.
 =cut
 
 has gpu  => ( is => 'ro' );
-has gpus => ( is => 'lazy' );
+has gpus => ( is => 'lazy', writer => '_set_gpus' );
 
 sub _build_gpus {
   my ( $self ) = @_;
@@ -47,6 +48,17 @@ sub BUILD {
     if defined $args->{gpus} && ref $args->{gpus} ne 'ARRAY';
 }
 
+# extra_requirement may be given as a plain hashref; it becomes an object of
+# the class's requirement_class here, so a typo croaks at construction -- on
+# every host, not only on one that gets as far as plan.
+around BUILDARGS => sub {
+  my ( $orig, $class, @args ) = @_;
+  my $args = $class->$orig(@args);
+  $args->{extra_requirement} = $class->_coerce_requirement($args->{extra_requirement})
+    if defined $args->{extra_requirement};
+  return $args;
+};
+
 =attr requirement
 
 The L<Rex::GPU::NVIDIA::Requirement> the driver has to meet: the
@@ -57,6 +69,24 @@ host is changed, when the GPUs need different kernel modules or no common
 branch (a V100 next to a B200), naming the GPUs on each side. May be passed
 to C<new> instead.
 
+=attr extra_requirement
+
+  My::GPU::Setup->new(extra_requirement => { kernel_module => 'open', min_branch => 580 });
+
+An additional constraint of your own, B<intersected> with what the GPUs
+need -- the C<requirement> option of L<Rex::GPU::NVIDIA/install_driver> and
+L<Rex::GPU/gpu_setup> ends up here. It can only tighten: a V100 stays
+C<proprietary> and at most 580 whatever you ask for, and a constraint the
+GPUs cannot meet (C<open> on a V100) makes L</plan> die before anything on
+the host is changed, naming both sides. With no GPU it is the whole
+requirement.
+
+A hashref with the keys C<kernel_module>, C<min_branch>, C<max_branch> and
+optionally C<name> (for messages; default C<the requirement option>), or a
+L<Rex::GPU::NVIDIA::Requirement> object. A hashref becomes an object of
+L</requirement_class> in C<new>, so an unknown key or a bad value croaks
+there. C<undef> (the default) adds nothing.
+
 =method requirement_class
 
 The requirement class, C<Rex::GPU::NVIDIA::Requirement>. Override it to use
@@ -65,15 +95,18 @@ L<generations|Rex::GPU::NVIDIA::Requirement/generations> table.
 
 =cut
 
-has requirement => ( is => 'lazy' );
+has requirement => ( is => 'lazy', predicate => '_has_requirement' );
+
+has extra_requirement => ( is => 'ro', writer => '_set_extra_requirement' );
 
 sub requirement_class { 'Rex::GPU::NVIDIA::Requirement' }
 
 sub _build_requirement {
   my ( $self ) = @_;
   my $class = $self->requirement_class;
+  my $extra = $self->extra_requirement;
   my @gpus  = grep { ref $_ eq 'HASH' } @{ $self->gpus };
-  return $class->new unless @gpus;
+  return $extra // $class->new unless @gpus;
   my @reqs = map { $class->from_gpu($_) } @gpus;
   if ( my @conflicts = $class->conflicts(@reqs) ) {
     die 'No single NVIDIA driver supports all GPUs on this host: '
@@ -81,7 +114,81 @@ sub _build_requirement {
       ."driver yourself; once `nvidia-smi -L` lists the GPUs, install_driver skips "
       ."the driver step\n";
   }
-  return $class->intersect(@reqs);
+  my $gpu_req = $class->intersect(@reqs);
+  return $gpu_req unless $extra;
+  # The user's requirement only tightens (karr #34): a conflict with what the
+  # GPUs need dies here, in plan, before anything on the host is changed.
+  if ( my @conflicts = $class->conflicts($gpu_req, $extra) ) {
+    die 'No NVIDIA driver meets both what the GPUs need and '.$extra->who.' ('
+      .$extra->describe.'): '.join('; ', @conflicts).'. Nothing was changed on the '
+      ."host. Loosen the requirement, or install the driver yourself\n";
+  }
+  return $class->intersect($gpu_req, $extra);
+}
+
+my %REQUIREMENT_KEY = map { $_ => 1 } qw( kernel_module min_branch max_branch name );
+
+# A hashref or requirement object -> requirement object. Callable on the class
+# (BUILDARGS) and on an object (adopt).
+sub _coerce_requirement {
+  my ( $self, $req ) = @_;
+  my $base = 'Rex::GPU::NVIDIA::Requirement';
+  return $req if blessed($req) && $req->isa($base);
+  croak __PACKAGE__.': a requirement is a hashref or a '.$base.' object, not '
+    .( defined $req ? "'".$req."'" : 'undef' )
+    unless ref $req eq 'HASH';
+  my @unknown = sort grep { !$REQUIREMENT_KEY{$_} } keys %$req;
+  croak __PACKAGE__.': unknown requirement key'.( @unknown == 1 ? '' : 's' ).' '
+    .join(', ', @unknown).' -- known: kernel_module, min_branch, max_branch, name'
+    if @unknown;
+  return $self->requirement_class->new(name => 'the requirement option', %$req);
+}
+
+=method adopt
+
+  $setup->adopt(gpus => \@gpus, extra_requirement => { min_branch => 580 });
+
+What L<Rex::GPU::NVIDIA/install_driver> does to a setup B<object> passed as
+C<setup>: it hands over the GPUs it was called with and its C<requirement>
+option. C<gpus> is taken only if the object has none of its own (built
+without C<gpu>/C<gpus>, or with an empty list) -- an object built for
+specific GPUs keeps them. C<extra_requirement> (hashref or object, see
+L</extra_requirement>) is set if given. Returns the object.
+
+Croaks, before anything on the host is changed, if the object has already
+run L</install> -- it caches the host facts (L</os>, L</kernel>, ...) of
+that host, so one object serves one host -- or if it would have to change
+an object whose L</requirement> is already fixed (passed to C<new>, or built
+by an earlier L</plan>) -- the detected GPUs would otherwise not be checked
+-- or if both the object and the option carry an C<extra_requirement>.
+
+=cut
+
+sub adopt {
+  my ( $self, %arg ) = @_;
+  my $gpus  = $arg{gpus} // [];
+  croak __PACKAGE__.'->adopt: gpus must be an arrayref of GPU hashrefs'
+    unless ref $gpus eq 'ARRAY';
+  croak ref($self).' object passed as setup => has already run install -- it '
+    .'holds that host\'s facts and GPUs. Build a new object per host, or pass a '
+    .'class name. Nothing was changed on the host'
+    if $self->_installed;
+  my $extra = defined $arg{extra_requirement}
+    ? $self->_coerce_requirement($arg{extra_requirement}) : undef;
+  my $take_gpus = @$gpus && !@{ $self->gpus };
+  return $self unless $take_gpus || $extra;
+  croak ref($self).' object passed as setup => already has a fixed requirement '
+    .'(given to new or built by plan), so the detected GPUs or the requirement '
+    .'option could not be checked. Build it without requirement =>, or pass a '
+    .'class name. Nothing was changed on the host'
+    if $self->_has_requirement;
+  croak ref($self).' object passed as setup => has an extra_requirement of its '
+    .'own and the requirement option was given too; pass one of them. Nothing '
+    .'was changed on the host'
+    if $extra && $self->extra_requirement;
+  $self->_set_gpus($gpus) if $take_gpus;
+  $self->_set_extra_requirement($extra) if $extra;
+  return $self;
 }
 
 =attr os
@@ -179,13 +286,22 @@ Runs the fixed sequence, each step a method a subclass can override:
   post_install($plan)
 
 Returns C<1> after an install, C<0> if a working driver was already there.
-Loading the module, rebooting and L<Rex::GPU::NVIDIA/verify_nvidia> are
-still done by L<Rex::GPU::NVIDIA/install_driver> after this returns.
+Loading the module (C<modprobe nvidia>) or rebooting, and
+L<Rex::GPU::NVIDIA/verify_nvidia>, are done by
+L<Rex::GPU::NVIDIA/install_driver> after this returns, not by the setup:
+the reboot is a per-call option that needs Rex's live connection, and
+C<verify_nvidia> is an exported check that also looks for the container
+toolkit.
 
 =cut
 
+# Set once install starts: the object has read (and cached) one host's facts
+# and GPUs, so adopt refuses to hand it to another host.
+has _installed => ( is => 'rwp', init_arg => undef );
+
 sub install {
   my ( $self ) = @_;
+  $self->_set__installed(1);
   return 0 if $self->already_installed;
   my $plan = $self->plan;
   $self->prepare_host($plan);
@@ -311,7 +427,7 @@ sub plan {
   my $requirement = $self->requirement;
   Rex::Logger::info('Installing NVIDIA drivers on '.$self->os.' (kernel '.$self->kernel.')');
   Rex::Logger::info('  Driver requirement: '.$requirement->who.': '.$requirement->describe)
-    if @{ $self->gpus };
+    if @{ $self->gpus } || $self->extra_requirement;
 
   my $plan = { packages => [ $self->kernel_packages ], verify => [] };
   my @sources = $self->sources;
@@ -471,9 +587,9 @@ sub _major_version {
 =head1 DESCRIPTION
 
 B<Experimental.> The class layout, the step names, the source keys and the
-C<$plan> keys may change in the next release without a deprecation cycle;
-there is no option yet that makes L<Rex::GPU::NVIDIA/install_driver> use a
-class of your own.
+C<$plan> keys may change in the next release without a deprecation cycle.
+L<Rex::GPU::NVIDIA/install_driver> and L<Rex::GPU/gpu_setup> use a class of
+your own when told to -- see L</WRITING YOUR OWN SETUP>.
 
 One driver install is one object: the GPUs and the host facts it was built
 with, and a fixed L</install> sequence of overridable steps. Which driver it
@@ -488,6 +604,99 @@ L<Rex::GPU::NVIDIA::Setup::Rpm>.
 
 Every host interaction goes through L</run_cmd>, L</pkg_cmd> and
 L</file_cmd>.
+
+=head1 WRITING YOUR OWN SETUP
+
+A setup of your own is a Moo class that extends one of the built-in ones and
+overrides what it needs to; nothing in Rex::GPU has to be patched. Put it in
+your Rex project's C<lib/> directory -- Rex puts the C<lib/> next to the
+Rexfile, and the one in the current directory, first on C<@INC> -- or write
+the package straight into the Rexfile:
+
+  my-project/
+    Rexfile
+    lib/My/GPU/Setup.pm
+
+=head2 Adding a driver source
+
+Override L</sources> and put your candidate first; C<SUPER::sources> keeps
+the built-in ones behind it. The GPUs' L</requirement> still decides: a
+source they cannot use is skipped with its reason, and the next one is
+tried.
+
+  package My::GPU::Setup;
+  use Moo;
+  use namespace::autoclean;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+
+  sub sources {
+    my ( $self ) = @_;
+    return (
+      {
+        name            => 'pinned-580-open',
+        kernel_module   => 'open',
+        branch          => 580,
+        packages        => [ 'nvidia-driver-580-server-open' ],
+        verify          => [ 'nvidia-driver-580-server-open' ],
+        check_candidate => 'nvidia-driver-580-server-open'
+      },
+      $self->SUPER::sources
+    );
+  }
+
+  1;
+
+An Ada or a B200 gets the pinned open driver; a V100 (proprietary only)
+rejects it and gets the built-in C<nvidia-driver-580-server>.
+C<check_candidate> is a key L<Rex::GPU::NVIDIA::Setup::Ubuntu> reads in its
+C<prepare_source>; which extra keys a source may carry depends on the class
+you extend.
+
+=head2 Changing a step
+
+Override the step and call C<SUPER::> for the built-in part. Reach the host
+only through L</run_cmd> and L</file_cmd> (L</pkg_cmd> only for inert
+helpers such as C<curl>): the driver packages are installed and verified by
+the packaging layer's L</install_packages> and L</verify_packages>, never
+through C<Rex::Pkg>, which dies on the non-zero exit a successful DKMS build
+can return. L</plan> and everything it calls must only read the host.
+
+  has apt_line => ( is => 'ro', predicate => 1 );
+
+  # a local mirror, in before the inherited step runs `apt-get update`
+  sub prepare_source {
+    my ( $self, $plan ) = @_;
+    $self->file_cmd('/etc/apt/sources.list.d/internal-nvidia.list',
+      content => $self->apt_line."\n") if $self->has_apt_line;
+    $self->SUPER::prepare_source($plan);
+  }
+
+=head2 Choosing it
+
+First hit wins (L<Rex::GPU::NVIDIA/setup_for>):
+
+  # 1. per call -- a class name, or an object with settings of its own
+  gpu_setup(setup => 'My::GPU::Setup');
+  gpu_setup(setup => My::GPU::Setup->new(apt_line => 'deb [...] http://... noble main'));
+
+  # 2. for the whole Rexfile -- also reaches Rex::Rancher's gpu => 1
+  set gpu_nvidia_setup => 'My::GPU::Setup';
+
+  # 3. neither: Rex::GPU::NVIDIA->setup_class_for_os
+
+The same C<setup> option works on L<Rex::GPU::NVIDIA/install_driver>. The
+class is built with the detected GPUs (C<gpus>); an object gets them through
+L</adopt> if it has none. A class extends one distro's setup, so it is for
+hosts of that distro: to cover several, choose per host in the Rexfile, or
+override L<Rex::GPU::NVIDIA/setup_class_for_os> in a subclass of
+L<Rex::GPU::NVIDIA>.
+
+To narrow the driver choice without a class, pass C<requirement> (see
+L</extra_requirement>). To teach the GPU table a device, override
+L</requirement_class> with a L<Rex::GPU::NVIDIA::Requirement> subclass that
+adds rows to its C<generations>.
+
+A runnable example: C<eg/custom-setup/> in the distribution.
 
 =head1 SEE ALSO
 

@@ -1,6 +1,18 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - Use your own driver setup class: gpu_setup / install_driver take
+    setup => 'My::GPU::Setup' (or an object), and
+    `set gpu_nvidia_setup => 'My::GPU::Setup'` in the Rexfile does the same
+    for every call, Rex::Rancher's gpu => 1 included. Otherwise the class is
+    still chosen by OS. The class is a subclass of a Rex::GPU::NVIDIA::Setup
+    class (experimental API), loaded from the project's lib/ or defined in
+    the Rexfile. A missing or broken class dies before anything is done on
+    the host. New requirement => { kernel_module, min_branch, max_branch }
+    narrows the driver choice. It is intersected with what the GPUs need
+    and can never override it; if no driver meets both, the call dies before
+    the install. Example in eg/custom-setup/. Not hardware-verified
+    (karr #34)
   - gpu_setup hands every CUDA-capable NVIDIA GPU to install_driver (new
     option gpus => [...]; gpu => $one still works) and installs one driver
     that fits all of them: an Ada next to a B200 gets the open driver, an
@@ -19,8 +31,7 @@ Revision history for Rex-GPU
     ::Setup::SUSE), one overridable method per step: already_installed,
     plan (host-read-only), prepare_host, prepare_source, install_packages,
     verify_packages, post_install. The commands sent to the host and the
-    package choice are unchanged on every distro; there is no option yet to
-    use a class of your own (karr #31, #32)
+    package choice are unchanged on every distro (karr #31, #32)
   - install_driver on Debian enables contrib/non-free/non-free-firmware per
     Debian archive entry (*.debian.org, Hetzner's /debian/ mirror, the cloud
     mirror+file list), adding only missing components, in sources.list and

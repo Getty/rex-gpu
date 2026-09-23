@@ -19,7 +19,8 @@ use Test::More;
 #     openSUSE — including the per-family package lists and version branches.
 #   * the Rex::Pkg-bypass verify seam (dpkg -l '^ii' / rpm -q) against a
 #     partial/failed DKMS build.
-#   * _blacklist_nouveau + initramfs regeneration (update-initramfs / dracut).
+#   * the nouveau blacklist + initramfs regeneration (Setup post_install:
+#     update-initramfs / dracut).
 #   * _reboot_and_wait: the shutdown, the disconnect/reconnect polling loop,
 #     and that the NVIDIA module binds after nouveau is unloaded.
 #   * install_container_toolkit and `nvidia-ctk cdi generate` (CDI specs).

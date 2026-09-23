@@ -68,8 +68,15 @@ provably carries.
 
 ## The driver matrix — one dispatch, three families
 
-`install_driver` asks the overridable `Rex::GPU::NVIDIA->setup_class_for_os` first:
-every family runs through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
+`install_driver` gets its Setup from `Rex::GPU::NVIDIA->setup_for` (k34), first hit wins:
+`setup =>` option (class name or object) → `set gpu_nvidia_setup` (Rex::Config; how
+Rancher's `gpu => 1` gets a custom setup) → overridable `setup_class_for_os`. Names load
+via `use_module` unless the package is already defined (inline in a Rexfile; users drop
+classes into the project's `lib/`), must `isa` Setup, and any failure croaks before the
+`nvidia-smi` probe (`gpu_setup`: before detection). An object `adopt`s the detected GPUs
+only if it has none. `requirement =>` → Setup `extra_requirement`, **intersected**, never
+replacing: it tightens, a conflict dies in `plan`. Reboot/`modprobe`/`verify_nvidia` stay
+in `install_driver` (connection + toolkit check). Every family runs through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
 `Setup::Apt` → `Setup::Debian` / `Setup::Ubuntu`; `Setup::Rpm` → `Setup::RHEL` /
 `Setup::SUSE`; experimental, epic #25) with the fixed flow `already_installed → plan → prepare_host → prepare_source → install_packages →
 verify_packages → post_install`. `plan` is host-read-only; `run_cmd` / `pkg_cmd` /
@@ -100,8 +107,8 @@ family has a trap that is already solved in the code; do not "simplify" these aw
   meta package co-installs kmp + userspace at one version; the lock stops a later update
   re-splitting them into a `Driver/library version mismatch`.
 
-After the branch: `_blacklist_nouveau` (write the blacklist, regenerate initramfs via
-`update-initramfs`/`dracut`), then reboot-and-verify or `modprobe nvidia`.
+After the branch: Setup `post_install` (write the nouveau blacklist, regenerate initramfs
+via `update-initramfs`/`dracut`), then reboot-and-verify or `modprobe nvidia`.
 
 ## Never Rex::Pkg for the driver/toolkit — the load-bearing invariant
 
