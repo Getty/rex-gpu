@@ -1,0 +1,15 @@
+---
+claimed_at: 2026-09-23T17:32:25Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T17:32:25Z
+created: 2026-09-23T16:49:10Z
+id: 28
+priority: low
+started: 2026-09-23T17:23:16Z
+status: done
+title: 'NVIDIA.pm DESCRIPTION nennt -open noch als aarch64-only (veraltet seit #16)'
+updated: 2026-09-23T17:32:25Z
+---
+
+POD-DESCRIPTION in lib/Rex/GPU/NVIDIA.pm beschreibt die -open-Wahl noch als aarch64/GB10-only. Seit #16 (alle Blackwell, jede Arch) und #18 (Debian CUDA-Repo) veraltet. Reiner Doku-Fix.
