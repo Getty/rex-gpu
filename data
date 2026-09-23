@@ -1,0 +1,62 @@
+---
+claimed_at: 2026-09-23T20:13:46Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:13:46Z
+created: 2026-09-23T16:48:58Z
+id: 25
+priority: high
+started: 2026-09-23T20:13:46Z
+status: done
+title: 'Epic: Treiber-Anforderungsmodell + klassenbasierte, erweiterbare Setups (ersetzt
+  #22)'
+updated: 2026-09-23T20:13:46Z
+---
+
+DESIGN (Epic, ersetzt #22): Treiber-Anforderungsmodell + klassenbasierte, vom Nutzer erweiterbare Setups
+
+## Problem
+Keine Stelle im Code weiss, welche Treiber-Branch / welches Kernel-Modul eine GPU-Generation braucht. Jeder Distro-Zweig entscheidet ad hoc (#16 Ubuntu-open, #18 Debian-CUDA-Repo, #22 Ubuntu-min-Branch). Folge wiederkehrend: Paket ist ii/rpm -q ok, Modul bindet nicht. Siehe Pre-Turing-Bug (eigenes Ticket).
+
+## Fakten (Recherche 2026-09-23, Quellen: 615/580 README supportedchips + kernel_open, open-gpu-kernel-modules README, NVIDIA driver-installation-guide version-locking)
+| Arch | IDs 10de | Branch | proprietaer | open |
+| Kepler | 0FC6-12BA | <=470 | ja | nein |
+| Maxwell/Pascal/Volta | 1340-1DF6 | <=580 | ja | NEIN (kein GSP) |
+| Turing..Hopper | 1E02-28F8 (Luecken) | aktuell | ja | ja |
+| Blackwell | 2900-2FFF | >=570 | NEIN | ja |
+| Blackwell Ultra | 3182, 31C2-31C3 | >=580 | NEIN | ja |
+Aktuelle Branches: 580 LTSB (EOL 06/2028), 590, 595 PB, 610 NFB, 615. R535 EOL 06/2026.
+Quellen je Distro: Ubuntu -server/-server-open 535..595 (jammy/noble), resolute 535/570/580/590/595; Debian 12 nvidia-driver 535 (+tesla-470/535), 13: 550 (+tesla-535); CUDA-Repo debian12 545-615, debian13 NUR 590-615, ubuntu 22/24 bis 615 (versionierte Namen bis 580, danach nvidia-driver-pinning-NNN), rhel8/9 Module-Streams NNN/NNN-dkms/NNN-open, rhel10 keine Streams -> versionlock; SUSE G06 = 580 (prop + open), G07 = 595 nur open.
+
+## Architektur (Vorschlag rex-gpu-worker, Design-only)
+- Rex::GPU::NVIDIA::Requirement: Wertobjekt {generation, kernel_module open|proprietary|either, min_branch, max_branch}; from_gpu($gpu), satisfied_by($source); Tabelle ueber ueberschreibbare Methode `generations` (keine globale mutable Registry). Unbekannte ID -> either, keine Grenzen = heutiges Verhalten. Tabelle macht NIE eine GPU compute (_is_nvidia_compute bleibt einziges Gate).
+- Rex::GPU::NVIDIA::Setup (Basis): fester Ablauf install = already_installed -> plan -> prepare_host -> prepare_source -> install_packages -> verify_packages -> post_install. `plan` ist host-read-only, filtert `sources` (geordnete Liste {name, kernel_module, branch, packages, verify}) ueber satisfied_by, nimmt den ersten Treffer, croakt sonst VOR jeder Aenderung mit allen verworfenen Kandidaten + Grund. run_cmd = einziger Weg zu Rex run (Test-Seam). Override-Punkte: jede Stufe, sources, requirement_class, initramfs_command.
+- Paket-Layer Setup::Apt / ::Rpm / ::Zypper: Lock-Timeout, apt-timer stop, apt-get/dnf/zypper direkt, Verify dpkg -l ^ii / rpm -q. Rex::Pkg-Bypass-Invariante bleibt ("never pkg" dokumentiert).
+- Distro-Klassen Setup::Debian (sources: debian_nonfree, cuda_repo), ::Ubuntu (server, server_open, Branch aus apt-cache), ::RHEL, ::SUSE.
+- Auswahl (Prioritaet): 1. gpu_setup/install_driver(setup => Klasse|Objekt) 2. `set gpu_nvidia_setup => 'My::GPU::Setup'` im Rexfile (erreicht auch Rex::Rancher gpu => 1 ohne Rancher-Aenderung) 3. Auto nach OS via ueberschreibbarem setup_class_for_os. Laden via Module::Runtime::use_module (skip wenn Klasse schon definiert, z.B. inline im Rexfile), isa-Check auf Rex::GPU::NVIDIA::Setup.
+- Custom-Klassen: Rex 1.16 legt <Rexfile-dir>/lib und <cwd>/lib vorne in @INC (Rex::generate_inc) -> lib/My/GPU/Setup.pm im Projekt reicht.
+- Escape-Hatch: gpu_setup(requirement => {kernel_module => 'open', min_branch => 575}).
+- Kompatibilitaet: install_driver/gpu_setup Signatur + Defaults unveraendert (setup/requirement nur optional neu); Detect::open_kernel_module_required bleibt als delegierender Wrapper; private k16/k18-Helper fallen erst mit dem Ticket, das t/80 + t/90 umschreibt.
+
+## Migrationsschritte (je eigenes Ticket, T0-T5 verhaltensneutral)
+T0 Characterization: run/is_* gemockt, Golden-Command-Sequenzen je Distro x GPU (Ada/Blackwell/Volta x Debian12/13, Ubuntu, RHEL9/10, SUSE15/16).
+T1 Requirement + Tabelle (erst nur Blackwell-Zeilen), open_kernel_module_required delegiert.
+T2 Setup + Setup::Apt, Debian/Ubuntu verbatim verschoben; Golden-Sequenzen muessen exakt passen.
+T3 RHEL + SUSE verschoben.
+T4 requirement-getriebenes plan ersetzt k16/k18-Helper.
+T5 setup =>, set gpu_nvidia_setup, use_module + isa, POD, eg/-Beispiel, Changes.
+T6+ Verhaltensaenderungen, je Hardware noetig: Pre-Turing-Zeilen (proprietary, max 580) = Pre-Turing-Bug-Fix; Kepler 470; Multi-GPU-Regel; SUSE-Verify; ggf. Toolkit in die Setups.
+
+## Offene Entscheidungen (Maintainer)
+1. Moo (kommt mit Rex, muss in cpanfile) oder bless.
+2. Subklassen-Interface als public API: ein Release lang "experimental" markieren?
+3. Multi-GPU: heute zaehlt nur compute[0]. Schnittmenge der Anforderungen? Die bei Konflikt (z.B. V100 + B200) laut sterben?
+4. Debian non-free: feste Release->Branch-Tabelle (kann veralten) vs. apt-cache-Abfrage (braucht non-free vorher aktiviert = Host-Aenderung vor dem Fail-loud-Check).
+5. Kepler (470): unterstuetzen oder laut ablehnen?
+6. Jedes neue Modul = weiteres $VERSION; release-checker + Skill ("alle drei") anpassen.
+
+Kein Code, bevor die Entscheidungen stehen.
+
+ENTSCHEIDUNGEN Maintainer 2026-09-23: (1) Moo. (3) Multi-GPU: Schnittmenge der Anforderungen aller compute-GPUs, bei Konflikt vor Install laut sterben. (5) Kepler: laut ablehnen (custom Setup als Ausweg). #26 als Hotfix VORAB im heutigen Code. Noch offen, Default gesetzt: (2) Setup-Subklassen-API ein Release lang als experimental markieren; (4) Debian non-free per fester Release->Branch-Tabelle (kein Host-Eingriff vor plan).
+
+T0-T5 abgeschlossen (6dc1992, 097110e, 070eef2, 45c6977, 1eca1a8, T5). Offene T6+-Punkte laufen als eigene Tickets: #27 SUSE-Verify, #35 apt-cache vor update, #41 eigene Debian-Mirrors (jetzt per Custom-Setup loesbar), reboot/verify in Setup (bewusst in install_driver belassen).
