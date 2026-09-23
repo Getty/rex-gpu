@@ -1,6 +1,20 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver keeps pre-Turing GPUs (Maxwell/Pascal/Volta: V100, P100,
+    P40, M60, ...; 10de:1340-1DF6) on the proprietary 580 branch, their last
+    one: Ubuntu nvidia-driver-580-server (dies if apt has no candidate),
+    RHEL 8/9 module stream nvidia-driver:580-dkms, RHEL 10 dnf versionlock
+    '*nvidia*580*', both with kmod-nvidia-latest-dkms, openSUSE Leap 15/16
+    nvidia-driver-G06-kmp-meta. They used to get the newest driver or the
+    open module, which installed fine but never bound. The installed branch
+    and kmod are verified. Debian is unchanged. A Kepler-or-older GPU (e.g.
+    Tesla K80; below 10de:1340) now makes install_driver and gpu_setup die
+    before the host is changed. Its last driver is the end-of-life 470
+    branch, so install it by hand; a working driver is still skipped. Not
+    hardware-verified (karr #26)
+  - NVIDIA.pm DESCRIPTION describes the per-generation driver selection; it
+    still said -open was chosen on aarch64/GB10 only (karr #28)
   - install_driver on Debian installs a Blackwell GPU's driver (B200/GB200/
     B300, GeForce RTX 50xx, RTX PRO Blackwell, GB10) from NVIDIA's CUDA apt
     repository: cuda-keyring for debian12/debian13 (x86_64, or sbsa on

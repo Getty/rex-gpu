@@ -90,9 +90,36 @@ own version) or architecture B<dies> before anything is changed on the host.
 
 =back
 
+It also recognises pre-Turing silicon (see
+L<Rex::GPU::Detect/legacy_driver_requirement>). Current NVIDIA drivers no
+longer support it, and the open kernel module never did:
+
+=over
+
+=item * B<Kepler or older> (device ID below C<1340>, e.g. Tesla K80/K40): the
+newest driver that supports it is the end-of-life 470 branch. C<install_driver>
+B<dies> on every distro before anything on the host is changed. A host whose
+driver was installed by hand (C<nvidia-smi -L> lists the GPU) passes the
+already-installed check above instead.
+
+=item * B<Maxwell, Pascal, Volta> (C<1340>-C<1DF6>, e.g. Tesla M60, P100, P40,
+V100): the proprietary driver of the 580 branch. On Ubuntu that is
+C<nvidia-driver-580-server>. If apt has no candidate for it, C<install_driver>
+dies before installing and does not fall back to another branch. On
+RHEL/Rocky/Alma 8 and 9 it enables module stream C<nvidia-driver:580-dkms>. On
+RHEL 10 it installs C<python3-dnf-plugin-versionlock> and locks C<*nvidia*580*>
+(C<dnf versionlock>). Both RHEL paths then install C<kmod-nvidia-latest-dkms>
++ C<nvidia-driver> + C<nvidia-driver-cuda>, and verify the kmod and a 580
+C<nvidia-driver>. On openSUSE Leap 15 and 16 it installs
+C<nvidia-driver-G06-kmp-meta> and verifies it with C<rpm -q>. Debian is
+unchanged: its C<non-free> 535/550 driver supports these GPUs.
+
+=back
+
 Every other GPU keeps the previous selection (Ubuntu C<-server>, Debian
-C<non-free> C<nvidia-driver>); RHEL and openSUSE ignore the option. Omit it
-(or pass C<undef>) to keep the previous, GPU-agnostic package selection.
+C<non-free> C<nvidia-driver>, RHEL C<open-dkms>, openSUSE open C<G06>/C<G07>).
+Omit the option (or pass C<undef>) to keep the previous, GPU-agnostic package
+selection.
 
 =back
 
@@ -123,6 +150,12 @@ sub install_driver {
     return;
   }
 
+  # Kepler or older (karr #26): no driver newer than the EOL 470 branch
+  # supports it. Die here — after the short-circuit above, so a host whose
+  # operator installed 470 by hand still passes, and before anything on the
+  # host is changed, on every distro.
+  _reject_unsupported_legacy_gpu($opts{gpu});
+
   my $os = operating_system();
   my $running_kernel = run "uname -r";
   chomp $running_kernel;
@@ -133,10 +166,10 @@ sub install_driver {
     _install_driver_debian($os, $running_kernel, $opts{gpu});
   }
   elsif (is_redhat()) {
-    _install_driver_redhat($os, $running_kernel);
+    _install_driver_redhat($os, $running_kernel, $opts{gpu});
   }
   elsif (is_suse()) {
-    _install_driver_suse($os, $running_kernel);
+    _install_driver_suse($os, $running_kernel, $opts{gpu});
   }
   else {
     die "Unsupported OS for NVIDIA driver installation: $os\n";
@@ -166,6 +199,50 @@ sub _nvidia_driver_present {
   my ($smi) = @_;
   return 0 unless defined $smi;
   return $smi =~ /GPU \d+:/ ? 1 : 0;
+}
+
+# Pure (karr #26): the pre-Turing requirement for the detected GPU hashref, or
+# undef — see Rex::GPU::Detect::legacy_driver_requirement, which owns the
+# device-ID ranges. No GPU, a non-hashref, no device_id, or any Turing-or-later
+# / unknown ID => undef => the default selection on every distro, unchanged.
+sub _legacy_driver_requirement {
+  my ($gpu) = @_;
+  return unless $gpu && ref $gpu eq 'HASH';
+  return Rex::GPU::Detect::legacy_driver_requirement($gpu->{device_id});
+}
+
+# Pure (karr #26): die for a GPU no installable branch supports — Kepler or
+# older, max_branch 470. Maintainer decision (epic karr #25): reject loudly
+# instead of installing the EOL 470 driver. Returns quietly for every other
+# GPU, Maxwell/Pascal/Volta (580) included.
+sub _reject_unsupported_legacy_gpu {
+  my ($gpu) = @_;
+  my $legacy = _legacy_driver_requirement($gpu);
+  return unless $legacy && $legacy->{max_branch} < 580;
+  die "NVIDIA GPU '" . ($gpu->{name} // 'unknown') . "' (10de:$gpu->{device_id}) is "
+    . "$legacy->{generation} silicon: no driver newer than the end-of-life "
+    . "$legacy->{max_branch} branch supports it, and Rex::GPU does not install "
+    . "that. Nothing was changed on the host. Install the driver yourself; once "
+    . "`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
+}
+
+# Pure (karr #26): does `apt-cache policy PKG` output (LC_ALL=C) show an
+# installation candidate? An unknown package prints nothing; a known one with
+# nothing installable prints "Candidate: (none)".
+sub _apt_candidate_present {
+  my ($policy) = @_;
+  return 0 unless defined $policy;
+  my ($candidate) = $policy =~ /^\s*Candidate:\s*(\S+)/m;
+  return (defined $candidate && $candidate ne '(none)') ? 1 : 0;
+}
+
+# Pure (karr #26): is this `rpm -q --qf '%{VERSION}'` output a version of
+# driver branch $branch ("580.178.04" is branch 580)? Anything else — another
+# branch, "package ... is not installed", empty — is false.
+sub _rpm_version_in_branch {
+  my ($version, $branch) = @_;
+  return 0 unless defined $version && defined $branch;
+  return $version =~ /^\Q$branch\E\./ ? 1 : 0;
 }
 
 =method install_container_toolkit
@@ -384,6 +461,7 @@ sub _install_driver_debian {
   }
 
   my @packages = ("linux-headers-$running_kernel");
+  my $ubuntu_legacy_pkg;
 
   if ($os eq 'Ubuntu') {
     push @packages, "linux-headers-generic";
@@ -397,21 +475,34 @@ sub _install_driver_debian {
     # #14/#15/#16). _ubuntu_needs_open_kernel_module keys on the detected PCI
     # device ID only; for any non-Blackwell GPU (RTX 4000 Ada et al.), or no
     # GPU passed, it returns false and this branch behaves exactly as before.
-    my $open = _ubuntu_needs_open_kernel_module($gpu);
-    if ($open) {
-      Rex::Logger::info("  Blackwell-class GPU on $arch — selecting the open-kernel-module driver");
+    #
+    # Pre-Turing (Maxwell/Pascal/Volta, e.g. V100) (karr #26): the newest
+    # -server is a branch that no longer supports them, so pin the last one
+    # that does, proprietary (the open module never binds on them). Its
+    # candidate is checked after apt-get update below — fail loud, never a
+    # silent fallback to another branch.
+    $ubuntu_legacy_pkg = _ubuntu_legacy_driver_package($gpu);
+    if ($ubuntu_legacy_pkg) {
+      Rex::Logger::info("  Pre-Turing GPU — pinning the proprietary $ubuntu_legacy_pkg");
+      push @packages, $ubuntu_legacy_pkg;
     }
-    my $search_pattern = $open
-      ? '^nvidia-driver-[0-9].*-server-open$'
-      : '^nvidia-driver-[0-9].*-server$';
-    my $latest = run "apt-cache search '$search_pattern' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
-      auto_die => 0;
-    chomp $latest if $latest;
-    unless ($open) {
-      # Filter out *-open variants from auto-detect (use regular server driver)
-      $latest = undef if $latest && $latest =~ /-open$/;
+    else {
+      my $open = _ubuntu_needs_open_kernel_module($gpu);
+      if ($open) {
+        Rex::Logger::info("  Blackwell-class GPU on $arch — selecting the open-kernel-module driver");
+      }
+      my $search_pattern = $open
+        ? '^nvidia-driver-[0-9].*-server-open$'
+        : '^nvidia-driver-[0-9].*-server$';
+      my $latest = run "apt-cache search '$search_pattern' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
+        auto_die => 0;
+      chomp $latest if $latest;
+      unless ($open) {
+        # Filter out *-open variants from auto-detect (use regular server driver)
+        $latest = undef if $latest && $latest =~ /-open$/;
+      }
+      push @packages, ($latest || ($open ? "nvidia-driver-570-server-open" : "nvidia-driver-570-server"));
     }
-    push @packages, ($latest || ($open ? "nvidia-driver-570-server-open" : "nvidia-driver-570-server"));
   }
   elsif ($cuda_repo) {
     # Debian + Blackwell: NVIDIA's compute-only (headless) open-module set
@@ -435,6 +526,14 @@ sub _install_driver_debian {
     auto_die => 0;
   _add_nvidia_cuda_apt_repo($cuda_repo) if $cuda_repo;
   run "apt-get -o DPkg::Lock::Timeout=120 update -q", auto_die => 0;
+
+  if ($ubuntu_legacy_pkg) {
+    my $policy = run "LC_ALL=C apt-cache policy $ubuntu_legacy_pkg 2>/dev/null", auto_die => 0;
+    die "$ubuntu_legacy_pkg has no installation candidate on this $os host — it is the "
+      . "newest driver that supports this pre-Turing GPU and no other branch is "
+      . "substituted; no driver was installed\n"
+      unless _apt_candidate_present($policy);
+  }
 
   # Use apt-get directly: Rex::Pkg::Apt fails when apt exits non-zero due to
   # post-install scripts (DKMS build, grub update, initramfs). Verify via dpkg -l.
@@ -543,6 +642,18 @@ sub _ubuntu_needs_open_kernel_module {
   return Rex::GPU::Detect::open_kernel_module_required($gpu->{device_id});
 }
 
+# Pure (karr #26): the pinned Ubuntu driver package for a pre-Turing GPU —
+# "nvidia-driver-580-server" (proprietary: the -open variant does not support
+# these chips) — or undef for every other GPU, which keeps the newest -server
+# (or -server-open for Blackwell). A Kepler-or-older GPU never gets here:
+# install_driver rejected it already.
+sub _ubuntu_legacy_driver_package {
+  my ($gpu) = @_;
+  my $legacy = _legacy_driver_requirement($gpu);
+  return unless $legacy;
+  return "nvidia-driver-$legacy->{max_branch}-server";
+}
+
 sub _enable_debian_nonfree {
   # Add contrib non-free non-free-firmware to all deb lines
   my $sources = run "cat /etc/apt/sources.list 2>/dev/null", auto_die => 0;
@@ -560,9 +671,10 @@ sub _enable_debian_nonfree {
 # ============================================================
 
 sub _install_driver_redhat {
-  my ($os, $running_kernel) = @_;
+  my ($os, $running_kernel, $gpu) = @_;
 
   my $major = _os_major_version();
+  my $legacy = _rhel_legacy_driver_plan($major, $gpu);
 
   # Enable required repos
   Rex::Logger::info("  Enabling EPEL and extra repos...");
@@ -596,7 +708,28 @@ sub _install_driver_redhat {
   }
 
   # Driver packages — different for v10 (no module streams, dkms variant)
-  if ($major >= 10) {
+  if ($legacy) {
+    # Pre-Turing (karr #26): proprietary kmod, held on branch $legacy->{branch}.
+    # Unlike the open path below, a failed stream enable or lock is NOT
+    # swallowed: without it dnf would resolve the newest branch, which does not
+    # support this GPU.
+    Rex::Logger::info("  Pre-Turing GPU — proprietary driver, branch $legacy->{branch}");
+    if ($legacy->{module_stream}) {
+      run "dnf module enable nvidia-driver:$legacy->{module_stream} -y", auto_die => 0;
+      die "dnf module enable nvidia-driver:$legacy->{module_stream} failed — another "
+        . "nvidia-driver stream is probably enabled already (`dnf module reset "
+        . "nvidia-driver` switches it); no driver was installed\n"
+        if $? != 0;
+    }
+    if ($legacy->{versionlock}) {
+      pkg ["python3-dnf-plugin-versionlock"], ensure => "present";
+      run "dnf versionlock add '$legacy->{versionlock}'", auto_die => 0;
+      die "dnf versionlock add '$legacy->{versionlock}' failed; no driver was installed\n"
+        if $? != 0;
+    }
+    push @packages, @{ $legacy->{packages} };
+  }
+  elsif ($major >= 10) {
     push @packages, "kmod-nvidia-open-dkms", "nvidia-driver", "nvidia-driver-cuda";
   }
   else {
@@ -614,6 +747,46 @@ sub _install_driver_redhat {
   my $check = run "rpm -q nvidia-driver 2>&1", auto_die => 0;
   die "nvidia-driver not installed after dnf install — check dnf output\n"
     if $? != 0;
+
+  if ($legacy) {
+    # The proprietary kmod must be what got installed, and the driver must be
+    # on the pinned branch — not a newer one that cannot drive this GPU.
+    run "rpm -q $legacy->{kmod} 2>&1", auto_die => 0;
+    die "$legacy->{kmod} not installed after dnf install — check dnf output\n"
+      if $? != 0;
+    my $version = run "rpm -q --qf '%{VERSION}' nvidia-driver 2>&1", auto_die => 0;
+    chomp $version if defined $version;
+    die "nvidia-driver is " . ($version // 'unknown') . ", not branch "
+      . "$legacy->{branch} — this pre-Turing GPU needs $legacy->{branch}\n"
+      unless _rpm_version_in_branch($version, $legacy->{branch});
+  }
+}
+
+# Pure (karr #26): the RHEL-family driver plan for a pre-Turing GPU, or undef
+# for every other GPU (the open-dkms / kmod-nvidia-open-dkms path above stays
+# exactly as it was). These GPUs need the proprietary kmod
+# (kmod-nvidia-latest-dkms) on the 580 branch:
+#   * RHEL 8/9: the CUDA repo's module stream nvidia-driver:580-dkms, whose
+#     artifacts are kmod-nvidia-latest-dkms + nvidia-driver(-cuda) 3:580.*
+#     (checked in repos/rhel{8,9}/x86_64 modules.yaml, 2026-09-23).
+#   * RHEL 10: no module streams, so a dnf versionlock on '*nvidia*580*' per
+#     NVIDIA's version-locking guide (docs.nvidia.com/datacenter/tesla/
+#     driver-installation-guide/version-locking.html). repos/rhel10/x86_64
+#     carries kmod-nvidia-latest-dkms, nvidia-driver and nvidia-driver-cuda at
+#     580.x (checked 2026-09-23).
+# Returns { branch, module_stream|undef, versionlock|undef, packages, kmod }.
+sub _rhel_legacy_driver_plan {
+  my ($major, $gpu) = @_;
+  my $legacy = _legacy_driver_requirement($gpu);
+  return unless $legacy;
+  my $branch = $legacy->{max_branch};
+  return {
+    branch        => $branch,
+    module_stream => ($major >= 10 ? undef : "$branch-dkms"),
+    versionlock   => ($major >= 10 ? "*nvidia*$branch*" : undef),
+    packages      => [ 'kmod-nvidia-latest-dkms', 'nvidia-driver', 'nvidia-driver-cuda' ],
+    kmod          => 'kmod-nvidia-latest-dkms'
+  };
 }
 
 # Map the machine hardware name (`uname -m`) to the architecture token NVIDIA
@@ -650,10 +823,11 @@ sub _os_major_version {
 # ============================================================
 
 sub _install_driver_suse {
-  my ($os, $running_kernel) = @_;
+  my ($os, $running_kernel, $gpu) = @_;
 
   my $release = Rex::Commands::Gather::operating_system_release();
-  my ($repo_url, $meta_pkg) = _suse_nvidia_repo_params($release);
+  my $legacy  = _legacy_driver_requirement($gpu);
+  my ($repo_url, $meta_pkg) = _suse_nvidia_repo_params($release, $legacy);
 
   # Remove any stale NVIDIA packages first — avoids kmp/userspace version mismatch
   # caused by libnvidia-ml/libnvidia-cfg from the standard OSS non-free repo lagging
@@ -678,15 +852,37 @@ sub _install_driver_suse {
   # Lock the OSS non-free standalone packages so future zypper updates don't
   # pull in a stale libnvidia-ml / libnvidia-cfg and cause a mismatch again.
   run "zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true", auto_die => 0;
+
+  # Pre-Turing only (karr #26): verify the proprietary meta package landed. It
+  # requires the kmp and the userspace at its own exact version, so installed
+  # means both are. Other GPUs keep the unverified path as before.
+  if ($legacy) {
+    run "rpm -q $meta_pkg 2>&1", auto_die => 0;
+    die "$meta_pkg not installed after zypper install — check zypper output\n"
+      if $? != 0;
+  }
 }
 
 sub _suse_nvidia_repo_params {
-  my ($release) = @_;
+  my ($release, $legacy) = @_;
 
   # Derive the major from the raw release string. operating_system_version()
   # strips dots ("15.6" -> "156"), which made int() see 156 and route every
   # Leap through the ">= 16" branch (karr #6).
   my $major = _os_major_version($release);
+
+  # Pre-Turing (karr #26; $legacy from _legacy_driver_requirement): the
+  # PROPRIETARY G06 (= branch 580) meta package on both Leap 15 and 16 — the
+  # open G06/G07 metas do not support these GPUs, and G07 (595) is open-only.
+  # NVIDIA's leap/15.6/ and leap/16.0/ repos both carry
+  # nvidia-driver-G06-kmp-meta (x86_64 + aarch64, up to 580.178.04, checked in
+  # their primary.xml 2026-09-23); it requires nvidia-driver-G06-kmp and
+  # nvidia-userspace-meta-G06 at its own exact version.
+  if ($legacy) {
+    my $leap_version = $major >= 16 ? '16.0' : ($release =~ /^(\d+\.\d+)/)[0] // $release;
+    return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
+            "nvidia-driver-G06-kmp-meta");
+  }
 
   if ($major >= 16) {
     return ("https://download.nvidia.com/opensuse/leap/16.0/",
@@ -1187,28 +1383,49 @@ and the initramfs is regenerated to prevent it from loading at boot.
 On Debian, C<contrib>, C<non-free>, and C<non-free-firmware> components
 are added to C</etc/apt/sources.list> automatically if not already present.
 
+The package choice also depends on the GPU generation, read from the PCI
+device ID of the GPU passed as C<gpu> to L</install_driver>
+(L<Rex::GPU/gpu_setup> passes it automatically). Without that option every
+host gets the default selection below.
+
+=over
+
+=item * B<Turing, Ampere, Ada, Hopper> and unknown IDs: the default per-distro
+selection.
+
+=item * B<Blackwell> (B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell,
+GB10), on any CPU architecture: it has no proprietary kernel module. Ubuntu
+selects the C<-server-open> variant. Debian 12/13 installs the open-module set
+from NVIDIA's CUDA repository instead of C<non-free>.
+
+=item * B<Maxwell, Pascal, Volta> (e.g. V100, P100): only the proprietary
+module of the 580 branch supports them. Ubuntu pins
+C<nvidia-driver-580-server>, RHEL pins branch 580 (module stream or
+versionlock) with C<kmod-nvidia-latest-dkms>, and openSUSE uses
+C<nvidia-driver-G06-kmp-meta>.
+
+=item * B<Kepler or older>: no supported branch is installed and
+L</install_driver> dies before changing the host.
+
+=back
+
+See the C<gpu> option of L</install_driver> for the exact packages.
+
 On Ubuntu, the newest available C<nvidia-driver-NNN-server> package is
-auto-detected and installed. On aarch64 (C<dpkg --print-architecture>
-C<arm64>) for a GPU whose PCI device ID L<Rex::GPU::Detect> marks
-open-kernel-module-only — the GB10 / NVIDIA DGX Spark, which has no
-proprietary kernel module at all — the C<-server-open> variant is selected
-instead. This requires the caller (L<Rex::GPU/gpu_setup> does this
-automatically) to pass the detected GPU via the C<gpu> option to
-L</install_driver>; without it, or on x86_64, the plain C<-server> package is
-used exactly as before.
+auto-detected and installed by default.
 
 On RHEL/Rocky/AlmaLinux/CentOS Stream, the NVIDIA CUDA repository is added
-and the open-kernel DKMS variant is used. For RHEL 10+ the module streams
-approach is not available; C<kmod-nvidia-open-dkms> is installed directly.
-The CUDA repository URL is architecture-aware: aarch64 hosts use the C<sbsa>
-tree (C<repos/rhelN/sbsa/>), x86_64 hosts the C<x86_64> tree.
+and the open-kernel DKMS variant is used by default. For RHEL 10+ the module
+streams approach is not available; C<kmod-nvidia-open-dkms> is installed
+directly. The CUDA repository URL is architecture-aware: aarch64 hosts use the
+C<sbsa> tree (C<repos/rhelN/sbsa/>), x86_64 hosts the C<x86_64> tree.
 
-On openSUSE Leap, the signed kmp-meta package (C<nvidia-open-driver-G06-signed-kmp-meta>
-for Leap 15.x, C<nvidia-open-driver-G07-signed-kmp-meta> for Leap 16.x) is
-used to ensure the kernel module and userspace libraries are always at the
-same version. Stale OSS non-free packages are removed before installation
-and locked afterwards to prevent C<nvidia-smi> from reporting a
-C<Driver/library version mismatch>.
+On openSUSE Leap, a kmp-meta package is used (by default
+C<nvidia-open-driver-G06-signed-kmp-meta> for Leap 15.x,
+C<nvidia-open-driver-G07-signed-kmp-meta> for Leap 16.x) to ensure the kernel
+module and userspace libraries are always at the same version. Stale OSS
+non-free packages are removed before installation and locked afterwards to
+prevent C<nvidia-smi> from reporting a C<Driver/library version mismatch>.
 
 =head2 Container Toolkit
 

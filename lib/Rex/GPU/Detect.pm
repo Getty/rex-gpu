@@ -79,6 +79,34 @@ my @NVIDIA_BLACKWELL_DEVICE_ID_RANGES = (
   [ 0x31c2, 0x31c3 ]    # GB300
 );
 
+# Pre-Turing NVIDIA PCI device IDs (karr #26), inclusive ranges, with the
+# newest driver branch that still supports them. Interim hotfix table; epic
+# karr #25 folds it into a driver Requirement table. Like the Blackwell ranges
+# above it ONLY picks the driver — it never makes a device compute.
+#
+# Source: the legacy sections of NVIDIA's supportedchips README (driver
+# 615.71.09, us.download.nvidia.com/XFree86/Linux-x86_64/615.71.09/README/
+# supportedchips.html), checked 2026-09-23:
+#   * "current" list: lowest ID 1E02 (TITAN RTX, Turing). No current ID < 1E02.
+#   * 580.xx legacy list (Maxwell/Pascal/Volta): exactly 1340..1DF6, e.g.
+#     Tesla M60 13F2, M40 17FD, P100 15F7/15F8, P40 1B38, P4 1BB3, TITAN V
+#     1D81, V100 1DB1/1DB4-1DB6, V100S 1DF6. Proprietary kernel module only —
+#     the open module needs GSP, which these chips lack — and 580 is their last
+#     branch (595+ dropped them).
+#   * 470.xx list (Kepler): 0FC6..12BA. The 390.xx (Fermi) list interleaves
+#     with it (1040..1251) and goes down to 06C0; older legacy lists reach
+#     down to 0020. No list has an ID in 12BB..133F or 1DF7..1E01.
+# So every ID below 1340 is Kepler or older and no driver newer than 470
+# supports it: one block, not a Kepler-only range, so a Fermi Tesla (C2050
+# 06D1, M2090 1091) is rejected too instead of getting today's broken install.
+# 1340..1DF6 is taken as a block like the Blackwell one: an unlisted ID inside
+# it is Maxwell..Volta silicon. IDs from 1DF7 on (Turing and later, unknown)
+# return nothing here — today's selection, unchanged.
+my @NVIDIA_LEGACY_DEVICE_ID_RANGES = (
+  [ 0x0000, 0x133f, 'Kepler or older',      470 ],
+  [ 0x1340, 0x1df6, 'Maxwell/Pascal/Volta', 580 ]
+);
+
 =head1 FUNCTIONS
 
 =cut
@@ -245,6 +273,49 @@ sub open_kernel_module_required {
   return 0;
 }
 
+=method legacy_driver_requirement
+
+  my $legacy = Rex::GPU::Detect::legacy_driver_requirement($device_id);
+  # { generation => 'Maxwell/Pascal/Volta', max_branch => 580 } or undef
+
+Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, any case),
+returns a hashref for a pre-Turing GPU that current NVIDIA drivers no longer
+support: C<generation> (a label for messages) and C<max_branch>, the newest
+driver branch that still does. These GPUs work only with NVIDIA's
+I<proprietary> kernel module; the open module does not support them.
+
+=over
+
+=item * C<1340>-C<1DF6> — Maxwell, Pascal and Volta (Tesla M60/M40, P100, P40,
+P4, V100, V100S, TITAN V, GeForce 9xx/10xx, ...): C<max_branch> C<580>.
+
+=item * below C<1340> — Kepler (C<0FC6>-C<12BA>, Tesla K80/K40) and older
+(Fermi and earlier): C<max_branch> C<470>.
+
+=back
+
+Returns C<undef> for C<undef>, a malformed ID, and every ID from C<1DF7> up
+(Turing and every later or unknown generation), which keep the default driver
+selection. The ranges are taken from the legacy sections of NVIDIA's
+C<supportedchips> README (driver 615.71.09). Like
+L</open_kernel_module_required> this only chooses the driver; it never makes a
+GPU compute-capable.
+
+Not in C<@EXPORT> — a C<Rex::GPU::NVIDIA>-internal lookup.
+
+=cut
+
+sub legacy_driver_requirement {
+  my ($device_id) = @_;
+  return unless defined $device_id && $device_id =~ /^[0-9a-f]{4}$/i;
+  my $id = hex $device_id;
+  for my $range (@NVIDIA_LEGACY_DEVICE_ID_RANGES) {
+    return { generation => $range->[2], max_branch => $range->[3] }
+      if $id >= $range->[0] && $id <= $range->[1];
+  }
+  return;
+}
+
 sub _parse_amd_line {
   my ($line) = @_;
 
@@ -344,7 +415,9 @@ hashref through to L<Rex::GPU::NVIDIA/install_driver>, which uses
 L</open_kernel_module_required> on the device ID to pick the correct Ubuntu
 driver package variant for Blackwell-architecture silicon (B200/GB200/B300,
 GeForce RTX 50xx, RTX PRO Blackwell, GB10) that has no proprietary kernel
-module at all.
+module at all, and L</legacy_driver_requirement> to keep a pre-Turing GPU
+(Maxwell/Pascal/Volta, e.g. the V100) on the proprietary 580 branch and to
+reject a Kepler-or-older one.
 
 =head1 SEE ALSO
 

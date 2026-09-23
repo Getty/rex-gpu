@@ -74,8 +74,11 @@ Blackwell, the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module
 at all, on x86_64 and aarch64 alike. On Debian the same GPUs get NVIDIA's
 CUDA-repository open-module driver instead of Debian's C<non-free> one (which
 cannot drive them), on Debian 12 and 13 only; a Blackwell GPU on any other
-Debian release dies before the host is changed. Every other distro/GPU
-combination is unaffected.
+Debian release dies before the host is changed. A pre-Turing GPU
+(Maxwell/Pascal/Volta, e.g. the V100) gets the proprietary 580-branch driver on
+Ubuntu, RHEL and openSUSE; a Kepler-or-older GPU (e.g. Tesla K80) makes
+C<gpu_setup> die before the host is changed, unless a working driver is
+already installed. Every other distro/GPU combination is unaffected.
 
 AMD GPUs are detected and logged but not yet supported (a warning is emitted).
 
