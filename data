@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T18:43:35Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T18:43:35Z
+created: 2026-09-23T17:22:51Z
+id: 30
+priority: medium
+started: 2026-09-23T18:34:30Z
+status: done
+title: 'T1: Requirement-Klasse + Generationen-Tabelle, open_kernel_module_required
+  delegiert (Teil von #25)'
+updated: 2026-09-23T18:43:35Z
+---
+
+Siehe Epic #25 (Architektur, Migrationsschritte, Entscheidungen). T0-T3 und T5 verhaltensneutral bzw. rein additiv; Golden-Sequenzen aus T0 muessen exakt passen.
