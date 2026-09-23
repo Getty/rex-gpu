@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T18:38:10Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T18:38:10Z
+created: 2026-09-23T18:34:19Z
+id: 40
+priority: high
+started: 2026-09-23T18:34:23Z
+status: done
+title: 'Debian 12: sources.list mit ''main non-free-firmware'' -- /non-free/ matcht
+  non-free-firmware, non-free wird nie aktiviert'
+updated: 2026-09-23T18:38:10Z
+---
+
+Aus #36: Der klassische Pfad prueft $sources !~ /non-free/. Der bookworm-Installer schreibt "deb ... bookworm main non-free-firmware" -> Regex matcht, sed laeuft nie, non-free fehlt -> nvidia-driver ohne Candidate (gleicher Fehler wie #36). Fix: pro deb-Zeile fehlende Komponenten ergaenzen (wie _deb822_enable_nonfree), idempotent.
