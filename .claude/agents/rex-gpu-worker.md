@@ -58,15 +58,17 @@ dpkg lock, a cold host where nouveau has not been unloaded yet.
 ## Proof
 
 ```bash
-prove -lr t/          # -r matters if subdir tests ever appear; today t/ is flat
+prove -lr t/          # -r matters: helpers live in t/lib, goldens in t/golden
 ```
 
-`t/00-load.t` passing means three files compile — nothing more. It cannot see a wrong
+A green suite means the modules compile, the pure selection logic holds and the emitted
+commands match `t/golden/` (regenerate only on purpose: `REX_GPU_GOLDEN_UPDATE=1`, then
+explain every changed golden) — nothing more. It cannot see a wrong
 package name, a broken version branch or a mis-ordered pipeline, because none of that runs
 without a real GPU host. Never report a green `prove` as evidence that a
 detection or install change works; say plainly that it was not exercised against hardware,
 and what a maintainer would have to run on a real node to confirm it.
 
-`$VERSION` is repeated in all three modules under `lib/`; if you touch it, touch all three.
+`$VERSION` is repeated in every module under `lib/`; if you touch it, touch all of them.
 A change to what a Rexfile author sees wants a `Changes` `{{$NEXT}}` entry naming the
 effect and its POD updated in the same edit.

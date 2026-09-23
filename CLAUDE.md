@@ -27,10 +27,10 @@ delegates rather than loading them. Skill sources live under `.claude/skills/` â
 ## Build and test
 
 ```bash
-prove -lr t/     # today only t/00-load.t â€” compile check, no hardware exercised
+prove -lr t/     # compile check + offline unit/golden tests of emitted commands; no hardware exercised
 dzil build
 dzil test
 ```
 
 No detection, install, containerd or reboot path runs without a real GPU host; a green
-`prove` is a compile check, not proof a behavior change works.
+`prove` checks the emitted commands, not that a behavior change works on a host.

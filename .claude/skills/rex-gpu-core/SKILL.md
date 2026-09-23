@@ -38,32 +38,47 @@ with no driver yet). The compiled regexes at the top of the file are the contrac
 
 - Display class `[0300]` (VGA) or `[0302]` (3D/datacenter). `0302` ⇒ compute, always.
 - Vendor IDs: `10de` NVIDIA, `1002` AMD.
-- **Virtual GPUs short-circuit the whole scan**: `1af4` virtio, `1b36` QEMU, `15ad`
-  VMware, `80ee` VirtualBox → log and return empty arrays. A VM needs no host driver.
+- **Virtual displays are skipped per line** (k17): `1af4` virtio, `1b36` QEMU, `15ad`
+  VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
+  to an emulated console is still detected; only-virtual output returns empty arrays.
 
 `_is_nvidia_compute` classifies by name when class is `0300`: RTX/TITAN/Quadro/Tesla and
 GTX 10xx/16xx are compute; MX, GT/GTS/NVS, GTX 2xx–9xx are not; **unknown defaults to
 `0`** (safe: no install) with a warning. Changing that default from 0 to 1 means an
 unrecognised laptop chip triggers a datacenter driver install — keep it 0.
 
+**Which driver a GPU needs is a separate question** (epic #25): `Rex::GPU::NVIDIA::Requirement`
+(Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,
+min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF /
+B300 / GB300 open-only; Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; <1340 Kepler or
+older ≤470 (rejected). Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs
+and croaks on conflict. The table **never** makes a GPU compute. `Detect::
+open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers over it.
+
 ## The driver matrix — one dispatch, three families
 
 `install_driver` branches on `is_debian` / `is_redhat` / `is_suse`, else dies. Each
 family has a trap that is already solved in the code; do not "simplify" these away:
 
-- **Debian** — enable `contrib non-free non-free-firmware` first; install `nvidia-driver`
-  + `nvidia-smi` + the *running* kernel's headers only. Never the `linux-headers-$arch`
+- **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
+  archive entry in both `sources.list` and deb822 `*.sources` (k36/k40; unknown mirrors are
+  left alone and warn); install `nvidia-driver` + `nvidia-smi` + the *running* kernel's
+  headers only. Blackwell on Debian 12/13 instead uses NVIDIA's CUDA repo (`cuda-keyring`,
+  `nvidia-driver-cuda` + `nvidia-kernel-open-dkms`, no non-free; k18). Never the `linux-headers-$arch`
   metapackage — it pulls a new kernel whose grub/initramfs post-install returns non-zero.
 - **Ubuntu** — auto-detect the newest `nvidia-driver-NNN-server` via `apt-cache search`,
-  filtering out `-open`. **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
+  filtering out `-open`; Blackwell gets `-server-open` (k16), pre-Turing is pinned to
+  `nvidia-driver-580-server` (k26). **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
   virtual package with no install candidate and the driver metapackage pulls it anyway.
 - **RHEL/Rocky/Alma/CentOS** — EPEL + `crb`(≥9)/`powertools`(<9) + the CUDA repo. **v10+
   has no module streams**: install `kmod-nvidia-open-dkms` + `nvidia-driver` +
   `nvidia-driver-cuda` directly; <10 uses `dnf module enable nvidia-driver:open-dkms` +
-  `nvidia-open`. Get the major version from `_rhel_major_version` — see the trap below.
+  `nvidia-open`. Pre-Turing: stream `580-dkms` (<10) or a `*nvidia*580*` versionlock (10)
+  with the proprietary `kmod-nvidia-latest-dkms` (k26). Get the major version from
+  `_rhel_major_version` — see the trap below.
 - **openSUSE Leap** — `rpm -e` any stale `nvidia*`/`libnvidia*` first, add the GFX repo by
   **baseurl** (zypper can't parse yum `.repo` files), install the `signed-kmp-meta` package
-  (`G06` for 15.x, `G07` for 16.x), then `zypper addlock libnvidia-ml libnvidia-cfg`. The
+  (`G06` for 15.x, `G07` for 16.x; pre-Turing: proprietary `nvidia-driver-G06-kmp-meta`), then `zypper addlock libnvidia-ml libnvidia-cfg`. The
   meta package co-installs kmp + userspace at one version; the lock stops a later update
   re-splitting them into a `Driver/library version mismatch`.
 
@@ -116,8 +131,9 @@ nouveau; without it the NVIDIA module can't bind. `verify_nvidia` (module loaded
 
 ## Housekeeping
 
-`$VERSION` is repeated in all three modules under `lib/` (`GPU.pm`, `Detect.pm`,
-`NVIDIA.pm`) — bump them together. A change to what a Rexfile author sees (a new option, a
+`$VERSION` is repeated in every module under `lib/` (`GPU.pm`, `Detect.pm`, `NVIDIA.pm`,
+`NVIDIA/Requirement.pm`, and each new Setup class) — bump them together
+(`grep -rn 'our \$VERSION' lib/`). A change to what a Rexfile author sees (a new option, a
 detection outcome, a package choice) wants a `Changes` `{{$NEXT}}` entry naming the effect
 and its POD updated in the same edit. Perl house style and dist mechanics: skills
 `getty-perl-core`, `getty-perl-release-author-getty`, `perl-release-dist-ini`.

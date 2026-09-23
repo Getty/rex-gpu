@@ -1,6 +1,6 @@
 ---
 name: rex-gpu-release-checker
-description: "Audit Rex::GPU before release — Changes/{{$NEXT}} current, cpanfile complete with Rex recommends/deps sane, $VERSION consistent across all three modules under lib/ (GPU.pm, Detect.pm, NVIDIA.pm), dist.ini [@Author::GETTY] correct, dzil build clean, and POD claims about supported distros and the pipeline matching the code. Knows Rex::LibSSH is a recommends not a pin and Rex::Rancher consumes this via gpu => 1. Reports; does not fix and never releases."
+description: "Audit Rex::GPU before release — Changes/{{$NEXT}} current, cpanfile complete with Rex recommends/deps sane, $VERSION consistent across every module under lib/ (GPU.pm, Detect.pm, NVIDIA.pm, NVIDIA/Requirement.pm, Setup classes), dist.ini [@Author::GETTY] correct, dzil build clean, and POD claims about supported distros and the pipeline matching the code. Knows Rex::LibSSH is a recommends not a pin and Rex::Rancher consumes this via gpu => 1. Reports; does not fix and never releases."
 model: sonnet
 allowed-tools: Read, Bash, Glob, Grep
 briefing:
@@ -23,8 +23,9 @@ Audit only — you report findings, `rex-gpu-worker` fixes them and the maintain
    CPAN.
 
 2. **`$VERSION` consistency — specific to this distribution.** There is no single version
-   module; `our $VERSION` is repeated in all three files under `lib/` (`Rex/GPU.pm`,
-   `Rex/GPU/Detect.pm`, `Rex/GPU/NVIDIA.pm`). Check them against each other, not just
+   module; `our $VERSION` is repeated in every file under `lib/` (`Rex/GPU.pm`,
+   `Rex/GPU/Detect.pm`, `Rex/GPU/NVIDIA.pm`, `Rex/GPU/NVIDIA/Requirement.pm`, …; list them
+   with `grep -rn "our \$VERSION" lib/`). Check them against each other, not just
    against `Changes` — a partial bump ships modules that disagree about their own version:
 
    ```bash

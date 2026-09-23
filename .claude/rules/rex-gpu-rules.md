@@ -61,7 +61,8 @@ the distribution — full rationale in skill `rex-gpu-core`; do not "clean it up
 
 ## A green suite is not a proof
 
-`t/00-load.t` covers "three files compile" and nothing else — no detection, install,
+The suite covers compilation, pure selection logic and golden files of the emitted host
+commands (`t/golden/`, regenerate on purpose with `REX_GPU_GOLDEN_UPDATE=1`) — no detection, install,
 containerd or reboot path runs without a real GPU host. Never report green as evidence for
 a behavior change; state that it was not exercised against hardware and what a maintainer
 would run on a real node to confirm.
