@@ -34,7 +34,7 @@ use lib "$Bin/lib";
 # runs apt, dnf, zypper, rpm or a GPU.
 # -----------------------------------------------------------------------------
 
-use Test::RexGPU::Golden qw( record_host host_profile gpu_fixture mutating_lines );
+use Test::RexGPU::Golden qw( record_host host_profile gpu_fixture mutating_lines working_driver );
 use Rex::GPU::NVIDIA;
 
 my $APT  = 'Rex::GPU::NVIDIA::Setup::Apt';
@@ -93,9 +93,7 @@ is($SUSE->package_manager, 'zypper', 'SUSE installs with zypper');
     code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('kepler')) });
   like($rec->{error}, qr/Kepler or older/, '... a Kepler still gets the Kepler message first');
 
-  $rec = record_host(host => host_profile('debian-12', os => 'Gentoo', responses => [
-      [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ]
-    ]),
+  $rec = record_host(host => host_profile('debian-12', os => 'Gentoo', responses => [ working_driver() ]),
     code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
   is($rec->{error}, undef, '... and a working driver still short-circuits without dying');
 }
@@ -343,13 +341,13 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
 
 {
   my $rec = record_host(
-    host => host_profile('ubuntu-24.04', responses => [
-      [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ]
-    ]),
+    host => host_profile('ubuntu-24.04', responses => [ working_driver() ]),
     code => sub { die "install returned true\n" if $UBU->new(gpu => gpu_fixture('ada'))->install }
   );
   is($rec->{error}, undef, 'working driver: install returns 0');
-  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], '... after nothing but the probe');
+  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1',
+    q{run: /sbin/ldconfig -p 2>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '} ],
+    '... after nothing but the two probes (nvidia-smi, libcuda)');
 }
 
 #### A subclass overriding one step

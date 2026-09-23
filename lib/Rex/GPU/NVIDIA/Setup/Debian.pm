@@ -14,10 +14,15 @@ In this order:
 
 =over
 
-=item * C<debian-nonfree> -- C<nvidia-driver> + C<nvidia-smi> from Debian
-C<non-free>, proprietary kernel module, verified by C<nvidia-driver>. Its
-branch comes from L</nonfree_branch>; on a release that table does not know
-it is unknown, which fits only a GPU without constraints.
+=item * C<debian-nonfree> -- C<nvidia-driver> + C<nvidia-smi> +
+C<libcuda1> from Debian C<non-free>, proprietary kernel module, verified by
+C<nvidia-driver> and C<libcuda1>. C<libcuda1> is named because
+C<nvidia-driver> pulls it only through recommends
+(C<libnvidia-encode1> -E<gt> C<libnvcuvid1>), so a host with
+C<APT::Install-Recommends "false"> would get no CUDA library -- and without
+it L<Rex::GPU::NVIDIA::Setup/already_installed> never counts the driver as
+installed. Its branch comes from L</nonfree_branch>; on a release that table
+does not know it is unknown, which fits only a GPU without constraints.
 
 =item * C<nvidia-cuda-repo> -- NVIDIA's CUDA apt repository for C<debian12>
 or C<debian13> (C<x86_64> for amd64, C<sbsa> for arm64, key C<cuda_repo>):
@@ -61,8 +66,10 @@ sub sources {
       name          => 'debian-nonfree',
       kernel_module => 'proprietary',
       branch        => $self->nonfree_branch($major),
-      packages      => [ 'nvidia-driver', 'nvidia-smi' ],
-      verify        => [ 'nvidia-driver' ],
+      # libcuda1 explicitly (karr #42): only a recommends of nvidia-driver
+      # (via libnvidia-encode1 -> libnvcuvid1), and already_installed needs it
+      packages      => [ 'nvidia-driver', 'nvidia-smi', 'libcuda1' ],
+      verify        => [ 'nvidia-driver', 'libcuda1' ],
       nonfree       => 1
     },
     $self->_cuda_repo_source($major)

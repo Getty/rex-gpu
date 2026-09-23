@@ -1,6 +1,25 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver counts a driver as installed only if nvidia-smi -L lists
+    a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
+    a working nvidia-smi but no CUDA library now gets a warning and the
+    driver install instead of a skip. Debian's non-free driver installs and
+    verifies libcuda1 explicitly (nvidia-driver pulls it only through
+    recommends). Not hardware-verified (karr #42)
+  - install_driver checks only the driver after an install (module,
+    nvidia-smi, libcuda; new Rex::GPU::NVIDIA::verify_nvidia_driver, not
+    exported), so it no longer warns "nvidia-container-toolkit not found"
+    before the toolkit step. gpu_setup runs the full verify_nvidia as its
+    last step instead, also when the driver was already installed;
+    verify_nvidia itself is unchanged (karr #42)
+  - install_driver(gpu => { device_id => '2b85', name => '...' }) needs no
+    gpu_detect: only device_id and name are read, and install_driver never
+    runs lspci or installs pciutils. A device_id that is not four hex digits
+    (e.g. sysfs "0x2b85") now dies before the host is touched instead of
+    counting as an unknown GPU. New example eg/ubuntu-drivers/: a custom
+    setup that takes the Ubuntu package from ubuntu-drivers list --gpgpu
+    (karr #42)
   - install_container_toolkit skips an installed toolkit (nvidia-ctk
     --version runs and dpkg/rpm lists nvidia-container-toolkit), e.g. on a
     re-run or a DGX OS image. A re-run therefore no longer upgrades the

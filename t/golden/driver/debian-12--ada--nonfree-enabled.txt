@@ -8,8 +8,9 @@ run: cat /etc/apt/sources.list 2>/dev/null
 run: ls -1 /etc/apt/sources.list.d/ 2>/dev/null
 run: systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 run: apt-get -o DPkg::Lock::Timeout=120 update -q
-run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-6.1.0-37-amd64 nvidia-driver nvidia-smi
+run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-6.1.0-37-amd64 nvidia-driver nvidia-smi libcuda1
 run: dpkg -l nvidia-driver 2>/dev/null | grep -q '^ii'
+run: dpkg -l libcuda1 2>/dev/null | grep -q '^ii'
 file: /etc/modprobe.d/blacklist-nouveau.conf
   | blacklist nouveau
   | options nouveau modeset=0
@@ -17,4 +18,4 @@ run: update-initramfs -u 2>/dev/null
 run: modprobe nvidia
 run: lsmod | grep '^nvidia '
 run: nvidia-smi -L 2>&1
-can_run: nvidia-ctk
+run: /sbin/ldconfig -p 2>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '

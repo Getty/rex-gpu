@@ -43,15 +43,19 @@ Blacklists the C<nouveau> driver and rebuilds the initramfs so the blacklist
 takes effect on next boot.
 
 After installation (and after reboot, if C<reboot =E<gt> 1>), calls
-L</verify_nvidia> to confirm the kernel module loaded correctly.
+L</verify_nvidia_driver> to confirm the kernel module loaded correctly. Not
+the full L</verify_nvidia>: the container toolkit is installed after the
+driver, so its check could only warn here.
 
 Dies if the detected OS is not supported.
 
 If a working NVIDIA driver is already loaded and functional (C<nvidia-smi -L>
-lists a GPU) — for example on a host provisioned via the NVIDIA CUDA package
-repository, or on a re-run — C<install_driver> logs this and returns
-immediately without installing anything, and without blacklisting nouveau or
-rebooting. This keeps the call idempotent and stops the per-distro package
+lists a GPU B<and> C<libcuda.so.1> is in the linker cache, C<ldconfig -p>) —
+for example on a host provisioned via the NVIDIA CUDA package repository, or
+on a re-run — C<install_driver> logs this and returns immediately without
+installing anything, and without blacklisting nouveau or rebooting. A host
+where C<nvidia-smi> works but C<libcuda.so.1> is missing gets a warning and
+the driver install (see L<Rex::GPU::NVIDIA::Setup/already_installed>). This keeps the call idempotent and stops the per-distro package
 selection from installing a second, version-conflicting (or lower) driver over
 the one already present.
 
@@ -72,10 +76,19 @@ unloaded before the NVIDIA kernel module can bind to the device.
 
 =item C<gpus>
 
-Optional arrayref of the detected GPUs this driver install is for, each in
-the shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
-(C<name>, C<device_id>, ...). L<Rex::GPU/gpu_setup> passes every CUDA-capable
-NVIDIA GPU here. One driver has to drive them all: the driver is chosen for
+Optional arrayref of the GPUs this driver install is for.
+L<Rex::GPU/gpu_setup> passes every CUDA-capable NVIDIA GPU it detected here,
+in the shape L<Rex::GPU::Detect/detect> returns. Only C<device_id> and
+C<name> are read, so a caller that finds the GPUs itself -- without
+C<lspci> -- passes just those:
+
+  install_driver(gpu => { device_id => '2b85', name => 'NVIDIA GeForce RTX 5090' });
+
+C<device_id> is four hex digits, without C<0x> (sysfs C<device> reads
+C<0x2b85>) and without a newline; any other defined value dies before the
+host is touched. See L<Rex::GPU::NVIDIA::Setup/gpus>. C<install_driver>
+itself never runs C<lspci> or installs C<pciutils>, with or without
+C<gpus>. One driver has to drive them all: the driver is chosen for
 the B<intersection> of their requirements (L<Rex::GPU::NVIDIA::Requirement>:
 kernel module and driver-branch range, keyed on the C<device_id>), and
 C<install_driver> B<dies> before anything on the host is changed when the
@@ -159,7 +172,8 @@ verified with C<rpm -q>. On Debian 11/12/13 the C<non-free> driver (470,
 any one of the GPUs: the newest driver that supports it is the end-of-life
 470 branch. C<install_driver> B<dies> on every distro before anything on the
 host is changed. A host whose driver was installed by hand (C<nvidia-smi -L>
-lists the GPU) passes the already-installed check above instead.
+lists the GPU and C<libcuda.so.1> is in the linker cache) passes the
+already-installed check above instead.
 
 =back
 
@@ -210,7 +224,9 @@ sub install_driver {
     run "modprobe nvidia", auto_die => 0;
   }
 
-  verify_nvidia();
+  # Driver only (karr #42): the toolkit comes after this step in gpu_setup,
+  # so verify_nvidia's nvidia-ctk check could only warn here.
+  verify_nvidia_driver();
 
   Rex::Logger::info("NVIDIA driver installation complete");
 }
@@ -562,6 +578,71 @@ noting that features may not work until reboot.
 
 sub verify_nvidia {
   Rex::Logger::info("Verifying NVIDIA installation...");
+  my $ok = _verify_module_and_smi();
+
+  if (can_run("nvidia-ctk")) {
+    Rex::Logger::info("  [ok] nvidia-container-toolkit installed");
+  }
+  else {
+    Rex::Logger::info("nvidia-container-toolkit not found", "warn");
+    $ok = 0;
+  }
+
+  unless ($ok) {
+    Rex::Logger::info("GPU verification incomplete — some features may not work until reboot", "warn");
+  }
+
+  return $ok;
+}
+
+=method verify_nvidia_driver
+
+The driver half of L</verify_nvidia>, what L</install_driver> runs after an
+install:
+
+=over
+
+=item 1. C<nvidia> kernel module is loaded (C<lsmod | grep nvidia>)
+
+=item 2. C<nvidia-smi -L> reports at least one GPU
+
+=item 3. C<libcuda.so.1> is in the linker cache
+(L<Rex::GPU::NVIDIA::Setup/libcuda_command>) -- what
+L<Rex::GPU::NVIDIA::Setup/already_installed> requires, so a failure here
+means the next run installs again
+
+=back
+
+Does not look for the container toolkit. Returns C<1> if all checks pass,
+C<0> otherwise; logs a warning per failure and never dies. Not exported:
+call it as C<Rex::GPU::NVIDIA::verify_nvidia_driver()>.
+
+=cut
+
+sub verify_nvidia_driver {
+  Rex::Logger::info("Verifying NVIDIA driver...");
+  my $ok = _verify_module_and_smi();
+
+  run(Rex::GPU::NVIDIA::Setup->libcuda_command, auto_die => 0);
+  if ($? == 0) {
+    Rex::Logger::info("  [ok] libcuda.so.1 in the linker cache");
+  }
+  else {
+    Rex::Logger::info("libcuda.so.1 not in the linker cache (ldconfig -p) — CUDA programs "
+      ."cannot run, and the next install_driver installs again", "warn");
+    $ok = 0;
+  }
+
+  unless ($ok) {
+    Rex::Logger::info("NVIDIA driver verification incomplete — some features may not work until reboot", "warn");
+  }
+
+  return $ok;
+}
+
+# The kernel module and nvidia-smi checks both verify_* share; warns per
+# failure, returns 1/0.
+sub _verify_module_and_smi {
   my $ok = 1;
 
   my $lsmod = run "lsmod | grep '^nvidia '", auto_die => 0;
@@ -581,18 +662,6 @@ sub verify_nvidia {
   else {
     Rex::Logger::info("nvidia-smi not working: " . ($smi // 'no output'), "warn");
     $ok = 0;
-  }
-
-  if (can_run("nvidia-ctk")) {
-    Rex::Logger::info("  [ok] nvidia-container-toolkit installed");
-  }
-  else {
-    Rex::Logger::info("nvidia-container-toolkit not found", "warn");
-    $ok = 0;
-  }
-
-  unless ($ok) {
-    Rex::Logger::info("GPU verification incomplete — some features may not work until reboot", "warn");
   }
 
   return $ok;

@@ -59,6 +59,7 @@ our @EXPORT_OK = qw(
   gpu_fixture
   mutating_lines
   transcript
+  working_driver
 );
 
 my $GOLDEN_DIR = path(__FILE__)->absolute->parent(4)->child('golden');
@@ -73,6 +74,9 @@ my $GOLDEN_DIR = path(__FILE__)->absolute->parent(4)->child('golden');
 my @COMMON = (
   [ 'nvidia-smi -L 2>&1'                   => 'bash: line 1: nvidia-smi: command not found', 127 ],
   [ q{lsmod | grep '^nvidia '}             => '', 1 ],
+  # no CUDA library in the linker cache (karr #42); a test with a working
+  # driver scripts it present
+  [ qr{^/sbin/ldconfig -p }                => '', 1 ],
   [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$} => '', 0 ],
   [ q{rpm -q --qf '%{VERSION}' nvidia-driver 2>&1} => '580.95.05', 0 ],
   [ qr{^rpm -q (?:--whatprovides )?(\S+) 2>&1$} => 'installed', 0 ],
@@ -161,6 +165,16 @@ my %HOST = (
 );
 
 sub host_names { sort keys %HOST }
+
+# Responses of a host whose driver works: nvidia-smi lists a GPU and
+# libcuda.so.1 is in the linker cache -- what already_installed needs (karr
+# #42). Put them into host_profile(..., responses => [ working_driver() ]).
+sub working_driver {
+  return (
+    [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ],
+    [ qr{^/sbin/ldconfig -p } => '', 0 ]
+  );
+}
 
 # host_profile($name, %override) -- a fresh copy; `responses` given here are
 # consulted BEFORE the profile's own, `release`/`os` replace the profile's.
@@ -380,6 +394,7 @@ my @READ_ONLY = (
   qr{${RUN}test -s \S+$},
   qr{${RUN}rpm -q },
   qr{${RUN}lsmod },
+  qr{${RUN}/sbin/ldconfig -p },
   qr{^can_run: }
 );
 

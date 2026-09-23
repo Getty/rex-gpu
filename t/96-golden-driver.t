@@ -40,7 +40,7 @@ use lib "$Bin/lib";
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw(
-  record_host golden_is host_names host_profile gpu_fixture mutating_lines
+  record_host golden_is host_names host_profile gpu_fixture mutating_lines working_driver
 );
 use Rex::GPU::NVIDIA;
 
@@ -83,18 +83,46 @@ for my $os (host_names()) {
 }
 
 #### Already-installed short-circuit
+#
+# Installed = nvidia-smi lists a GPU AND libcuda.so.1 is in the linker cache
+# (karr #42). The libcuda probe runs only after nvidia-smi passed, so a fresh
+# host (every golden above) still runs the single nvidia-smi probe.
+
+my $LIBCUDA_PROBE = q{run: /sbin/ldconfig -p 2>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '};
 
 for my $os (host_names()) {
-  my $rec = driver_on(
-    host_profile($os, responses => [
-      [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ]
-    ]),
-    gpu_fixture('kepler')
-  );
+  my $rec = driver_on(host_profile($os, responses => [ working_driver() ]), gpu_fixture('kepler'));
   is($rec->{error}, undef, "$os + working driver: no die, even for a K80");
-  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ],
-    "$os + working driver: nothing but the probe");
+  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1', $LIBCUDA_PROBE ],
+    "$os + working driver: nothing but the two probes");
 }
+
+# nvidia-smi lists a GPU but libcuda.so.1 is missing: not installed. The
+# install runs exactly as on a fresh host, with the libcuda probe after the
+# nvidia-smi one; a K80 is refused after both probes.
+for my $os (host_names()) {
+  my $smi_only = [ [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ] ];
+  my $fresh = driver_on(host_profile($os), gpu_fixture('ada'));
+  my $rec   = driver_on(host_profile($os, responses => $smi_only), gpu_fixture('ada'));
+  is($rec->{error}, $fresh->{error}, "$os + nvidia-smi without libcuda: dies/lives like a fresh host");
+  my @lines = @{ $rec->{lines} };
+  is($lines[1], $LIBCUDA_PROBE, "$os + nvidia-smi without libcuda: libcuda probed after nvidia-smi");
+  splice @lines, 1, 1;
+  is_deeply(\@lines, $fresh->{lines}, "$os + nvidia-smi without libcuda: then the fresh-host install");
+  ok((grep { $_->[0] eq 'warn' && $_->[1] =~ /libcuda\.so\.1 is not in the linker cache/ } @{ $rec->{logs} }),
+    "$os + nvidia-smi without libcuda: warns before installing");
+
+  $rec = driver_on(host_profile($os, responses => $smi_only), gpu_fixture('kepler'));
+  like($rec->{error}, qr/Kepler or older.*libcuda\.so\.1 is in the linker cache, install_driver skips/,
+    "$os + K80, nvidia-smi without libcuda: Kepler message names both conditions");
+  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1', $LIBCUDA_PROBE ], '... after the two probes only');
+}
+golden_is(
+  driver_on(host_profile('debian-12', responses => [
+    [ 'nvidia-smi -L 2>&1' => 'GPU 0: NVIDIA RTX 4000 SFF Ada Generation (UUID: GPU-0)', 0 ]
+  ]), gpu_fixture('ada')),
+  'driver/debian-12--ada--libcuda-missing'
+);
 
 #### Failure variants on the install-verify seam and the selection guards
 

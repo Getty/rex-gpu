@@ -18,11 +18,37 @@ use namespace::autoclean;
 
 =attr gpus
 
-Arrayref of the detected GPUs this driver install is for, each in the shape
-L<Rex::GPU::Detect/detect> returns for one C<nvidia> element (C<name>,
-C<device_id>, ...). One driver has to drive them all, so L</requirement> is
-the intersection of their requirements. Empty (the default) keeps the
-GPU-agnostic package selection. Elements that are not hashrefs are ignored.
+Arrayref of the GPUs this driver install is for. One driver has to drive
+them all, so L</requirement> is the intersection of their requirements.
+Empty (the default) keeps the GPU-agnostic package selection. Elements that
+are not hashrefs are ignored.
+
+Each GPU is a hashref; the elements L<Rex::GPU::Detect/detect> returns for
+C<nvidia> fit, but only two keys are read, so a caller that finds the GPU
+another way (e.g. sysfs, without C<lspci>) passes just these:
+
+  { device_id => '2b85', name => 'NVIDIA GeForce RTX 5090' }
+
+=over
+
+=item * C<device_id> -- the PCI device ID as four hex digits, without
+C<0x> and without a trailing newline (C<2b85>; sysfs C<device> reads
+C<0x2b85>). It is what the driver is chosen by
+(L<Rex::GPU::NVIDIA::Requirement>): Kepler is refused, Blackwell gets the
+open kernel module, Maxwell/Pascal/Volta the 580 branch. Any other defined
+value croaks in C<new> (and in L</adopt>), before anything touches the
+host -- it would otherwise silently count as an unknown GPU and lose those
+guards. Leaving it out (or C<undef>, as detection does for an C<lspci> line
+without C<[10de:XXXX]>) is accepted and means exactly that: an unknown GPU,
+no constraint.
+
+=item * C<name> -- for log lines and messages only. Optional.
+
+=back
+
+C<compute>, C<pci_class> and C<vendor> are not read: whether a GPU gets a
+driver at all is the caller's decision (L<Rex::GPU/gpu_setup> passes only
+C<compute> ones).
 
 =attr gpu
 
@@ -46,6 +72,22 @@ sub BUILD {
     if defined $args->{gpu} && defined $args->{gpus};
   croak __PACKAGE__.'->new: gpus must be an arrayref of GPU hashrefs'
     if defined $args->{gpus} && ref $args->{gpus} ne 'ARRAY';
+  $self->_check_gpus($args->{gpus} // [ defined $args->{gpu} ? $args->{gpu} : () ]);
+}
+
+# A device_id that is there but not four hex digits ("0x2b85" from sysfs,
+# "2b85\n" from a cat) would make Requirement->from_gpu see an unknown GPU:
+# no Kepler refusal, no open module for Blackwell. Croak instead (karr #42).
+sub _check_gpus {
+  my ( $self, $gpus ) = @_;
+  for my $gpu (grep { ref $_ eq 'HASH' } @$gpus) {
+    my $id = $gpu->{device_id};
+    next if !defined $id || $id =~ /\A[0-9a-f]{4}\z/i;
+    croak "NVIDIA GPU '".( $gpu->{name} // 'unknown' )."': device_id '".$id."' is not "
+      .'a PCI device ID of four hex digits, e.g. 2b85 (no 0x, no newline). Nothing '
+      .'was changed on the host';
+  }
+  return;
 }
 
 # extra_requirement may be given as a plain hashref; it becomes an object of
@@ -111,8 +153,8 @@ sub _build_requirement {
   if ( my @conflicts = $class->conflicts(@reqs) ) {
     die 'No single NVIDIA driver supports all GPUs on this host: '
       .join('; ', @conflicts).'. Nothing was changed on the host. Install the '
-      ."driver yourself; once `nvidia-smi -L` lists the GPUs, install_driver skips "
-      ."the driver step\n";
+      ."driver yourself; once `nvidia-smi -L` lists the GPUs and libcuda.so.1 is in "
+      ."the linker cache, install_driver skips the driver step\n";
   }
   my $gpu_req = $class->intersect(@reqs);
   return $gpu_req unless $extra;
@@ -175,6 +217,7 @@ sub adopt {
     if $self->_installed;
   my $extra = defined $arg{extra_requirement}
     ? $self->_coerce_requirement($arg{extra_requirement}) : undef;
+  $self->_check_gpus($gpus);
   my $take_gpus = @$gpus && !@{ $self->gpus };
   return $self unless $take_gpus || $extra;
   croak ref($self).' object passed as setup => already has a fixed requirement '
@@ -288,11 +331,9 @@ Runs the fixed sequence, each step a method a subclass can override:
 
 Returns C<1> after an install, C<0> if a working driver was already there.
 Loading the module (C<modprobe nvidia>) or rebooting, and
-L<Rex::GPU::NVIDIA/verify_nvidia>, are done by
+L<Rex::GPU::NVIDIA/verify_nvidia_driver>, are done by
 L<Rex::GPU::NVIDIA/install_driver> after this returns, not by the setup:
-the reboot is a per-call option that needs Rex's live connection, and
-C<verify_nvidia> is an exported check that also looks for the container
-toolkit.
+the reboot is a per-call option that needs Rex's live connection.
 
 =cut
 
@@ -316,10 +357,35 @@ sub install {
 
 =method already_installed
 
-True if a working NVIDIA driver is loaded: C<nvidia-smi -L> lists a
-C<GPU N:> device. Then nothing is installed, nouveau is not blacklisted and
-the host is not rebooted, so a re-run, or a host provisioned from NVIDIA's
-own repository, does not get a second, conflicting driver.
+True if a working NVIDIA driver with its CUDA user-space library is there:
+C<nvidia-smi -L> lists a C<GPU N:> device B<and> C<libcuda.so.1> is in the
+dynamic linker cache (L</libcuda_command>). Then nothing is installed,
+nouveau is not blacklisted and the host is not rebooted, so a re-run, or a
+host provisioned from NVIDIA's own repository, does not get a second,
+conflicting driver.
+
+The library probe runs only when C<nvidia-smi> lists a GPU. If it does and
+C<libcuda.so.1> is missing -- the kernel module and C<nvidia-smi> are there,
+but no CUDA program could run (e.g. Debian's C<nvidia-driver> installed
+without recommends, which does not pull C<libcuda1>) -- a warning is logged
+and the driver B<is installed>, over whatever is there: on a host whose
+driver came from elsewhere (NVIDIA's CUDA repository, a C<.run> installer)
+that is the distro driver next to it, and its install may fail with a
+package conflict.
+
+=method libcuda_command
+
+The read-only probe L</already_installed> runs for the CUDA library,
+C</sbin/ldconfig -p 2E<gt>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '>;
+exit C<0> means present. The linker cache is where every distro's driver
+packages register C<libcuda.so.1> (Debian through the C<nvidia> alternative
+in the multiarch directory, Ubuntu C<libnvidia-compute-NNN>, RHEL
+C<nvidia-driver-cuda-libs>, openSUSE C<nvidia-compute-G06>/C<G07>), whatever
+the library directory, and it is what the loader of a CUDA program
+consults. C</sbin/ldconfig> by path: C</sbin> is not on every login's
+C<PATH>, and it exists on every supported release (a symlink to C</usr/sbin>
+where C</usr> is merged). Matches the soname only, not C<libcudart> or
+C<libcudadebugger>. Override it for a host that keeps the library elsewhere.
 
 =cut
 
@@ -332,8 +398,25 @@ sub already_installed {
   my $smi = $self->run_cmd('nvidia-smi -L 2>&1', auto_die => 0);
   chomp $smi if defined $smi;
   return 0 unless $self->_driver_present($smi);
+  # ... and libcuda (karr #42): a module without the CUDA user-space library
+  # cannot run a CUDA workload, so it is not "installed". Probed only after
+  # nvidia-smi passed: a fresh host runs no more than the one probe.
+  unless ($self->_libcuda_present) {
+    Rex::Logger::info("nvidia-smi lists a GPU ($smi) but libcuda.so.1 is not in the "
+      .'linker cache (ldconfig -p) — installing the driver packages', 'warn');
+    return 0;
+  }
   Rex::Logger::info("NVIDIA driver already present and working — skipping driver install ($smi)");
   return 1;
+}
+
+sub libcuda_command { q{/sbin/ldconfig -p 2>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '} }
+
+# Runs libcuda_command; 1 if it exited 0.
+sub _libcuda_present {
+  my ( $self ) = @_;
+  $self->run_cmd($self->libcuda_command, auto_die => 0);
+  return $? == 0 ? 1 : 0;
 }
 
 =method plan
@@ -488,7 +571,8 @@ sub select_source {
   die 'No NVIDIA driver source on this '.$self->os.' '.( $self->release // '' ).' host fits '
     .$requirement->who.' ('.$requirement->describe.') -- '.join('; ', @rejected)
     .'. Nothing was changed on the host. Install the driver yourself; once '
-    ."`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
+    ."`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
+    ."install_driver skips the driver step\n";
 }
 
 sub resolve_plan {
@@ -504,7 +588,8 @@ sub resolve_plan {
     .' ('.$requirement->describe.') has nothing to install on this '.$self->os.' '
     .( $self->release // '' ).' host: '.$why.'. No driver package was installed, '
     .'only the package sources were prepared. Install the driver yourself; once '
-    ."`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n"
+    ."`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
+    ."install_driver skips the driver step\n"
     if defined $why;
   return if $resolved == $source;
   my %old = map { $_ => 1 } @{ $source->{packages} // [] };
@@ -595,7 +680,8 @@ sub _reject_unsupported_gpu {
     . $req->generation." silicon: no driver newer than the end-of-life "
     . $req->max_branch." branch supports it, and Rex::GPU does not install "
     . "that. Nothing was changed on the host. Install the driver yourself; once "
-    . "`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
+    . "`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
+    . "install_driver skips the driver step\n";
 }
 
 # `uname -m` / dpkg arch -> the token NVIDIA's CUDA repos use under
@@ -717,6 +803,30 @@ can return. L</plan> and everything it calls must only read the host.
     $self->file_cmd('/etc/apt/sources.list.d/internal-nvidia.list',
       content => $self->apt_line."\n") if $self->has_apt_line;
     $self->SUPER::prepare_source($plan);
+  }
+
+=head2 Choosing the package another way
+
+Override L</resolve_source>: it runs after C<apt-get update>, may read the
+host but not change it, and whatever it returns is checked against the
+requirement again. C<eg/ubuntu-drivers/> in the distribution asks
+C<ubuntu-drivers list --gpgpu> (read-only) for the Ubuntu package instead
+of C<apt-cache search>; the package it names is installed and verified by
+the inherited steps, not by C<ubuntu-drivers install>:
+
+  package My::GPU::UbuntuDrivers;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+
+  sub resolve_source {
+    my ( $self, $source ) = @_;
+    return $self->SUPER::resolve_source($source) unless defined $source->{search};
+    my $list = $self->run_cmd('ubuntu-drivers list --gpgpu 2>/dev/null', auto_die => 0);
+    # ... pick the newest nvidia-driver-NNN-server(-open) line of the
+    # source's kernel module flavour, then:
+    my %resolved = ( %$source, packages => [ $pkg ], verify => [ $pkg ], branch => $branch );
+    delete $resolved{branch_at_least};
+    return \%resolved;   # or { %$source, unavailable => 'why' }
   }
 
 =head2 Choosing it

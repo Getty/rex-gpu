@@ -83,6 +83,12 @@ working driver is already installed, and so do GPUs that cannot share one
 driver (a V100 next to a B200). A host whose GPUs are all Turing to Hopper
 gets the same driver as before.
 
+After the last step L<Rex::GPU::NVIDIA/verify_nvidia> checks the result --
+kernel module, C<nvidia-smi -L>, container toolkit -- and logs a warning for
+anything missing (e.g. the module before the first reboot); it never dies.
+It runs on every call with a CUDA-capable GPU, also when the driver was
+already installed.
+
 AMD GPUs are detected and logged but not yet supported (a warning is emitted).
 
   gpu_setup(
@@ -208,6 +214,10 @@ sub gpu_setup {
       if ($runtime ne 'none') {
         Rex::GPU::NVIDIA::configure_containerd($runtime);
       }
+
+      # The full check, toolkit included, once the toolkit is there (karr
+      # #42); install_driver checks only the driver.
+      Rex::GPU::NVIDIA::verify_nvidia();
     }
   }
 

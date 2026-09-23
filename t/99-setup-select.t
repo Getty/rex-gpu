@@ -284,19 +284,27 @@ PM
 #### gpu_setup hands the options through
 
 {
-  my ( @calls, $detected );
+  my ( @calls, @steps, $detected );
   no warnings 'redefine';
   local *Rex::GPU::_check_connection               = sub { };
   local *Rex::GPU::Detect::detect                  = sub { $detected++; { nvidia => [ gpu_fixture('ada') ], amd => [] } };
-  local *Rex::GPU::NVIDIA::install_driver          = sub { push @calls, { @_ } };
-  local *Rex::GPU::NVIDIA::install_container_toolkit = sub { };
-  local *Rex::GPU::NVIDIA::generate_cdi_specs      = sub { };
-  local *Rex::GPU::NVIDIA::configure_containerd    = sub { };
+  local *Rex::GPU::NVIDIA::install_driver          = sub { push @calls, { @_ }; push @steps, 'driver' };
+  local *Rex::GPU::NVIDIA::install_container_toolkit = sub { push @steps, 'toolkit' };
+  local *Rex::GPU::NVIDIA::generate_cdi_specs      = sub { push @steps, 'cdi' };
+  local *Rex::GPU::NVIDIA::configure_containerd    = sub { push @steps, 'containerd' };
+  local *Rex::GPU::NVIDIA::verify_nvidia           = sub { push @steps, 'verify' };
   local *Rex::Logger::info                         = sub { };
 
   Rex::GPU::gpu_setup(containerd_config => 'rke2', reboot => 0);
   is_deeply([ sort keys %{ $calls[-1] } ], [ qw( gpus reboot ) ],
     'gpu_setup without the options: install_driver gets exactly what it got before');
+  # karr #42: install_driver checks only the driver; the full verify_nvidia
+  # (toolkit included) runs once, after the toolkit and containerd steps.
+  is_deeply(\@steps, [ qw( driver toolkit cdi containerd verify ) ],
+    'gpu_setup runs the full verify_nvidia last');
+  @steps = ();
+  Rex::GPU::gpu_setup(containerd_config => 'none');
+  is_deeply(\@steps, [ qw( driver toolkit cdi verify ) ], '... also with containerd_config => none');
 
   Rex::GPU::gpu_setup(setup => 'My::Inline::Setup', requirement => { min_branch => 580 });
   is($calls[-1]{setup}, 'My::Inline::Setup', 'setup => handed through');

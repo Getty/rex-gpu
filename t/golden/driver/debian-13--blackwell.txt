@@ -19,4 +19,4 @@ run: update-initramfs -u 2>/dev/null
 run: modprobe nvidia
 run: lsmod | grep '^nvidia '
 run: nvidia-smi -L 2>&1
-can_run: nvidia-ctk
+run: /sbin/ldconfig -p 2>/dev/null | grep -q '^[[:space:]]*libcuda\.so\.1 '
