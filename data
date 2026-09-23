@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T18:34:14Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T18:34:14Z
+created: 2026-09-23T17:41:54Z
+id: 36
+priority: high
+started: 2026-09-23T18:29:21Z
+status: done
+title: 'Debian 13 mit nur deb822-Sources (debian.sources): non-free wird nie aktiviert,
+  Treiberinstall stirbt'
+updated: 2026-09-23T18:34:14Z
+---
+
+Aus T0 (#29): _enable_debian_nonfree liest nur /etc/apt/sources.list und kehrt bei leer/fehlend frueh zurueck. Trixie-Default ist /etc/apt/sources.list.d/debian.sources (deb822, Components:). Folge: nvidia-driver ohne Candidate, dpkg-Check stirbt -- Non-Blackwell auf Debian 13 nicht installierbar, sofern das Image deb822 nutzt (Hetzner-Image pruefen!). Golden debian-13 zeigt: kein sed.
