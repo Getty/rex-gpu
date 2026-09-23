@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-23T02:23:15Z
+claimed_by: claude
+class: standard
+completed: 2026-09-23T02:23:15Z
+created: 2026-09-21T00:42:27Z
+id: 15
+priority: low
+started: 2026-09-23T02:02:15Z
+status: done
+tags:
+- aarch64
+- nvidia
+- driver
+- ubuntu
+title: 'Ubuntu Blackwell/GB10 Treiber-Install: open statt proprietaer (aarch64) --
+  Teil 2 von #14'
+updated: 2026-09-23T02:23:19Z
+---
+
+WICHTIG (Interaktion mit #14 Teil 1): #14 Teil 1 aktiviert die GB10-Detection (compute=1). Damit laeuft gpu_setup auf einem FRISCHEN Ubuntu-arm64 Spark jetzt in install_driver hinein; der Ubuntu-Zweig waehlt per apt-cache search die PROPRIETAERE nvidia-driver-595-server -- fuer Blackwell FALSCH (braucht die OPEN Kernel-Module). Vorher: Detection=0 -> ganze Pipeline uebersprungen. Der Verify-Seam faellt bei nicht-ladendem Treiber laut aus (fail-safe), aber der Install ist falsch. Konsequenz: fuer Ubuntu-Sparks muessen Teil 1 + Teil 2 zusammen released werden. Warum in #14 bewusst NICHT geaendert: (a) #10-Short-Circuit no-oppt auf cortex (Treiber 580-open schon da), Install-Pfad dort nicht exerzierbar; (b) cortex nutzt DGX-OS prebuilt linux-modules-nvidia-580-open auf kernel 6.17.0-nvidia, nicht generisches DKMS -- unklar ob nvidia-driver-NNN-server-open auf GB10 auf Stock-Ubuntu-Kernel DKMS-baut; (c) unbedingtes Umstellen auf -open wuerde den verifizierten x86_64-RTX-4000-Ada-Pfad aendern -> conditional braucht GPU-Info in install_driver gefaedelt (groesserer Umbau). NOETIG: Test auf frischem Ubuntu-arm64 Spark. Angrenzend: RHEL-aarch64 (sbsa dnf + open DKMS) ist in #14 nur URL-verifiziert, Install ebenfalls hardware-ungetestet.
+
+In Arbeit: Ubuntu-Zweig soll bei Blackwell/GB10 (aarch64) das -open Paketset statt des proprietaeren -server Pakets waehlen; GPU-Name/Arch muss von gpu_setup() durch install_driver() bis _install_driver_debian() gefaedelt werden, ohne den verifizierten x86_64 RTX-4000-Ada-Pfad zu aendern. An rex-gpu-worker delegiert (eigener Branch, kein Commit/Board durch Worker). Parallel dazu: Audit-Auftrag an rex-gpu-worker, weitere Faelle zu finden, wo Detection einen Pfad freischaltet, dessen Install-/Paket-Logik fuer die neue Hardware/Arch/OS-Kombination noch falsche Annahmen traegt (gleiche Fehlerklasse wie #14/#15). Kein frischer Ubuntu-arm64 Spark zum Verifizieren vorhanden -- cortex hat den Treiber schon (Short-Circuit greift, Pfad nicht exerzierbar).
+
+Audit abgeschlossen: 2 neue verwandte, aber NICHT in #15 zu scopende Bugs gefunden -- #16 (Ubuntu-Namensheuristik waehlt proprietaer fuer Blackwell auf x86_64, nicht nur GB10/aarch64, HOCH) und #17 (Virtual-GPU-Short-Circuit versteckt echte GPU bei Passthrough/Cloud-VM, MITTEL). Dazu Recherche-Tickets #18 (Debian-Metapaket-Verhalten bei Blackwell, unverifiziert) und #19 (MIG-CDI-Generierung, spekulativ). Alles Weitere aus dem Audit war schon bekannt (GB200/GH200-Luecke aus #14, SUSE unsupported, AMD #1/#5). Implementierung des #15-Fixes selbst laeuft noch bei rex-gpu-worker.
+
+Gemergt nach main (Fast-forward ec09890, linear). Review PASS durch Orchestrator: Diff gelesen (Detect.pm device_id-Feld + open_kernel_module_required, NVIDIA.pm _ubuntu_needs_open_kernel_module mit Arch-Gate VOR GPU-Check -- x86_64-Pfad bleibt byte-identisch, GPU.pm faedelt $compute[0] durch), POD + Changes aktuell, prove 9/42 gruen, dzil build+dzil test beide gruen (11/45, nach Fix von #20 der die dzil-Verifikation ueberhaupt erst wieder moeglich gemacht hat). Wichtige Abweichung vom Ticket-Text: GPU-Name ist bei GB10 real 'Device' (pci.ids kennt die ID nicht), Matching laeuft daher ueber device_id statt Name -- device_id wurde dafuer additiv in Detect.pm's return-Contract aufgenommen. Hardware-Verifikation weiterhin NICHT moeglich (kein frischer Ubuntu-arm64-Spark; cortex hat Treiber schon, Short-Circuit greift vor diesem Pfad) -- Paketname nvidia-driver-570-server-open nur gegen Launchpad-Metadaten verifiziert (Published, arm64, noble), nicht gegen echten apt-cache. NICHT nach origin gepusht -- Push bleibt Maintainer-Entscheidung.
