@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-23T20:29:02Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T20:29:02Z
+created: 2026-09-23T17:41:50Z
+id: 35
+priority: medium
+started: 2026-09-23T20:21:15Z
+status: done
+title: 'Ubuntu: apt-cache search vor apt-get update -- frische Images waehlen alten
+  Branch oder fallen still auf 570 zurueck'
+updated: 2026-09-23T20:29:02Z
+---
+
+Aus T0 (#29, goldens driver/ubuntu-*--ada/blackwell): -server/-server-open-Pfad sucht den Branch vor dem apt-get update. Auf frischem Image mit leeren/alten Listen -> alter Branch oder hartkodierter 570-Fallback. Pre-Turing-Pfad (apt-cache policy nach update) ist korrekt. Faellt im Epic #25 (plan) natuerlich weg, ggf. vorher fixen.
