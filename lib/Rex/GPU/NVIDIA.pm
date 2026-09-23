@@ -13,6 +13,8 @@ use Rex::Logger;
 
 use Rex::GPU::NVIDIA::Setup;
 use Rex::GPU::NVIDIA::Setup::Debian;
+use Rex::GPU::NVIDIA::Setup::RHEL;
+use Rex::GPU::NVIDIA::Setup::SUSE;
 use Rex::GPU::NVIDIA::Setup::Ubuntu;
 
 require Rex::Exporter;
@@ -131,48 +133,20 @@ selection.
 sub install_driver {
   my (%opts) = @_;
 
-  # Debian and Ubuntu run through their Setup class (epic karr #25, T2): the
+  # Every supported OS runs through its Setup class (epic karr #25, T2/T3): the
   # already-installed short-circuit, the Kepler rejection, package selection,
-  # install, verification and the nouveau blacklist are its steps. RHEL and
-  # openSUSE still run the code below until they move too (T3).
+  # install, verification and the nouveau blacklist are its steps.
   my $setup_class = Rex::GPU::NVIDIA->setup_class_for_os;
-  if ($setup_class) {
-    return unless $setup_class->new(gpu => $opts{gpu})->install;
+  unless ($setup_class) {
+    # No class for this OS. Same order as before the move: a working driver
+    # still short-circuits and a Kepler still gets its own message (both via
+    # the base class, read-only), then the OS is refused.
+    my $setup = Rex::GPU::NVIDIA::Setup->new(gpu => $opts{gpu});
+    return if $setup->already_installed;
+    $setup->plan;
+    die "Unsupported OS for NVIDIA driver installation: ".$setup->os."\n";
   }
-  else {
-    # Idempotency short-circuit (distro-neutral, BEFORE per-distro package
-    # selection): if a working NVIDIA driver is already loaded and functional,
-    # do NOT install a second driver source — see
-    # Rex::GPU::NVIDIA::Setup->already_installed.
-    my $smi = run "nvidia-smi -L 2>&1", auto_die => 0;
-    chomp $smi if defined $smi;
-    if (_nvidia_driver_present($smi)) {
-      Rex::Logger::info("NVIDIA driver already present and working — skipping driver install ($smi)");
-      return;
-    }
-
-    # Kepler or older (karr #26): die after the short-circuit above and
-    # before anything on the host is changed.
-    _reject_unsupported_legacy_gpu($opts{gpu});
-
-    my $os = operating_system();
-    my $running_kernel = run "uname -r";
-    chomp $running_kernel;
-
-    Rex::Logger::info("Installing NVIDIA drivers on $os (kernel $running_kernel)");
-
-    if (is_redhat()) {
-      _install_driver_redhat($os, $running_kernel, $opts{gpu});
-    }
-    elsif (is_suse()) {
-      _install_driver_suse($os, $running_kernel, $opts{gpu});
-    }
-    else {
-      die "Unsupported OS for NVIDIA driver installation: $os\n";
-    }
-
-    _blacklist_nouveau();
-  }
+  return unless $setup_class->new(gpu => $opts{gpu})->install;
 
   if ($opts{reboot}) {
     _reboot_and_wait();
@@ -192,25 +166,33 @@ sub install_driver {
 
 B<Experimental.> The L<Rex::GPU::NVIDIA::Setup> class L</install_driver> uses
 on this host: L<Rex::GPU::NVIDIA::Setup::Ubuntu> on Ubuntu,
-L<Rex::GPU::NVIDIA::Setup::Debian> on every other Debian-family host, and
-C<undef> elsewhere (RHEL and openSUSE are still installed without a Setup
-class). There is no option yet to choose a class of your own.
+L<Rex::GPU::NVIDIA::Setup::Debian> on every other Debian-family host,
+L<Rex::GPU::NVIDIA::Setup::RHEL> on the RHEL family,
+L<Rex::GPU::NVIDIA::Setup::SUSE> on openSUSE, and C<undef> elsewhere
+(L</install_driver> then dies). There is no option yet to choose a class of
+your own.
 
 =cut
 
 # Ubuntu is recognised by its OS name exactly as the old $os eq 'Ubuntu'
 # branch of install_driver did; every other is_debian host (Debian,
-# derivatives) gets the Debian class (epic karr #25; user selection is T5).
+# derivatives) gets the Debian class. is_debian, is_redhat, is_suse are asked
+# in the order the old install_driver branches asked them (epic karr #25;
+# user selection is T5).
 sub setup_class_for_os {
   my ( $class ) = @_;
-  return unless is_debian();
-  return operating_system() eq 'Ubuntu'
-    ? 'Rex::GPU::NVIDIA::Setup::Ubuntu'
-    : 'Rex::GPU::NVIDIA::Setup::Debian';
+  if (is_debian()) {
+    return operating_system() eq 'Ubuntu'
+      ? 'Rex::GPU::NVIDIA::Setup::Ubuntu'
+      : 'Rex::GPU::NVIDIA::Setup::Debian';
+  }
+  return 'Rex::GPU::NVIDIA::Setup::RHEL' if is_redhat();
+  return 'Rex::GPU::NVIDIA::Setup::SUSE' if is_suse();
+  return;
 }
 
-# The helpers below moved into the Setup classes (karr #31). The old private
-# names stay as thin wrappers: the RHEL/SUSE paths and t/ call them.
+# The helpers below moved into the Setup classes (karr #31, #32). The old
+# private names stay as thin wrappers: t/ calls them.
 
 sub _nvidia_driver_present {
   Rex::GPU::NVIDIA::Setup->_driver_present(@_);
@@ -228,13 +210,8 @@ sub _apt_candidate_present {
   Rex::GPU::NVIDIA::Setup::Apt->_apt_candidate_present(@_);
 }
 
-# Pure (karr #26): is this `rpm -q --qf '%{VERSION}'` output a version of
-# driver branch $branch ("580.178.04" is branch 580)? Anything else — another
-# branch, "package ... is not installed", empty — is false.
 sub _rpm_version_in_branch {
-  my ($version, $branch) = @_;
-  return 0 unless defined $version && defined $branch;
-  return $version =~ /^\Q$branch\E\./ ? 1 : 0;
+  Rex::GPU::NVIDIA::Setup::Rpm->_rpm_version_in_branch(@_);
 }
 
 =method install_container_toolkit
@@ -451,139 +428,23 @@ sub _deb822_enable_nonfree {
 }
 
 # ============================================================
-#  RHEL / Rocky / AlmaLinux / CentOS Stream
+#  RHEL / openSUSE — Rex::GPU::NVIDIA::Setup::RHEL / ::SUSE
 # ============================================================
 
-sub _install_driver_redhat {
-  my ($os, $running_kernel, $gpu) = @_;
+# Thin wrappers over the pure helpers that moved into the Setup classes
+# (karr #32); t/ calls them by these names.
 
-  my $major = _os_major_version();
-  my $legacy = _rhel_legacy_driver_plan($major, $gpu);
-
-  # Enable required repos
-  Rex::Logger::info("  Enabling EPEL and extra repos...");
-  pkg ["epel-release"], ensure => "present";
-
-  if ($major >= 9) {
-    run "dnf config-manager --set-enabled crb 2>/dev/null || true", auto_die => 0;
-  }
-  else {
-    run "dnf config-manager --set-enabled powertools 2>/dev/null || true", auto_die => 0;
-  }
-
-  # Add NVIDIA CUDA repo — arch-aware: aarch64 server/datacenter parts (Grace,
-  # Hopper, Blackwell) are published under the "sbsa" tree, not "x86_64".
-  my $distro  = "rhel$major";
-  my $machine = run "uname -m", auto_die => 0;
-  chomp $machine if defined $machine;
-  my $arch = _cuda_repo_arch($machine);
-  Rex::Logger::info("  Adding NVIDIA CUDA repo ($distro/$arch)...");
-  run "dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo 2>/dev/null",
-    auto_die => 0;
-  run "dnf clean expire-cache", auto_die => 0;
-
-  # Kernel headers
-  my @packages;
-  if ($major >= 9) {
-    @packages = ("kernel-devel-matched", "kernel-headers");
-  }
-  else {
-    @packages = ("kernel-devel-$running_kernel", "kernel-headers");
-  }
-
-  # Driver packages — different for v10 (no module streams, dkms variant)
-  if ($legacy) {
-    # Pre-Turing (karr #26): proprietary kmod, held on branch $legacy->{branch}.
-    # Unlike the open path below, a failed stream enable or lock is NOT
-    # swallowed: without it dnf would resolve the newest branch, which does not
-    # support this GPU.
-    Rex::Logger::info("  Pre-Turing GPU — proprietary driver, branch $legacy->{branch}");
-    if ($legacy->{module_stream}) {
-      run "dnf module enable nvidia-driver:$legacy->{module_stream} -y", auto_die => 0;
-      die "dnf module enable nvidia-driver:$legacy->{module_stream} failed — another "
-        . "nvidia-driver stream is probably enabled already (`dnf module reset "
-        . "nvidia-driver` switches it); no driver was installed\n"
-        if $? != 0;
-    }
-    if ($legacy->{versionlock}) {
-      pkg ["python3-dnf-plugin-versionlock"], ensure => "present";
-      run "dnf versionlock add '$legacy->{versionlock}'", auto_die => 0;
-      die "dnf versionlock add '$legacy->{versionlock}' failed; no driver was installed\n"
-        if $? != 0;
-    }
-    push @packages, @{ $legacy->{packages} };
-  }
-  elsif ($major >= 10) {
-    push @packages, "kmod-nvidia-open-dkms", "nvidia-driver", "nvidia-driver-cuda";
-  }
-  else {
-    run "dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true", auto_die => 0;
-    push @packages, "nvidia-open";
-  }
-
-  Rex::Logger::info("  Installing: " . join(", ", @packages));
-
-  # Use run() directly: Rex::Pkg::Dnf fails when dnf exits non-zero due to
-  # DKMS post-install scripts (kernel module build). Verify via rpm -q instead.
-  my $pkg_str = join(" ", @packages);
-  run "dnf install -y $pkg_str", auto_die => 0;
-
-  my $check = run "rpm -q nvidia-driver 2>&1", auto_die => 0;
-  die "nvidia-driver not installed after dnf install — check dnf output\n"
-    if $? != 0;
-
-  if ($legacy) {
-    # The proprietary kmod must be what got installed, and the driver must be
-    # on the pinned branch — not a newer one that cannot drive this GPU.
-    run "rpm -q $legacy->{kmod} 2>&1", auto_die => 0;
-    die "$legacy->{kmod} not installed after dnf install — check dnf output\n"
-      if $? != 0;
-    my $version = run "rpm -q --qf '%{VERSION}' nvidia-driver 2>&1", auto_die => 0;
-    chomp $version if defined $version;
-    die "nvidia-driver is " . ($version // 'unknown') . ", not branch "
-      . "$legacy->{branch} — this pre-Turing GPU needs $legacy->{branch}\n"
-      unless _rpm_version_in_branch($version, $legacy->{branch});
-  }
-}
-
-# Pure (karr #26): the RHEL-family driver plan for a pre-Turing GPU, or undef
-# for every other GPU (the open-dkms / kmod-nvidia-open-dkms path above stays
-# exactly as it was). These GPUs need the proprietary kmod
-# (kmod-nvidia-latest-dkms) on the 580 branch:
-#   * RHEL 8/9: the CUDA repo's module stream nvidia-driver:580-dkms, whose
-#     artifacts are kmod-nvidia-latest-dkms + nvidia-driver(-cuda) 3:580.*
-#     (checked in repos/rhel{8,9}/x86_64 modules.yaml, 2026-09-23).
-#   * RHEL 10: no module streams, so a dnf versionlock on '*nvidia*580*' per
-#     NVIDIA's version-locking guide (docs.nvidia.com/datacenter/tesla/
-#     driver-installation-guide/version-locking.html). repos/rhel10/x86_64
-#     carries kmod-nvidia-latest-dkms, nvidia-driver and nvidia-driver-cuda at
-#     580.x (checked 2026-09-23).
-# Returns { branch, module_stream|undef, versionlock|undef, packages, kmod }.
 sub _rhel_legacy_driver_plan {
-  my ($major, $gpu) = @_;
-  my $legacy = _legacy_driver_requirement($gpu);
-  return unless $legacy;
-  my $branch = $legacy->{max_branch};
-  return {
-    branch        => $branch,
-    module_stream => ($major >= 10 ? undef : "$branch-dkms"),
-    versionlock   => ($major >= 10 ? "*nvidia*$branch*" : undef),
-    packages      => [ 'kmod-nvidia-latest-dkms', 'nvidia-driver', 'nvidia-driver-cuda' ],
-    kmod          => 'kmod-nvidia-latest-dkms'
-  };
+  Rex::GPU::NVIDIA::Setup::RHEL->legacy_driver_plan(@_);
 }
 
-# Map the machine hardware name (`uname -m`) to the architecture token NVIDIA
-# uses in its CUDA package repositories:
-#   developer.download.nvidia.com/compute/cuda/repos/<distro>/<arch>/
-# aarch64 server/datacenter parts (Grace, Hopper, Blackwell) are published as
-# "sbsa" — NOT "aarch64" or "arm64" (verified: repos/rhel9/sbsa and
-# repos/rhel10/sbsa resolve, repos/.../aarch64 does not). Everything else keeps
-# the previous behaviour and maps to "x86_64", including an empty string when
-# `uname -m` could not be read. Pure (string map only) so it is unit-testable
-# offline. NB: this token is specific to the CUDA repos. The
-# libnvidia-container toolkit repo uses "aarch64" for the same machine, so do
-# NOT reuse this helper for the toolkit path.
+sub _suse_nvidia_repo_params {
+  Rex::GPU::NVIDIA::Setup::SUSE->nvidia_repo_params(@_);
+}
+
+# `uname -m` -> NVIDIA's CUDA repo arch token ("sbsa" for aarch64/arm64,
+# else "x86_64"). NOT the libnvidia-container toolkit repo's token, which is
+# "aarch64" for the same machine: do not reuse it for the toolkit path.
 sub _cuda_repo_arch {
   Rex::GPU::NVIDIA::Setup->_cuda_repo_arch(@_);
 }
@@ -595,103 +456,6 @@ sub _os_major_version {
   my ($release) = @_;
   $release //= Rex::Commands::Gather::operating_system_release();
   return Rex::GPU::NVIDIA::Setup->_major_version($release);
-}
-
-# ============================================================
-#  openSUSE Leap
-# ============================================================
-
-sub _install_driver_suse {
-  my ($os, $running_kernel, $gpu) = @_;
-
-  my $release = Rex::Commands::Gather::operating_system_release();
-  my $legacy  = _legacy_driver_requirement($gpu);
-  my ($repo_url, $meta_pkg) = _suse_nvidia_repo_params($release, $legacy);
-
-  # Remove any stale NVIDIA packages first — avoids kmp/userspace version mismatch
-  # caused by libnvidia-ml/libnvidia-cfg from the standard OSS non-free repo lagging
-  # behind the NVIDIA GFX repo packages.
-  Rex::Logger::info("  Removing any existing NVIDIA packages...");
-  run q{rpm -e $(rpm -qa | grep -E '^(nvidia|libnvidia)' | grep -v 'container') 2>/dev/null || true},
-    auto_die => 0;
-
-  # Add NVIDIA GFX repo (use direct baseurls — zypper cannot parse yum .repo files)
-  Rex::Logger::info("  Adding NVIDIA GFX repo (Leap $release): $repo_url");
-  run "zypper rr nvidia-gfx 2>/dev/null || true", auto_die => 0;
-  run "zypper addrepo --refresh $repo_url nvidia-gfx 2>/dev/null", auto_die => 0;
-  run "zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null", auto_die => 0;
-
-  # Use the meta package — it co-installs kmp-default + userspace at the same version,
-  # preventing the split that causes "Driver/library version mismatch" with nvidia-smi.
-  # Pre-signed kmp packages don't need kernel-devel/headers. The repo URL and meta
-  # package (G06 for Leap 15.x, G07 for 16.x) come from _suse_nvidia_repo_params.
-  Rex::Logger::info("  Installing $meta_pkg...");
-  run "zypper install -y $meta_pkg", auto_die => 0;
-
-  # Lock the OSS non-free standalone packages so future zypper updates don't
-  # pull in a stale libnvidia-ml / libnvidia-cfg and cause a mismatch again.
-  run "zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true", auto_die => 0;
-
-  # Pre-Turing only (karr #26): verify the proprietary meta package landed. It
-  # requires the kmp and the userspace at its own exact version, so installed
-  # means both are. Other GPUs keep the unverified path as before.
-  if ($legacy) {
-    run "rpm -q $meta_pkg 2>&1", auto_die => 0;
-    die "$meta_pkg not installed after zypper install — check zypper output\n"
-      if $? != 0;
-  }
-}
-
-sub _suse_nvidia_repo_params {
-  my ($release, $legacy) = @_;
-
-  # Derive the major from the raw release string. operating_system_version()
-  # strips dots ("15.6" -> "156"), which made int() see 156 and route every
-  # Leap through the ">= 16" branch (karr #6).
-  my $major = _os_major_version($release);
-
-  # Pre-Turing (karr #26; $legacy from _legacy_driver_requirement): the
-  # PROPRIETARY G06 (= branch 580) meta package on both Leap 15 and 16 — the
-  # open G06/G07 metas do not support these GPUs, and G07 (595) is open-only.
-  # NVIDIA's leap/15.6/ and leap/16.0/ repos both carry
-  # nvidia-driver-G06-kmp-meta (x86_64 + aarch64, up to 580.178.04, checked in
-  # their primary.xml 2026-09-23); it requires nvidia-driver-G06-kmp and
-  # nvidia-userspace-meta-G06 at its own exact version.
-  if ($legacy) {
-    my $leap_version = $major >= 16 ? '16.0' : ($release =~ /^(\d+\.\d+)/)[0] // $release;
-    return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
-            "nvidia-driver-G06-kmp-meta");
-  }
-
-  if ($major >= 16) {
-    return ("https://download.nvidia.com/opensuse/leap/16.0/",
-            "nvidia-open-driver-G07-signed-kmp-meta");
-  }
-
-  # Leap 15.x: keep the full x.y version in the repo path (leap/15.6/).
-  my ($leap_version) = $release =~ /^(\d+\.\d+)/;
-  $leap_version //= $release;
-  return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
-          "nvidia-open-driver-G06-signed-kmp-meta");
-}
-
-# ============================================================
-#  Nouveau blacklisting
-# ============================================================
-
-sub _blacklist_nouveau {
-  file "/etc/modprobe.d/blacklist-nouveau.conf",
-    content => "blacklist nouveau\noptions nouveau modeset=0\n";
-
-  if (is_debian()) {
-    run "update-initramfs -u 2>/dev/null", auto_die => 0;
-  }
-  elsif (is_redhat()) {
-    run "dracut --force 2>/dev/null", auto_die => 0;
-  }
-  elsif (is_suse()) {
-    run "dracut --force 2>/dev/null", auto_die => 0;
-  }
 }
 
 # ============================================================
@@ -1175,10 +939,11 @@ sources and unknown mirrors are left untouched, and a file with nothing to
 add is not rewritten; if no Debian archive entry is recognised in either
 format, a warning is logged.
 
-On Debian and Ubuntu the install is done by
-L<Rex::GPU::NVIDIA::Setup::Debian> and L<Rex::GPU::NVIDIA::Setup::Ubuntu>
-(experimental classes, see L<Rex::GPU::NVIDIA::Setup>); the steps and
-commands are the ones described here.
+The install is done by L<Rex::GPU::NVIDIA::Setup::Debian>,
+L<Rex::GPU::NVIDIA::Setup::Ubuntu>, L<Rex::GPU::NVIDIA::Setup::RHEL> and
+L<Rex::GPU::NVIDIA::Setup::SUSE> (experimental classes, see
+L<Rex::GPU::NVIDIA::Setup>); the steps and commands are the ones described
+here.
 
 The package choice also depends on the GPU generation, read from the PCI
 device ID of the GPU passed as C<gpu> to L</install_driver>
@@ -1267,8 +1032,8 @@ Supported distributions:
 
 The verified target set is the RKE2 Linux family above. B<openSUSE Leap / SLES
 is unverified and unsupported> — SUSE is not a deploy target for the
-GPU-on-Rancher pipeline. The C<_install_driver_suse> path exists but is not
-exercised; do not treat a SUSE run as evidence.
+GPU-on-Rancher pipeline. The L<Rex::GPU::NVIDIA::Setup::SUSE> path exists but
+is not exercised; do not treat a SUSE run as evidence.
 
 Tested on Hetzner dedicated servers with NVIDIA RTX 4000 SFF Ada Generation.
 

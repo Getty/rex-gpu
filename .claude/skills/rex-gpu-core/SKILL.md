@@ -58,12 +58,12 @@ open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers ove
 ## The driver matrix — one dispatch, three families
 
 `install_driver` asks the overridable `Rex::GPU::NVIDIA->setup_class_for_os` first:
-Debian/Ubuntu run through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
-`Setup::Apt` → `Setup::Debian` / `Setup::Ubuntu`, experimental, epic #25) with the fixed
-flow `already_installed → plan → prepare_host → prepare_source → install_packages →
+every family runs through Moo Setup classes (`Rex::GPU::NVIDIA::Setup` →
+`Setup::Apt` → `Setup::Debian` / `Setup::Ubuntu`; `Setup::Rpm` → `Setup::RHEL` /
+`Setup::SUSE`; experimental, epic #25) with the fixed flow `already_installed → plan → prepare_host → prepare_source → install_packages →
 verify_packages → post_install`. `plan` is host-read-only; `run_cmd` / `pkg_cmd` /
-`file_cmd` are the only routes to the host. RHEL/SUSE still use the old
-`is_redhat` / `is_suse` branches until T3; anything else dies. Each
+`file_cmd` are the only routes to the host. No class for the OS ⇒ `install_driver`
+still probes `nvidia-smi` and rejects Kepler, then dies. Each
 family has a trap that is already solved in the code; do not "simplify" these away:
 
 - **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
@@ -99,7 +99,8 @@ directly, then verify with `dpkg -l | grep '^ii'` / `rpm -q`. **Not `pkg`.**
 initramfs regeneration routinely exit non-zero on success. `pkg` is fine only for
 inert helpers (`pciutils`, `curl`, `gnupg`, `epel-release`). Route a real driver package
 through `pkg` and every install "fails" on a working host.
-In the Setup classes the bypass lives in `Setup::Apt::install_packages`; `pkg_cmd` is for
+In the Setup classes the bypass lives in `Setup::Apt::install_packages` /
+`Setup::Rpm::install_packages`; `pkg_cmd` is for
 inert helpers only.
 
 Two more resilience rules baked into every apt path, both for **fresh-boot** Hetzner

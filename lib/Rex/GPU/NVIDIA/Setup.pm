@@ -200,8 +200,8 @@ Dies unless every package in C<< $plan->{verify} >> ended up installed. That
 check, not the package manager's exit code, is the evidence of an install.
 
 Each of these four takes the C<$plan> from L</plan> and does nothing in the
-base class; the packaging layer (e.g. L<Rex::GPU::NVIDIA::Setup::Apt>) fills
-them.
+base class; the packaging layer (L<Rex::GPU::NVIDIA::Setup::Apt>,
+L<Rex::GPU::NVIDIA::Setup::Rpm>) and the distro classes fill them.
 
 =cut
 
@@ -218,7 +218,7 @@ L</initramfs_command>, so the blacklist takes effect on the next boot.
 =method initramfs_command
 
 The command that regenerates the initramfs: C<dracut --force 2E<gt>/dev/null>
-here, C<update-initramfs -u 2E<gt>/dev/null> in
+here (and so on the rpm layer), C<update-initramfs -u 2E<gt>/dev/null> in
 L<Rex::GPU::NVIDIA::Setup::Apt>. Run with C<auto_die =E<gt> 0>.
 
 =cut
@@ -236,7 +236,7 @@ sub initramfs_command { 'dracut --force 2>/dev/null' }
 #
 # Callable on the class as on an object, and with explicit arguments, because
 # Rex::GPU::NVIDIA keeps its old private names as thin wrappers over them
-# (its RHEL/SUSE paths and t/ call those).
+# (t/ calls those).
 
 # Given `nvidia-smi -L` output: is a working driver loaded? Every failure form
 # (NVML init error, "No devices were found", "command not found") does not
@@ -324,9 +324,10 @@ yet that makes L<Rex::GPU::NVIDIA/install_driver> use a class of your own.
 One driver install is one object: the GPU and the host facts it was built
 with, and a fixed L</install> sequence of overridable steps. The per-distro
 classes are L<Rex::GPU::NVIDIA::Setup::Debian> and
-L<Rex::GPU::NVIDIA::Setup::Ubuntu>, both on the apt packaging layer
-L<Rex::GPU::NVIDIA::Setup::Apt>. RHEL and openSUSE are still installed by
-L<Rex::GPU::NVIDIA> directly.
+L<Rex::GPU::NVIDIA::Setup::Ubuntu> on the apt packaging layer
+L<Rex::GPU::NVIDIA::Setup::Apt>, and L<Rex::GPU::NVIDIA::Setup::RHEL> and
+L<Rex::GPU::NVIDIA::Setup::SUSE> on the rpm packaging layer
+L<Rex::GPU::NVIDIA::Setup::Rpm>.
 
 Every host interaction goes through L</run_cmd>, L</pkg_cmd> and
 L</file_cmd>.

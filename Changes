@@ -1,14 +1,14 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
-  - install_driver on Debian and Ubuntu now runs through new Setup classes
-    (experimental API: Rex::GPU::NVIDIA::Setup with the apt layer
-    ::Setup::Apt and ::Setup::Debian / ::Setup::Ubuntu), one overridable
-    method per step: already_installed, plan (host-read-only), prepare_host,
-    prepare_source, install_packages, verify_packages, post_install. The
-    commands sent to the host and the package choice are unchanged; there
-    is no option yet to use a class of your own. RHEL and openSUSE are not
-    affected (karr #31)
+  - install_driver now runs through new Setup classes (experimental API:
+    Rex::GPU::NVIDIA::Setup; the apt layer ::Setup::Apt with ::Setup::Debian
+    / ::Setup::Ubuntu, the rpm layer ::Setup::Rpm with ::Setup::RHEL /
+    ::Setup::SUSE), one overridable method per step: already_installed,
+    plan (host-read-only), prepare_host, prepare_source, install_packages,
+    verify_packages, post_install. The commands sent to the host and the
+    package choice are unchanged on every distro; there is no option yet to
+    use a class of your own (karr #31, #32)
   - install_driver on Debian enables contrib/non-free/non-free-firmware per
     Debian archive entry (*.debian.org, Hetzner's /debian/ mirror, the cloud
     mirror+file list), adding only missing components, in sources.list and
