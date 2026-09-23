@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-23T02:57:24Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T02:57:24Z
+created: 2026-09-23T02:09:04Z
+id: 16
+priority: high
+started: 2026-09-23T02:53:15Z
+status: done
+tags:
+- nvidia
+- driver
+- ubuntu
+- blackwell
+- x86_64
+title: Ubuntu waehlt proprietaeren Treiber fuer Blackwell-GPUs ueber Namens-Heuristik
+  (x86_64, nicht nur GB10/aarch64)
+updated: 2026-09-23T02:57:24Z
+---
+
+Detect.pm:151 _is_nvidia_compute klassifiziert jede GPU mit RTX/TITAN/Quadro im Namen bedingungslos als compute=1 -- das erkennt auch aktuelle/kuenftige Blackwell-Consumer/Workstation-Karten (GeForce RTX 50xx, RTX PRO 6000 Blackwell) auf normaler x86_64-Hardware, unabhaengig von der GB10-Device-ID-Allowlist (nur aarch64-Spark). NVIDIA.pm:337-348 _install_driver_debian (Ubuntu-Zweig) filtert -open-Pakete explizit weg und faellt auf nvidia-driver-570-server (proprietaer) zurueck -- strukturell kann dieser Zweig nie ein -open-Paket waehlen. NVIDIAs eigene Release-Notes verlangen fuer die RTX-50-Serie (Blackwell) die offenen Kernel-Module; die proprietaeren unterstuetzen diese Generation nicht. Folge: apt-get/dpkg meldet Erfolg (ii), das Kernel-Modul bindet nicht -- Fehl-Install auf bereits verkaufter, gaengiger x86_64-Hardware, nicht nur auf dem exotischen aarch64-Spark-Fall.
+
+Abgrenzung zu #15: #15 scoped den Fix explizit auf aarch64/GB10 (Device-ID + Architektur-Bedingung). Dieser Fall laeuft ueber x86_64 und die Namens-Heuristik -- ein arch-conditional Fix fuer #15 deckt ihn NICHT ab. Braucht eigene Entscheidung, wie die GPU-Namens-Info (nicht nur Device-ID/Arch) in _install_driver_debian einfliesst, um Blackwell generell (unabhaengig von Architektur) auf -open zu routen. Siehe auch [C] (Debian-non-Ubuntu-Zweig, gleiche Namens-Heuristik betroffen).
+
+Herkunft: Audit-Auftrag zur #14/#15-Fehlerklasse (Detection laeuft Install-Logik voraus), Kandidat 1.
+
+Cross-Ref: [C] oben = #18 (Debian-non-Ubuntu-Zweig, gleiche Namens-Heuristik betroffen).
