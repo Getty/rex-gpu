@@ -7,14 +7,22 @@ use Test::More;
 #
 # Pure value object, no run/dpkg/rpm. Claims pinned here:
 #   * the generation table at every range boundary (and the IDs just outside)
-#   * satisfied_by: kernel module x branch bounds, unknowns never pass a bound
-#   * intersect: either/min/max combine, conflicts croak naming both sides
+#   * satisfied_by: kernel module x branch bounds, unknowns never pass a bound;
+#     a "newest, at least N" source (branch_at_least) passes a min bound up to
+#     N and never a max bound (karr #33); why_not says why
+#   * intersect: either/min/max combine, conflicts croak naming both sides;
+#     conflicts() returns the same reasons without dying
 #   * a subclass overriding `generations` adds a row without touching the base
 #   * the table never makes a GPU compute (Detect::_is_nvidia_compute unchanged)
 #
-# NOT covered: nothing in Rex::GPU::NVIDIA's install paths reads the object
-# yet (only the two Detect wrappers, pinned by t/80 and t/95), so none of this
-# says anything about which driver a real host gets.
+# GB10 (2e12) is its own row with min_branch 580, not the Blackwell block's
+# 570 (karr #33): NVIDIA's open-gpu-kernel-modules README and the aarch64
+# supportedchips README first list 2E12 in driver 580.119.02. The T1 claim
+# "GB10 => Blackwell, 570" is REPLACED by that, deliberately.
+#
+# NOT covered: which driver a real host gets. The Setup classes pick their
+# sources with this object (t/99, t/96), but none of it runs a package
+# manager or a GPU.
 # -----------------------------------------------------------------------------
 
 use Rex::GPU::Detect;
@@ -30,6 +38,7 @@ sub shape {
 my $UNKNOWN = [ undef, 'either', undef, undef ];
 my $BW      = [ 'Blackwell', 'open', 570, undef ];
 my $BWU     = [ 'Blackwell Ultra', 'open', 580, undef ];
+my $GB10    = [ 'Blackwell', 'open', 580, undef ];
 my $MPV     = [ 'Maxwell/Pascal/Volta', 'proprietary', undef, 580 ];
 my $KEP     = [ 'Kepler or older', 'proprietary', undef, 470 ];
 
@@ -39,7 +48,8 @@ subtest 'generation table at the range boundaries' => sub {
     '1340' => $MPV, '1db4' => $MPV, '1DB4' => $MPV, '1df6' => $MPV,
     '1df7' => $UNKNOWN, '1e02' => $UNKNOWN, '2330' => $UNKNOWN, '28f8' => $UNKNOWN,
     '28ff' => $UNKNOWN,
-    '2900' => $BW, '2901' => $BW, '2e12' => $BW, '2E12' => $BW, '2fff' => $BW,
+    '2900' => $BW, '2901' => $BW, '2e11' => $BW, '2e13' => $BW, '2fff' => $BW,
+    '2e12' => $GB10, '2E12' => $GB10,
     '3000' => $UNKNOWN, '3181' => $UNKNOWN,
     '3182' => $BWU,
     '3183' => $UNKNOWN, '31c1' => $UNKNOWN,
@@ -118,8 +128,46 @@ subtest 'satisfied_by' => sub {
       .( $src->{kernel_module} // '?' ).'/'.( $src->{branch} // '?' ).' => '.$want );
   }
   ok( !eval { $R->new->satisfied_by(undef); 1 }, 'undef source dies' );
+  ok( !eval { $R->new->satisfied_by({ kernel_module => 'open', branch_at_least => 'new' }); 1 },
+    'non-integer branch_at_least dies' );
   ok( !eval { $R->new->satisfied_by({ kernel_module => 'open', branch => '580.95.05' }); 1 },
     'full version string as branch dies' );
+};
+
+subtest 'satisfied_by: "newest branch, at least N" (branch_at_least)' => sub {
+  my $open590 = { kernel_module => 'open',        branch_at_least => 590 };
+  my $prop580 = { kernel_module => 'proprietary', branch_at_least => 580 };
+  my $prop560 = { kernel_module => 'proprietary', branch_at_least => 560 };
+  my $unknown = { kernel_module => 'proprietary' };
+  my @matrix = (
+    [ $R->new,                   $prop580, 1, 'no bounds: any floor fits' ],
+    [ $R->for_device_id('2901'), $open590, 1, 'Blackwell min 570 <= floor 590' ],
+    [ $R->for_device_id('3182'), $open590, 1, 'Blackwell Ultra min 580 <= floor 590' ],
+    [ $R->for_device_id('2901'), $prop580, 0, 'Blackwell: module first' ],
+    [ $R->new( min_branch => 600 ), $prop580, 0, 'min 600 above the floor 580' ],
+    [ $R->new( min_branch => 580 ), $prop560, 0, 'min 580 above the floor 560' ],
+    [ $R->for_device_id('1db4'), $prop580, 0, 'max 580: newest can pass it, never fits' ],
+    [ $R->for_device_id('1db4'), $prop560, 0, '... whatever the floor' ],
+    [ $R->for_device_id('1db4'), $unknown, 0, 'unknown branch never fits a bound' ],
+    [ $R->new,                   $unknown, 1, '... but fits no bound' ],
+    [ $R->for_device_id('1db4'), { %$prop560, branch => 580 }, 1,
+      'an exact branch wins over branch_at_least' ]
+  );
+  for my $row (@matrix) {
+    my ( $req, $src, $want, $label ) = @$row;
+    is( $req->satisfied_by($src), $want, $label.' => '.$want );
+    is( defined $req->why_not($src) ? 0 : 1, $want, '... why_not agrees' );
+  }
+  like( $R->for_device_id('1db4')->why_not($prop580), qr/newest branch .* newer than 580/,
+    'why_not: the max-bound reason' );
+  like( $R->new( min_branch => 600 )->why_not($prop580), qr/known only to be 580 or newer; 600 is needed$/,
+    'why_not: the floor reason' );
+  like( $R->for_device_id('2901')->why_not($prop580),
+    qr/^proprietary kernel module, the open one is needed$/, 'why_not: the module reason' );
+  like( $R->for_device_id('1db4')->why_not({ kernel_module => 'proprietary', branch => 590 }),
+    qr/^branch 590 is newer than 580$/, 'why_not: exact branch too new' );
+  like( $R->for_device_id('2901')->why_not({ kernel_module => 'open', branch => 565 }),
+    qr/^branch 565 is older than 570$/, 'why_not: exact branch too old' );
 };
 
 subtest 'intersect' => sub {
@@ -170,6 +218,14 @@ subtest 'intersect' => sub {
 
   ok( !eval { $R->intersect( $new_only, $b200, $v100 ); 1 }, 'both conflicts at once' );
   like( $@, qr/open kernel module.*; .*branch 590 or newer/, '... reports both' );
+
+  is_deeply( [ $R->conflicts( $v100, $p100, $h100 ) ], [], 'conflicts: none for V100 + P100 + H100' );
+  my @why = $R->conflicts( $new_only, $b200, $v100 );
+  is( scalar @why, 2, 'conflicts: both, without dying' );
+  like( $why[0], qr/^B200 \(Blackwell, 10de:2901\) needs the open kernel module, but Tesla V100/,
+    '... module conflict first, naming the GPUs' );
+  is( $R->intersect( $b200, $h100 )->who,
+    'B200 (Blackwell, 10de:2901), H100 (10de:2330)', 'who of an intersection lists its members' );
 
   ok( !eval { $R->intersect; 1 }, 'empty list dies' );
   ok( !eval { $R->intersect( $v100, { kernel_module => 'open' } ); 1 }, 'a hashref dies' );

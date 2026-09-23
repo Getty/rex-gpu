@@ -12,9 +12,13 @@ use Test::More;
 # repo instead: cuda-keyring for debian12|debian13 / x86_64|sbsa, then
 # nvidia-driver-cuda + nvidia-kernel-open-dkms.
 #
-# _debian_nvidia_cuda_repo($gpu, $release, $arch) is pure (hash/string only,
-# no run/dpkg), so the selection is unit-testable offline. Claims asserted:
-#   * non-Blackwell GPU or no GPU => undef => the unchanged Debian path
+# The decision is Rex::GPU::NVIDIA::Setup::Debian's plan (karr #33: the
+# requirement-driven source selection replaced _debian_nvidia_cuda_repo; the
+# claims below are kept, asserted on the plan now). With os/release/arch/
+# kernel injected into new() the plan reads nothing from the host, so it is
+# unit-testable offline. Claims asserted:
+#   * non-Blackwell GPU or no GPU => $plan->{cuda_repo} undef => the unchanged
+#     Debian non-free path, whatever the release or architecture
 #   * Blackwell on Debian 12/13 amd64/arm64 => the right repo + package set
 #   * Blackwell on any other release/arch => dies (fail loud, before any
 #     host change) rather than falling back to a driver that cannot bind
@@ -25,12 +29,21 @@ use Test::More;
 #     was checked against NVIDIA's and Debian's Packages indexes, not run)
 #   * that nvidia-kernel-open-dkms DKMS-builds against the running kernel and
 #     the module binds after the nouveau reboot
-#   * the exact commands install_driver emits (it needs a live connection)
+#   * the exact commands install_driver emits: t/96 (goldens)
 # -----------------------------------------------------------------------------
 
 use Rex::GPU::NVIDIA;
 
-sub repo { scalar Rex::GPU::NVIDIA::_debian_nvidia_cuda_repo(@_) }
+# The CUDA repo the plan chose, undef on the non-free path.
+sub repo {
+  my ( $gpu, $release, $arch ) = @_;
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { };
+  my $plan = Rex::GPU::NVIDIA::Setup::Debian->new(gpu => $gpu, os => 'Debian',
+    release => $release, arch => $arch, kernel => '6.12.0-test')->plan;
+  return undef unless $plan->{cuda_repo};
+  return { %{ $plan->{cuda_repo} }, packages => $plan->{source}{packages} };
+}
 
 my $rtx5090 = { name => 'GB202 [GeForce RTX 5090]', vendor => 'nvidia',
                 pci_class => '0300', compute => 1, device_id => '2b85' };
@@ -44,7 +57,7 @@ subtest 'non-Blackwell / no GPU => undef (Debian non-free path unchanged)' => su
   is(repo($rtx4000, '13.1',  'amd64'), undef, 'RTX 4000 Ada on Debian 13 => undef');
   is(repo(undef,    '13.1',  'amd64'), undef, 'no GPU passed => undef');
   is(repo({},       '13.1',  'amd64'), undef, 'GPU without device_id => undef');
-  # The release/arch are never judged for a non-Blackwell GPU: an unknown
+  # A GPU without constraints takes non-free whatever its branch: an unknown
   # release keeps today's behaviour instead of dying.
   is(repo($rtx4000, 'forky/sid', 'ppc64el'), undef,
     'non-Blackwell on unknown release/arch => undef, no die');
@@ -78,6 +91,7 @@ subtest 'Blackwell on an unsupported release/arch => dies (fail loud)' => sub {
     my $label = defined $rel ? "'$rel'" : 'undef';
     ok(!eval { repo($rtx5090, $rel, 'amd64'); 1 }, "release $label dies");
     like($@, qr/Debian 12 and 13/, "release $label: message names the supported releases");
+    like($@, qr/Nothing was changed on the host/, "release $label: ... and that nothing changed");
   }
   for my $arch ('i386', 'ppc64el', '', undef) {
     my $label = defined $arch ? "'$arch'" : 'undef';

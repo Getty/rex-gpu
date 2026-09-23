@@ -3,26 +3,86 @@
 package Rex::GPU::NVIDIA::Setup;
 our $VERSION = '0.002';
 use Moo;
+use Carp qw( croak );
 use Rex::Commands::File ();
 use Rex::Commands::Gather ();
 use Rex::Commands::Pkg ();
 use Rex::Commands::Run ();
 use Rex::Logger ();
-use Rex::GPU::Detect ();
+use Rex::GPU::NVIDIA::Requirement ();
 use namespace::autoclean;
 
 # No `use utf8` here, on purpose: the die messages carry UTF-8 em dashes as
 # byte strings exactly like Rex::GPU::NVIDIA always emitted them.
 
+=attr gpus
+
+Arrayref of the detected GPUs this driver install is for, each in the shape
+L<Rex::GPU::Detect/detect> returns for one C<nvidia> element (C<name>,
+C<device_id>, ...). One driver has to drive them all, so L</requirement> is
+the intersection of their requirements. Empty (the default) keeps the
+GPU-agnostic package selection. Elements that are not hashrefs are ignored.
+
 =attr gpu
 
-Optional hashref: the detected GPU this driver install is for, in the shape
-L<Rex::GPU::Detect/detect> returns for one C<nvidia> element (C<name>,
-C<device_id>, ...). C<undef> keeps the GPU-agnostic package selection.
+A single GPU hashref, the older form of L</gpus>: C<< gpu => $g >> is the
+same as C<< gpus => [ $g ] >>, C<< gpu => undef >> the same as no GPU.
+Passing both croaks.
 
 =cut
 
-has gpu => ( is => 'ro' );
+has gpu  => ( is => 'ro' );
+has gpus => ( is => 'lazy' );
+
+sub _build_gpus {
+  my ( $self ) = @_;
+  return defined $self->gpu ? [ $self->gpu ] : [];
+}
+
+sub BUILD {
+  my ( $self, $args ) = @_;
+  croak __PACKAGE__.'->new: pass gpu or gpus, not both'
+    if defined $args->{gpu} && defined $args->{gpus};
+  croak __PACKAGE__.'->new: gpus must be an arrayref of GPU hashrefs'
+    if defined $args->{gpus} && ref $args->{gpus} ne 'ARRAY';
+}
+
+=attr requirement
+
+The L<Rex::GPU::NVIDIA::Requirement> the driver has to meet: the
+L<Rex::GPU::NVIDIA::Requirement/intersect> of every GPU in L</gpus>, looked
+up through L</requirement_class>; C<either> with no bounds for no GPU. Built
+on first use -- by L</plan> -- and B<dies> there, before anything on the
+host is changed, when the GPUs need different kernel modules or no common
+branch (a V100 next to a B200), naming the GPUs on each side. May be passed
+to C<new> instead.
+
+=method requirement_class
+
+The requirement class, C<Rex::GPU::NVIDIA::Requirement>. Override it to use
+a subclass with rows of your own in its
+L<generations|Rex::GPU::NVIDIA::Requirement/generations> table.
+
+=cut
+
+has requirement => ( is => 'lazy' );
+
+sub requirement_class { 'Rex::GPU::NVIDIA::Requirement' }
+
+sub _build_requirement {
+  my ( $self ) = @_;
+  my $class = $self->requirement_class;
+  my @gpus  = grep { ref $_ eq 'HASH' } @{ $self->gpus };
+  return $class->new unless @gpus;
+  my @reqs = map { $class->from_gpu($_) } @gpus;
+  if ( my @conflicts = $class->conflicts(@reqs) ) {
+    die 'No single NVIDIA driver supports all GPUs on this host: '
+      .join('; ', @conflicts).'. Nothing was changed on the host. Install the '
+      ."driver yourself; once `nvidia-smi -L` lists the GPUs, install_driver skips "
+      ."the driver step\n";
+  }
+  return $class->intersect(@reqs);
+}
 
 =attr os
 
@@ -162,24 +222,135 @@ sub already_installed {
 
   my $plan = $self->plan;
 
-Decides what to install and returns it as a hashref: C<packages> (arrayref,
-in install order), C<verify> (arrayref of packages that must be installed
-afterwards) and whatever a subclass adds for its own later steps. Must only
-B<read> the host: every "this cannot work here" dies from here, before
-anything is changed. The base class dies for a GPU no installable driver
-branch supports (Kepler or older) and logs what it is about to do; a
-subclass calls C<< $self->SUPER::plan >> first and fills the result.
+Decides what to install and returns it as a hashref: C<source> (the chosen
+driver source, see L</sources>), C<packages> (arrayref, in install order:
+L</kernel_packages>, then the source's) and C<verify> (the source's
+packages that must be installed afterwards); a subclass adds keys for its
+own later steps. Must only B<read> the host: every "this cannot work here"
+dies from here, before anything is changed:
+
+=over
+
+=item * a GPU no installable driver branch supports (Kepler or older, even
+one among several GPUs);
+
+=item * GPUs that cannot share one driver (L</requirement>);
+
+=item * no source that fits the requirement (L</select_source>).
+
+=back
+
+A class without L</sources> (the base class) gets an empty plan.
+
+=method kernel_packages
+
+The packages the driver build needs before any source's: kernel headers.
+None in the base class.
+
+=method sources
+
+  my @candidates = $self->sources;
+
+The driver sources this setup can install from, B<in order of preference>.
+Each is a hashref:
+
+=over
+
+=item * C<name> -- for log lines and messages.
+
+=item * C<kernel_module> -- C<open> or C<proprietary>.
+
+=item * C<branch> -- the exact driver branch it installs; or
+C<branch_at_least> when it installs the newest branch its repository
+carries, which is known only to be at least that one (see
+L<Rex::GPU::NVIDIA::Requirement/satisfied_by> for how each counts); or
+neither when the branch is unknown.
+
+=item * C<packages>, C<verify> -- as in L</plan>. May be filled only by
+L</resolve_source>.
+
+=item * C<unavailable> -- a reason: this source does not exist on this host
+(no repository for the release or architecture). Skipped with that reason.
+
+=back
+
+Plus whatever keys the class's later steps read. Host-read-only, like
+L</plan>. Empty in the base class. Override it in a subclass to add,
+reorder or drop candidates; C<< $self->SUPER::sources >> gives the built-in
+ones.
+
+=method select_source
+
+  my $source = $self->select_source(@candidates);
+
+The first candidate L</requirement> accepts
+(L<Rex::GPU::NVIDIA::Requirement/satisfied_by>), after
+L</resolve_source> -- which is checked again, so a resolved branch that does
+not fit moves on to the next candidate. Dies when none fits, naming the
+GPUs, what they need and every rejected candidate with its reason; nothing
+has been changed on the host then.
+
+=method resolve_source
+
+  my $resolved = $self->resolve_source($source);
+
+Turns a chosen candidate into a concrete one: the base class returns it
+unchanged; L<Rex::GPU::NVIDIA::Setup::Ubuntu> asks C<apt-cache search> for
+the newest package and records its branch. Only for a candidate that
+already fits; must only read the host.
 
 =cut
 
 sub plan {
   my ( $self ) = @_;
-  # Kepler or older (karr #26): die here, after already_installed (a host
-  # whose operator installed 470 by hand still passes) and before anything
-  # on the host is changed.
-  $self->_reject_unsupported_gpu($self->gpu);
+  # Kepler or older (karr #26), on any GPU in the list: die here, after
+  # already_installed (a host whose operator installed 470 by hand still
+  # passes) and before anything on the host is changed or even read.
+  $self->_reject_unsupported_gpu($_) for @{ $self->gpus };
+  # Multi-GPU (karr #33): one driver for all of them, or die untouched.
+  my $requirement = $self->requirement;
   Rex::Logger::info('Installing NVIDIA drivers on '.$self->os.' (kernel '.$self->kernel.')');
-  return { packages => [], verify => [] };
+  Rex::Logger::info('  Driver requirement: '.$requirement->who.': '.$requirement->describe)
+    if @{ $self->gpus };
+
+  my $plan = { packages => [ $self->kernel_packages ], verify => [] };
+  my @sources = $self->sources;
+  return $plan unless @sources;
+  my $source = $self->select_source(@sources);
+  $plan->{source} = $source;
+  push @{ $plan->{packages} }, @{ $source->{packages} // [] };
+  $plan->{verify} = [ @{ $source->{verify} // [] } ];
+  return $plan;
+}
+
+sub kernel_packages { () }
+sub sources         { () }
+
+sub resolve_source {
+  my ( $self, $source ) = @_;
+  return $source;
+}
+
+sub select_source {
+  my ( $self, @candidates ) = @_;
+  my $requirement = $self->requirement;
+  my @rejected;
+  for my $candidate (@candidates) {
+    my $why = $candidate->{unavailable} // $requirement->why_not($candidate);
+    unless (defined $why) {
+      my $resolved = $self->resolve_source($candidate);
+      $why = $requirement->why_not($resolved);
+      unless (defined $why) {
+        Rex::Logger::info('  Driver source: '.$resolved->{name});
+        return $resolved;
+      }
+    }
+    push @rejected, $candidate->{name}.': '.$why;
+  }
+  die 'No NVIDIA driver source on this '.$self->os.' '.( $self->release // '' ).' host fits '
+    .$requirement->who.' ('.$requirement->describe.') -- '.join('; ', @rejected)
+    .'. Nothing was changed on the host. Install the driver yourself; once '
+    ."`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
 }
 
 =method prepare_host
@@ -235,7 +406,7 @@ sub initramfs_command { 'dracut --force 2>/dev/null' }
 #### Pure helpers #############################################################
 #
 # Callable on the class as on an object, and with explicit arguments, because
-# Rex::GPU::NVIDIA keeps its old private names as thin wrappers over them
+# Rex::GPU::NVIDIA keeps some old private names as thin wrappers over them
 # (t/ calls those).
 
 # Given `nvidia-smi -L` output: is a working driver loaded? Every failure form
@@ -247,38 +418,20 @@ sub _driver_present {
   return $smi =~ /GPU \d+:/ ? 1 : 0;
 }
 
-# The pre-Turing requirement for a GPU hashref, or undef -- see
-# Rex::GPU::Detect::legacy_driver_requirement, which owns the device-ID
-# ranges. No GPU, a non-hashref, no device_id, or any Turing-or-later / unknown
-# ID => undef => the default selection.
-sub _legacy_requirement {
-  my ( $self, $gpu ) = @_;
-  return unless $gpu && ref $gpu eq 'HASH';
-  return Rex::GPU::Detect::legacy_driver_requirement($gpu->{device_id});
-}
-
 # Die for a GPU no installable branch supports -- Kepler or older, max_branch
 # 470. Maintainer decision (epic karr #25): reject loudly instead of
-# installing the EOL 470 driver. Quiet for every other GPU, 580 included.
+# installing the EOL 470 driver. Quiet for every other GPU, 580 included, and
+# for anything that is not a GPU hashref.
 sub _reject_unsupported_gpu {
   my ( $self, $gpu ) = @_;
-  my $legacy = $self->_legacy_requirement($gpu);
-  return unless $legacy && $legacy->{max_branch} < 580;
+  return unless $gpu && ref $gpu eq 'HASH';
+  my $req = $self->requirement_class->from_gpu($gpu);
+  return unless defined $req->max_branch && $req->max_branch < 580;
   die "NVIDIA GPU '" . ($gpu->{name} // 'unknown') . "' (10de:$gpu->{device_id}) is "
-    . "$legacy->{generation} silicon: no driver newer than the end-of-life "
-    . "$legacy->{max_branch} branch supports it, and Rex::GPU does not install "
+    . $req->generation." silicon: no driver newer than the end-of-life "
+    . $req->max_branch." branch supports it, and Rex::GPU does not install "
     . "that. Nothing was changed on the host. Install the driver yourself; once "
     . "`nvidia-smi -L` lists the GPU, install_driver skips the driver step\n";
-}
-
-# Does this GPU need the open kernel module (Blackwell: no proprietary module
-# exists, on any CPU architecture)? The device-ID judgement lives in
-# Rex::GPU::Detect only. No GPU, a non-hashref, a missing device_id or any
-# non-Blackwell ID => false.
-sub _needs_open_kernel_module {
-  my ( $self, $gpu ) = @_;
-  return 0 unless $gpu && ref $gpu eq 'HASH';
-  return Rex::GPU::Detect::open_kernel_module_required($gpu->{device_id});
 }
 
 # `uname -m` / dpkg arch -> the token NVIDIA's CUDA repos use under
@@ -317,12 +470,16 @@ sub _major_version {
 
 =head1 DESCRIPTION
 
-B<Experimental.> The class layout, the step names and the C<$plan> keys may
-change in the next release without a deprecation cycle; there is no option
-yet that makes L<Rex::GPU::NVIDIA/install_driver> use a class of your own.
+B<Experimental.> The class layout, the step names, the source keys and the
+C<$plan> keys may change in the next release without a deprecation cycle;
+there is no option yet that makes L<Rex::GPU::NVIDIA/install_driver> use a
+class of your own.
 
-One driver install is one object: the GPU and the host facts it was built
-with, and a fixed L</install> sequence of overridable steps. The per-distro
+One driver install is one object: the GPUs and the host facts it was built
+with, and a fixed L</install> sequence of overridable steps. Which driver it
+installs is not a per-distro special case but data: the GPUs'
+L</requirement> against the ordered L</sources>, the first that fits wins
+(L</select_source>). The per-distro
 classes are L<Rex::GPU::NVIDIA::Setup::Debian> and
 L<Rex::GPU::NVIDIA::Setup::Ubuntu> on the apt packaging layer
 L<Rex::GPU::NVIDIA::Setup::Apt>, and L<Rex::GPU::NVIDIA::Setup::RHEL> and

@@ -64,89 +64,104 @@ Rebooting is required on the first deployment when the C<nouveau>
 open-source driver was previously loaded, because nouveau must be
 unloaded before the NVIDIA kernel module can bind to the device.
 
+=item C<gpus>
+
+Optional arrayref of the detected GPUs this driver install is for, each in
+the shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
+(C<name>, C<device_id>, ...). L<Rex::GPU/gpu_setup> passes every CUDA-capable
+NVIDIA GPU here. One driver has to drive them all: the driver is chosen for
+the B<intersection> of their requirements (L<Rex::GPU::NVIDIA::Requirement>:
+kernel module and driver-branch range, keyed on the C<device_id>), and
+C<install_driver> B<dies> before anything on the host is changed when the
+GPUs cannot share one driver -- e.g. a V100 (proprietary module, 580 or
+older) next to a B200 (open module only) -- naming the GPUs on each side.
+
 =item C<gpu>
 
-Optional hashref — the detected GPU this driver install is for, in the same
-shape L<Rex::GPU::Detect/detect> returns for one C<nvidia> array element
-(C<name>, C<device_id>, ...). L<Rex::GPU> passes C<< $compute[0] >> here.
-Used on Debian and Ubuntu to recognise Blackwell-architecture silicon
-(B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell, the GB10 / NVIDIA DGX
-Spark) by its C<device_id>. Blackwell has no proprietary kernel module at all,
-on any CPU architecture (see
-L<Rex::GPU::Detect/open_kernel_module_required>):
+A single GPU hashref: C<< gpu => $g >> is C<< gpus => [ $g ] >>. Kept for
+callers from before C<gpus>; passing both dies.
+
+=back
+
+Omit both (or pass C<undef>) to keep the GPU-agnostic package selection.
+
+Each distro's L<Rex::GPU::NVIDIA::Setup> class has an ordered list of
+driver sources; the first that fits the requirement is installed, and if
+none fits, C<install_driver> dies before anything is changed, listing every
+source and why it was rejected. What the requirement picks:
 
 =over
 
-=item * On Ubuntu it selects the C<-open> driver package variant instead of
-the default C<-server> one.
+=item * B<No constraint> (Turing, Ampere, Ada, Hopper and every GPU the
+table does not know; no GPU): the first source -- Ubuntu the newest
+C<-server>, Debian C<non-free> C<nvidia-driver>, RHEL C<open-dkms>,
+openSUSE open C<G06>/C<G07>.
 
-=item * On Debian no Debian-packaged driver supports Blackwell (bookworm
-ships 535, trixie 550), so the driver comes from NVIDIA's CUDA apt repository
-instead of Debian C<non-free>: the C<cuda-keyring> package for C<debian12> or
-C<debian13> (C<x86_64> for amd64, C<sbsa> for arm64) is installed, then the
-compute-only open-module set C<nvidia-driver-cuda> +
-C<nvidia-kernel-open-dkms>. Debian C<non-free> is not enabled on that path.
-A Blackwell GPU on any other Debian release (11, testing/sid, a derivative's
-own version) or architecture B<dies> before anything is changed on the host.
+=item * B<Blackwell> (open kernel module only, branch 570 or newer; GB10 and
+Blackwell Ultra 580 or newer): Ubuntu the newest C<-server-open>. On Debian
+no Debian-packaged driver fits (bookworm ships 535, trixie 550), so the
+driver comes from NVIDIA's CUDA apt repository instead of C<non-free>: the
+C<cuda-keyring> package for C<debian12> or C<debian13> (C<x86_64> for amd64,
+C<sbsa> for arm64), then the compute-only open-module set
+C<nvidia-driver-cuda> + C<nvidia-kernel-open-dkms>; C<non-free> is not
+enabled on that path. On any other Debian release or architecture it dies.
+RHEL and openSUSE: their default open driver.
 
-=back
+=item * B<Maxwell, Pascal, Volta> (C<1340>-C<1DF6>, e.g. Tesla M60, P100,
+P40, V100): the proprietary driver of the 580 branch, their last. On Ubuntu
+C<nvidia-driver-580-server>; if apt has no candidate for it,
+C<install_driver> dies before installing and does not fall back to another
+branch. On RHEL/Rocky/Alma 8 and 9 module stream C<nvidia-driver:580-dkms>;
+on RHEL 10 C<python3-dnf-plugin-versionlock> and a C<dnf versionlock> on
+C<*nvidia*580*>; both then install C<kmod-nvidia-latest-dkms> +
+C<nvidia-driver> + C<nvidia-driver-cuda>, and verify the kmod and a 580
+C<nvidia-driver>. On openSUSE Leap 15 and 16 C<nvidia-driver-G06-kmp-meta>,
+verified with C<rpm -q>. On Debian 11/12/13 the C<non-free> driver (470,
+535, 550); on a Debian release without a known C<non-free> branch it dies.
 
-It also recognises pre-Turing silicon (see
-L<Rex::GPU::Detect/legacy_driver_requirement>). Current NVIDIA drivers no
-longer support it, and the open kernel module never did:
-
-=over
-
-=item * B<Kepler or older> (device ID below C<1340>, e.g. Tesla K80/K40): the
-newest driver that supports it is the end-of-life 470 branch. C<install_driver>
-B<dies> on every distro before anything on the host is changed. A host whose
-driver was installed by hand (C<nvidia-smi -L> lists the GPU) passes the
-already-installed check above instead.
-
-=item * B<Maxwell, Pascal, Volta> (C<1340>-C<1DF6>, e.g. Tesla M60, P100, P40,
-V100): the proprietary driver of the 580 branch. On Ubuntu that is
-C<nvidia-driver-580-server>. If apt has no candidate for it, C<install_driver>
-dies before installing and does not fall back to another branch. On
-RHEL/Rocky/Alma 8 and 9 it enables module stream C<nvidia-driver:580-dkms>. On
-RHEL 10 it installs C<python3-dnf-plugin-versionlock> and locks C<*nvidia*580*>
-(C<dnf versionlock>). Both RHEL paths then install C<kmod-nvidia-latest-dkms>
-+ C<nvidia-driver> + C<nvidia-driver-cuda>, and verify the kmod and a 580
-C<nvidia-driver>. On openSUSE Leap 15 and 16 it installs
-C<nvidia-driver-G06-kmp-meta> and verifies it with C<rpm -q>. Debian is
-unchanged: its C<non-free> 535/550 driver supports these GPUs.
+=item * B<Kepler or older> (device ID below C<1340>, e.g. Tesla K80/K40), as
+any one of the GPUs: the newest driver that supports it is the end-of-life
+470 branch. C<install_driver> B<dies> on every distro before anything on the
+host is changed. A host whose driver was installed by hand (C<nvidia-smi -L>
+lists the GPU) passes the already-installed check above instead.
 
 =back
 
-Every other GPU keeps the previous selection (Ubuntu C<-server>, Debian
-C<non-free> C<nvidia-driver>, RHEL C<open-dkms>, openSUSE open C<G06>/C<G07>).
-Omit the option (or pass C<undef>) to keep the previous, GPU-agnostic package
-selection.
-
-=back
+A mixed host gets what the combination needs: an Ada next to a B200 gets
+the open driver (Ubuntu C<-server-open>), an Ada next to a V100 the
+proprietary 580 one (Ubuntu C<nvidia-driver-580-server>).
 
   install_driver();              # install only, load module without reboot
   install_driver(reboot => 1);   # install, reboot, verify
-  install_driver(gpu => $gpus->{nvidia}[0]);   # thread GPU identity through
+  install_driver(gpus => [ grep { $_->{compute} } @{ $gpus->{nvidia} } ]);
+  install_driver(gpu => $gpus->{nvidia}[0]);   # one GPU, the older form
 
 =cut
 
 sub install_driver {
   my (%opts) = @_;
 
+  die "install_driver: pass gpu or gpus, not both\n"
+    if defined $opts{gpu} && defined $opts{gpus};
+  my $gpus = $opts{gpus} // [ defined $opts{gpu} ? $opts{gpu} : () ];
+  die "install_driver: gpus must be an arrayref of GPU hashrefs\n"
+    unless ref $gpus eq 'ARRAY';
+
   # Every supported OS runs through its Setup class (epic karr #25, T2/T3): the
-  # already-installed short-circuit, the Kepler rejection, package selection,
-  # install, verification and the nouveau blacklist are its steps.
+  # already-installed short-circuit, the Kepler rejection, the multi-GPU
+  # requirement, package selection, install, verification and the nouveau
+  # blacklist are its steps.
   my $setup_class = Rex::GPU::NVIDIA->setup_class_for_os;
   unless ($setup_class) {
     # No class for this OS. Same order as before the move: a working driver
-    # still short-circuits and a Kepler still gets its own message (both via
-    # the base class, read-only), then the OS is refused.
-    my $setup = Rex::GPU::NVIDIA::Setup->new(gpu => $opts{gpu});
+    # still short-circuits and a Kepler or a GPU conflict still gets its own
+    # message (both via the base class, read-only), then the OS is refused.
+    my $setup = Rex::GPU::NVIDIA::Setup->new(gpus => $gpus);
     return if $setup->already_installed;
     $setup->plan;
     die "Unsupported OS for NVIDIA driver installation: ".$setup->os."\n";
   }
-  return unless $setup_class->new(gpu => $opts{gpu})->install;
+  return unless $setup_class->new(gpus => $gpus)->install;
 
   if ($opts{reboot}) {
     _reboot_and_wait();
@@ -196,10 +211,6 @@ sub setup_class_for_os {
 
 sub _nvidia_driver_present {
   Rex::GPU::NVIDIA::Setup->_driver_present(@_);
-}
-
-sub _legacy_driver_requirement {
-  Rex::GPU::NVIDIA::Setup->_legacy_requirement(@_);
 }
 
 sub _reject_unsupported_legacy_gpu {
@@ -407,18 +418,6 @@ sub verify_nvidia {
 # Thin wrappers over the pure helpers that moved into the Setup classes
 # (karr #31); t/ calls them by these names.
 
-sub _debian_nvidia_cuda_repo {
-  Rex::GPU::NVIDIA::Setup::Debian->nvidia_cuda_repo(@_);
-}
-
-sub _ubuntu_needs_open_kernel_module {
-  Rex::GPU::NVIDIA::Setup->_needs_open_kernel_module(@_);
-}
-
-sub _ubuntu_legacy_driver_package {
-  Rex::GPU::NVIDIA::Setup::Ubuntu->legacy_driver_package(@_);
-}
-
 sub _sources_list_enable_nonfree {
   Rex::GPU::NVIDIA::Setup::Debian->_sources_list_enable_nonfree(@_);
 }
@@ -433,14 +432,6 @@ sub _deb822_enable_nonfree {
 
 # Thin wrappers over the pure helpers that moved into the Setup classes
 # (karr #32); t/ calls them by these names.
-
-sub _rhel_legacy_driver_plan {
-  Rex::GPU::NVIDIA::Setup::RHEL->legacy_driver_plan(@_);
-}
-
-sub _suse_nvidia_repo_params {
-  Rex::GPU::NVIDIA::Setup::SUSE->nvidia_repo_params(@_);
-}
 
 # `uname -m` -> NVIDIA's CUDA repo arch token ("sbsa" for aarch64/arm64,
 # else "x86_64"). NOT the libnvidia-container toolkit repo's token, which is

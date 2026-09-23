@@ -4,4 +4,4 @@
 run: nvidia-smi -L 2>&1
 run(auto_die=default): uname -r
 run: dpkg --print-architecture
-DIE: Blackwell-class NVIDIA GPU on Debian release '11.11': Debian's own nvidia packages cannot drive it and NVIDIA's CUDA repo only covers Debian 12 and 13 — install the driver manually
+DIE: No NVIDIA driver source on this Debian 11.11 host fits GB202 [GeForce RTX 5090] (Blackwell, 10de:2b85) (open kernel module, driver branch 570 or newer) -- debian-nonfree: proprietary kernel module, the open one is needed; nvidia-cuda-repo: NVIDIA's CUDA repo only covers Debian 12 and 13, not release '11.11'. Nothing was changed on the host. Install the driver yourself; once `nvidia-smi -L` lists the GPU, install_driver skips the driver step

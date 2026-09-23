@@ -66,19 +66,22 @@ Detect GPUs and run the full installation pipeline: NVIDIA driver, Container
 Toolkit, CDI spec generation, and containerd runtime configuration. This is
 the single call needed to make a node GPU-ready for Kubernetes.
 
-The detected GPU (name and PCI device ID) is passed through to
-L<Rex::GPU::NVIDIA/install_driver>, which uses it on Ubuntu to pick the
-C<-open> driver package variant instead of the default C<-server> one for
-Blackwell-architecture silicon (B200/GB200/B300, GeForce RTX 50xx, RTX PRO
-Blackwell, the GB10 / NVIDIA DGX Spark) that has no proprietary kernel module
-at all, on x86_64 and aarch64 alike. On Debian the same GPUs get NVIDIA's
-CUDA-repository open-module driver instead of Debian's C<non-free> one (which
-cannot drive them), on Debian 12 and 13 only; a Blackwell GPU on any other
-Debian release dies before the host is changed. A pre-Turing GPU
-(Maxwell/Pascal/Volta, e.g. the V100) gets the proprietary 580-branch driver on
-Ubuntu, RHEL and openSUSE; a Kepler-or-older GPU (e.g. Tesla K80) makes
-C<gpu_setup> die before the host is changed, unless a working driver is
-already installed. Every other distro/GPU combination is unaffected.
+Every CUDA-capable NVIDIA GPU detected (name and PCI device ID) is passed
+to L<Rex::GPU::NVIDIA/install_driver> as C<gpus>, and one driver is chosen
+that can drive them all -- the intersection of what each GPU needs (see
+L<Rex::GPU::NVIDIA::Requirement>). Blackwell-architecture silicon
+(B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell, the GB10 / NVIDIA DGX
+Spark) has no proprietary kernel module at all, on x86_64 and aarch64 alike:
+Ubuntu gets the C<-open> driver package variant instead of the default
+C<-server> one, Debian 12 and 13 NVIDIA's CUDA-repository open-module driver
+instead of Debian's C<non-free> one (which cannot drive them); on any other
+Debian release it dies before the host is changed. A pre-Turing GPU
+(Maxwell/Pascal/Volta, e.g. the V100) gets the proprietary 580-branch driver
+on Ubuntu, RHEL and openSUSE. A Kepler-or-older GPU (e.g. Tesla K80) anywhere
+on the host makes C<gpu_setup> die before the host is changed, unless a
+working driver is already installed, and so do GPUs that cannot share one
+driver (a V100 next to a B200). A host whose GPUs are all Turing to Hopper
+gets the same driver as before.
 
 AMD GPUs are detected and logged but not yet supported (a warning is emitted).
 
@@ -160,10 +163,11 @@ sub gpu_setup {
   if ($gpus->{nvidia} && @{$gpus->{nvidia}}) {
     my @compute = grep { $_->{compute} } @{$gpus->{nvidia}};
     if (@compute) {
-      Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $compute[0]->{name});
+      Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $_->{name}) for @compute;
+      # Every compute GPU (karr #33): the driver has to fit all of them.
       Rex::GPU::NVIDIA::install_driver(
         reboot => ($opts{reboot} ? 1 : 0),
-        gpu    => $compute[0],
+        gpus   => \@compute,
       );
       Rex::GPU::NVIDIA::install_container_toolkit();
       Rex::GPU::NVIDIA::generate_cdi_specs();

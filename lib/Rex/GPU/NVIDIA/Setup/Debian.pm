@@ -8,71 +8,140 @@ use namespace::autoclean;
 
 extends 'Rex::GPU::NVIDIA::Setup::Apt';
 
-=method plan
+=method sources
 
-Adds to the apt layer's plan:
+In this order:
 
 =over
 
-=item * Blackwell (open kernel module only) on Debian 12/13, amd64/arm64: no
-Debian-packaged driver supports it, so the driver comes from NVIDIA's CUDA
-apt repository -- C<< $plan->{cuda_repo} >> (see L</nvidia_cuda_repo>),
-packages and verify C<nvidia-driver-cuda> + C<nvidia-kernel-open-dkms>.
-Blackwell on any other Debian release or architecture dies here, before the
-host is changed.
+=item * C<debian-nonfree> -- C<nvidia-driver> + C<nvidia-smi> from Debian
+C<non-free>, proprietary kernel module, verified by C<nvidia-driver>. Its
+branch comes from L</nonfree_branch>; on a release that table does not know
+it is unknown, which fits only a GPU without constraints.
 
-=item * Every other GPU: C<nvidia-driver> + C<nvidia-smi> from Debian
-C<non-free>, verified by C<nvidia-driver>.
+=item * C<nvidia-cuda-repo> -- NVIDIA's CUDA apt repository for C<debian12>
+or C<debian13> (C<x86_64> for amd64, C<sbsa> for arm64, key C<cuda_repo>):
+the compute-only open-module set C<nvidia-driver-cuda> +
+C<nvidia-kernel-open-dkms>, both verified, the newest branch the repository
+carries, at least 590. Unavailable on any other release or architecture.
 
 =back
+
+So a Blackwell GPU (open module, 570 or newer: no Debian-packaged driver
+fits) gets the CUDA repository on Debian 12/13 and dies before the host is
+changed anywhere else; every other GPU gets C<non-free>.
+
+=method nonfree_branch
+
+  my $branch = $self->nonfree_branch($major);   # 12 => 535
+
+The driver branch of Debian's own C<nvidia-driver> in a release: 11 (470),
+12 (535), 13 (550); C<undef> for any other. A fixed table (maintainer
+decision, epic karr #25): looking it up with C<apt-cache> would need
+C<non-free> enabled first, a host change before the plan can fail.
+Override it for a release this table does not know.
+
+=cut
+
+# nvidia-graphics-drivers per suite, sources.debian.org/api/src/
+# nvidia-graphics-drivers/ checked 2026-09-23: bullseye 470.256.02,
+# bookworm 535.261.03, trixie 550.163.01. forky/sid (550 today) is
+# deliberately absent: it moves.
+sub nonfree_branch {
+  my ( $self, $major ) = @_;
+  my %branch = ( 11 => 470, 12 => 535, 13 => 550 );
+  return $branch{ $major // 0 };
+}
+
+sub sources {
+  my ( $self ) = @_;
+  my $major = $self->_major_version($self->release);
+  return (
+    {
+      name          => 'debian-nonfree',
+      kernel_module => 'proprietary',
+      branch        => $self->nonfree_branch($major),
+      packages      => [ 'nvidia-driver', 'nvidia-smi' ],
+      verify        => [ 'nvidia-driver' ],
+      nonfree       => 1
+    },
+    $self->_cuda_repo_source($major)
+  );
+}
+
+# Debian + Blackwell (karr #18): no Debian-packaged driver supports Blackwell
+# (bookworm 535, trixie/sid 550; Blackwell needs >= 570 AND the open kernel
+# module), so it comes from NVIDIA's CUDA apt repo. Falling back to Debian
+# non-free where NVIDIA has no repo would install a driver that dpkg reports
+# as ii but whose module never binds; guessing a neighbouring repo would mix
+# a foreign distro's libc/dkms into the host -- so that source is simply
+# unavailable there.
+#
+# branch_at_least 590: the branch every tree carries. Checked 2026-09-23 in
+# the repos' Packages.gz (nvidia-kernel-open-dkms): debian12/x86_64 545..615,
+# debian12/sbsa 590..615, debian13/x86_64 590..615, debian13/sbsa 595..615.
+# The repo installs its newest branch, which is at least that.
+#
+# NOT nvidia-driver in verify: that name exists in Debian non-free too, so a
+# leftover Debian 535/550 install would pass it. nvidia-kernel-open-dkms
+# exists only in NVIDIA's repo.
+sub _cuda_repo_source {
+  my ( $self, $major ) = @_;
+  my $packages = [ 'nvidia-driver-cuda', 'nvidia-kernel-open-dkms' ];
+  my %source = (
+    name            => 'nvidia-cuda-repo',
+    kernel_module   => 'open',
+    branch_at_least => 590,
+    packages        => $packages,
+    verify          => [ @$packages ]
+  );
+  my $release = $self->release // '';
+  my $arch    = $self->arch // '';
+  if ($major != 12 && $major != 13) {
+    $source{unavailable} = "NVIDIA's CUDA repo only covers Debian 12 and 13, not release '$release'";
+  }
+  elsif ($arch ne 'amd64' && $arch ne 'arm64') {
+    $source{unavailable} = "NVIDIA's CUDA repo only covers amd64 and arm64, not '$arch'";
+  }
+  else {
+    my $distro    = "debian$major";
+    my $repo_arch = $self->_cuda_repo_arch($arch);   # arm64 -> sbsa, amd64 -> x86_64
+    $source{cuda_repo} = {
+      distro      => $distro,
+      arch        => $repo_arch,
+      keyring_url => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/$repo_arch/cuda-keyring_1.1-1_all.deb"
+    };
+  }
+  return \%source;
+}
+
+=method plan
+
+The base plan, plus C<< $plan->{cuda_repo} >>: the chosen source's CUDA
+repository, or C<undef> on the C<non-free> path.
 
 =cut
 
 sub plan {
   my ( $self ) = @_;
   my $plan = $self->SUPER::plan;
-
-  # Debian + Blackwell (karr #18): no Debian-packaged driver supports
-  # Blackwell (bookworm 535, trixie/sid 550; Blackwell needs >= 570 AND the
-  # open kernel module), so this install comes from NVIDIA's CUDA apt repo.
-  # Decided here, BEFORE anything is written to the host: an unsupported
-  # Debian release or architecture dies untouched. Undef for every
-  # non-Blackwell GPU; the release is only read when it can matter.
-  my $cuda_repo = $self->_needs_open_kernel_module($self->gpu)
-    ? $self->nvidia_cuda_repo($self->gpu, $self->release, $self->arch)
-    : undef;
-  $plan->{cuda_repo} = $cuda_repo;
-
-  if ($cuda_repo) {
-    # NVIDIA's compute-only (headless) open-module set from the CUDA repo.
-    # nvidia-driver-cuda provides nvidia-smi itself.
-    Rex::Logger::info("  Blackwell-class GPU on Debian — using NVIDIA's CUDA repo "
-      . "($cuda_repo->{distro}/$cuda_repo->{arch}), open kernel module");
-    push @{ $plan->{packages} }, @{ $cuda_repo->{packages} };
-    # NOT nvidia-driver: that name exists in Debian non-free too, so a
-    # leftover Debian 535/550 install would pass it. nvidia-kernel-open-dkms
-    # exists only in NVIDIA's repo.
-    $plan->{verify} = [ @{ $cuda_repo->{packages} } ];
-  }
-  else {
-    push @{ $plan->{packages} }, 'nvidia-driver', 'nvidia-smi';
-    $plan->{verify} = [ 'nvidia-driver' ];
-  }
+  $plan->{cuda_repo} = $plan->{source} && $plan->{source}{cuda_repo};
   return $plan;
 }
 
 =method prepare_host
 
 Enables C<contrib non-free non-free-firmware> in Debian's own archive entries
-(L</enable_nonfree>) -- not on the CUDA-repo path, whose packages resolve from
-NVIDIA's repo plus Debian C<main>, and must not mix with Debian's nvidia
-packages -- then the apt layer's step.
+(L</enable_nonfree>) when the chosen source is C<non-free> -- not on the
+CUDA-repo path, whose packages resolve from NVIDIA's repo plus Debian
+C<main>, and must not mix with Debian's nvidia packages -- then the apt
+layer's step.
 
 =cut
 
 sub prepare_host {
   my ( $self, $plan ) = @_;
-  $self->enable_nonfree unless $plan->{cuda_repo};
+  $self->enable_nonfree if $plan->{source} && $plan->{source}{nonfree};
   $self->SUPER::prepare_host($plan);
 }
 
@@ -87,47 +156,6 @@ sub prepare_source {
   my ( $self, $plan ) = @_;
   $self->add_nvidia_cuda_apt_repo($plan->{cuda_repo}) if $plan->{cuda_repo};
   $self->SUPER::prepare_source($plan);
-}
-
-=method nvidia_cuda_repo
-
-  my $repo = $self->nvidia_cuda_repo($gpu, $release, $arch);
-
-Pure. C<undef> unless C<$gpu> needs the open kernel module; otherwise
-C<{ distro, arch, keyring_url, packages }> for NVIDIA's CUDA repository.
-C<$release> is the raw C<operating_system_release> (C<13.1>, C<trixie/sid>),
-C<$arch> the dpkg architecture. Dies -- before any change on the host -- for
-a Debian release other than 12 and 13 (NVIDIA publishes no repo for it) and
-an architecture other than amd64/arm64.
-
-=cut
-
-# Falling back to Debian non-free where NVIDIA has no repo would install a
-# driver that dpkg reports as ii but whose module never binds; guessing a
-# neighbouring repo would mix a foreign distro's libc/dkms into the host.
-sub nvidia_cuda_repo {
-  my ( $self, $gpu, $release, $arch ) = @_;
-  return unless $self->_needs_open_kernel_module($gpu);
-
-  my $major = $self->_major_version($release // '');
-  die "Blackwell-class NVIDIA GPU on Debian release '" . ($release // '') . "': "
-    . "Debian's own nvidia packages cannot drive it and NVIDIA's CUDA repo only "
-    . "covers Debian 12 and 13 — install the driver manually\n"
-    unless $major == 12 || $major == 13;
-
-  $arch //= '';
-  die "Blackwell-class NVIDIA GPU on Debian architecture '$arch': NVIDIA's CUDA "
-    . "repo only covers amd64 and arm64\n"
-    unless $arch eq 'amd64' || $arch eq 'arm64';
-
-  my $distro    = "debian$major";
-  my $repo_arch = $self->_cuda_repo_arch($arch);   # arm64 -> sbsa, amd64 -> x86_64
-  return {
-    distro      => $distro,
-    arch        => $repo_arch,
-    keyring_url => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/$repo_arch/cuda-keyring_1.1-1_all.deb",
-    packages    => [ 'nvidia-driver-cuda', 'nvidia-kernel-open-dkms' ]
-  };
 }
 
 =method add_nvidia_cuda_apt_repo
@@ -378,8 +406,9 @@ sub _debian_archive_keyring {
 
 B<Experimental>, like L<Rex::GPU::NVIDIA::Setup>. The NVIDIA driver install
 for Debian (and every C<is_debian> host that is not Ubuntu): C<nvidia-driver>
-from Debian C<non-free>, or for Blackwell the open-module set from NVIDIA's
-CUDA repository, on the apt layer L<Rex::GPU::NVIDIA::Setup::Apt>.
+from Debian C<non-free>, or where that cannot drive the GPUs (Blackwell) the
+open-module set from NVIDIA's CUDA repository (L</sources>), on the apt
+layer L<Rex::GPU::NVIDIA::Setup::Apt>.
 
 =head1 SEE ALSO
 

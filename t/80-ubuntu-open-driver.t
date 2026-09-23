@@ -14,10 +14,13 @@ use Test::More;
 # silicon: the GB10 has no proprietary kernel module at all, only the -open
 # variant builds/loads for it.
 #
-# Both functions under test are pure (string/hash lookups only, no run/dpkg),
-# so they are unit-testable offline:
-#   * Rex::GPU::Detect::open_kernel_module_required   — the device-ID lookup
-#   * Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module — GPU gate
+# Under test, offline:
+#   * Rex::GPU::Detect::open_kernel_module_required -- the device-ID lookup
+#   * which source Rex::GPU::NVIDIA::Setup::Ubuntu's plan picks for a GPU
+#     (karr #33: the requirement-driven selection replaced the
+#     _ubuntu_needs_open_kernel_module gate; same claims, asserted on the
+#     chosen source now). The host is faked by overriding run_cmd, so the
+#     apt-cache search answers with a canned package name.
 #
 # karr #16: Blackwell has no proprietary kernel module on x86_64 either
 # (GeForce RTX 50xx, RTX PRO Blackwell, B200/GB200). The arm64-only gate k15
@@ -95,9 +98,32 @@ subtest 'open_kernel_module_required — Blackwell device-ID ranges (karr #16)' 
   is($okm->(''),      0, 'empty string => 0');
 };
 
-#### Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module
+#### Which Ubuntu source the plan picks
 
-sub needs_open { Rex::GPU::NVIDIA::_ubuntu_needs_open_kernel_module(@_) }
+{
+  package T::Ubuntu;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  sub run_cmd {
+    my ( $self, $cmd ) = @_;
+    $? = 0;
+    return $cmd =~ /-server-open\$'/ ? 'nvidia-driver-590-server-open'
+         : $cmd =~ /-server\$'/      ? 'nvidia-driver-590-server'
+         :                              '';
+  }
+}
+
+# 1 if the plan picks the -server-open driver, 0 if the -server one
+sub needs_open {
+  my ( $gpu ) = @_;
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { };
+  my $plan = T::Ubuntu->new(gpu => $gpu, os => 'Ubuntu', release => '24.04',
+    arch => 'arm64', kernel => '6.8.0-1')->plan;
+  return $plan->{source}{name} eq 'ubuntu-server-open' ? 1
+       : $plan->{source}{name} eq 'ubuntu-server'      ? 0
+       : die "unexpected source $plan->{source}{name}\n";
+}
 
 my $gb10 = { name => 'Device', vendor => 'nvidia', pci_class => '0300',
              compute => 1, device_id => '2e12' };

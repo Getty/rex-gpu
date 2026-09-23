@@ -16,32 +16,96 @@ C<zypper>.
 
 sub package_manager { 'zypper' }
 
+=method sources
+
+One kmp meta package from NVIDIA's GFX repository for the Leap release
+(key C<repo_url>, see L</leap_version>), in this order:
+
+=over
+
+=item * Leap 16: C<nvidia-gfx-G07-open> --
+C<nvidia-open-driver-G07-signed-kmp-meta>, open kernel module, the newest
+G07 branch (at least 595). Leap 15: C<nvidia-gfx-G06-open> --
+C<nvidia-open-driver-G06-signed-kmp-meta>, open, branch 580.
+
+=item * C<nvidia-gfx-G06> -- the proprietary C<nvidia-driver-G06-kmp-meta>,
+branch 580 (G07 has no proprietary module), on Leap 15 and 16.
+
+=back
+
+A meta package co-installs the kernel module and the userspace at one
+version, so C<nvidia-smi> never sees a C<Driver/library version mismatch>.
+Pre-signed kmp packages need no kernel headers.
+
+Only the proprietary C<nvidia-driver-G06-kmp-meta> is verified. The open
+meta packages are B<not> verified -- that gap is known and kept as it was.
+
+=method leap_version
+
+C<16.0> on Leap 16 and later, the C<x.y> of the raw release string
+(C<15.6>) before -- never C<operating_system_version>, which strips the dots
+(C<156>, karr #6).
+
+=method repo_url
+
+  my $url = $self->repo_url('15.6');
+
+C<https://download.nvidia.com/opensuse/leap/15.6/>.
+
 =method plan
 
-Adds one kmp meta package from NVIDIA's GFX repository
-(L</nvidia_repo_params>, stored as C<< $plan->{repo_url} >>): it
-co-installs the kernel module and the userspace at one version, so
-C<nvidia-smi> never sees a C<Driver/library version mismatch>. Pre-signed
-kmp packages need no kernel headers.
-
-Only the pre-Turing proprietary C<nvidia-driver-G06-kmp-meta> is verified.
-The default open meta packages are B<not> verified -- that gap is known and
-kept as it was.
+The base plan plus C<< $plan->{repo_url} >>, the chosen source's repository.
 
 =cut
+
+sub leap_version {
+  my ( $self ) = @_;
+  my $release = $self->release;
+  return '16.0' if $self->_major_version($release) >= 16;
+  my ($leap_version) = ($release // '') =~ /^(\d+\.\d+)/;
+  return $leap_version // $release;
+}
+
+sub repo_url {
+  my ( $self, $leap_version ) = @_;
+  return "https://download.nvidia.com/opensuse/leap/$leap_version/";
+}
+
+# G06 is NVIDIA's series up to 580, G07 the open-only one after it. Checked
+# 2026-09-23 in the repos' primary.xml: the G06 metas (open on leap/15.6,
+# proprietary on 15.6 and 16.0) carry branches 570 and 580 only, zypper
+# resolves the newest, so they install 580 -- branch 580 exactly; 590 never
+# went into G06. The G07 open meta on leap/16.0 carries 594 and 595, newer
+# branches land there: branch_at_least 595. NVIDIA's leap/15.6/ and leap/16.0/ repos
+# both carry nvidia-driver-G06-kmp-meta (x86_64 + aarch64, up to 580.178.04,
+# checked in their primary.xml 2026-09-23); it requires
+# nvidia-driver-G06-kmp and nvidia-userspace-meta-G06 at its own exact
+# version. The open G06/G07 metas do not support pre-Turing GPUs.
+sub sources {
+  my ( $self ) = @_;
+  my $url = $self->repo_url($self->leap_version);
+  my $open = $self->_major_version($self->release) >= 16
+    ? { name => 'nvidia-gfx-G07-open', branch_at_least => 595,
+        packages => [ 'nvidia-open-driver-G07-signed-kmp-meta' ] }
+    : { name => 'nvidia-gfx-G06-open', branch => 580,
+        packages => [ 'nvidia-open-driver-G06-signed-kmp-meta' ] };
+  return (
+    { %$open, kernel_module => 'open', verify => [], repo_url => $url },
+    {
+      name          => 'nvidia-gfx-G06',
+      kernel_module => 'proprietary',
+      branch        => 580,
+      packages      => [ 'nvidia-driver-G06-kmp-meta' ],
+      verify        => [ 'nvidia-driver-G06-kmp-meta' ],
+      repo_url      => $url
+    }
+  );
+}
 
 sub plan {
   my ( $self ) = @_;
   my $plan = $self->SUPER::plan;
-  my $legacy = $self->_legacy_requirement($self->gpu);
-  my ($repo_url, $meta_pkg) = $self->nvidia_repo_params($self->release, $legacy);
-  $plan->{repo_url} = $repo_url;
-  push @{ $plan->{packages} }, $meta_pkg;
-
-  # Pre-Turing only (karr #26): verify the proprietary meta package landed. It
-  # requires the kmp and the userspace at its own exact version, so installed
-  # means both are. Other GPUs keep the unverified path as before.
-  $plan->{verify} = $legacy ? [ $meta_pkg ] : [];
+  $plan->{repo_url} = $plan->{source} && $plan->{source}{repo_url};
   return $plan;
 }
 
@@ -88,60 +152,6 @@ sub install_packages {
   my ( $self, $plan ) = @_;
   $self->SUPER::install_packages($plan);
   $self->run_cmd('zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true', auto_die => 0);
-}
-
-=method nvidia_repo_params
-
-  my ($repo_url, $meta_pkg) = $self->nvidia_repo_params($release, $legacy);
-
-Pure. C<$release> is the raw C<operating_system_release> (C<15.6>, C<16.0>),
-C<$legacy> the pre-Turing requirement or C<undef>:
-
-=over
-
-=item * Pre-Turing: C<leap/15.x/> or C<leap/16.0/> with the proprietary
-C<nvidia-driver-G06-kmp-meta> (branch 580); G07 is open-only.
-
-=item * Leap 16: C<leap/16.0/>, C<nvidia-open-driver-G07-signed-kmp-meta>.
-
-=item * Leap 15: C<leap/15.x/> (the minor kept),
-C<nvidia-open-driver-G06-signed-kmp-meta>.
-
-=back
-
-=cut
-
-sub nvidia_repo_params {
-  my ( $self, $release, $legacy ) = @_;
-
-  # Derive the major from the raw release string. operating_system_version()
-  # strips dots ("15.6" -> "156"), which made int() see 156 and route every
-  # Leap through the ">= 16" branch (karr #6).
-  my $major = $self->_major_version($release);
-
-  # Pre-Turing (karr #26): the PROPRIETARY G06 (= branch 580) meta package on
-  # both Leap 15 and 16 -- the open G06/G07 metas do not support these GPUs,
-  # and G07 (595) is open-only. NVIDIA's leap/15.6/ and leap/16.0/ repos both
-  # carry nvidia-driver-G06-kmp-meta (x86_64 + aarch64, up to 580.178.04,
-  # checked in their primary.xml 2026-09-23); it requires
-  # nvidia-driver-G06-kmp and nvidia-userspace-meta-G06 at its own exact
-  # version.
-  if ($legacy) {
-    my $leap_version = $major >= 16 ? '16.0' : ($release =~ /^(\d+\.\d+)/)[0] // $release;
-    return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
-            "nvidia-driver-G06-kmp-meta");
-  }
-
-  if ($major >= 16) {
-    return ("https://download.nvidia.com/opensuse/leap/16.0/",
-            "nvidia-open-driver-G07-signed-kmp-meta");
-  }
-
-  # Leap 15.x: keep the full x.y version in the repo path (leap/15.6/).
-  my ($leap_version) = $release =~ /^(\d+\.\d+)/;
-  $leap_version //= $release;
-  return ("https://download.nvidia.com/opensuse/leap/$leap_version/",
-          "nvidia-open-driver-G06-signed-kmp-meta");
 }
 
 1;

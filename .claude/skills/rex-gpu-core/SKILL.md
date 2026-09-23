@@ -22,7 +22,7 @@ therefore has to survive on exec channels; Rex idioms and the SFTP question live
 1. `_check_connection` — die early if the backend is neither LibSSH nor SFTP-capable.
 2. `gpu_detect` → `Rex::GPU::Detect::detect`.
 3. Only if a **CUDA-capable** NVIDIA GPU is present (`grep { $_->{compute} }`):
-   `install_driver` → `install_container_toolkit` → `generate_cdi_specs` →
+   `install_driver(gpus => \@compute)` (all of them; `gpu =>` is the one-GPU alias) → `install_container_toolkit` → `generate_cdi_specs` →
    `configure_containerd($runtime)` unless `containerd_config eq 'none'`.
 
 The order is not cosmetic. CDI generation runs `nvidia-ctk cdi generate`, which
@@ -49,11 +49,22 @@ unrecognised laptop chip triggers a datacenter driver install — keep it 0.
 
 **Which driver a GPU needs is a separate question** (epic #25): `Rex::GPU::NVIDIA::Requirement`
 (Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,
-min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF /
-B300 / GB300 open-only; Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; <1340 Kepler or
-older ≤470 (rejected). Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs
-and croaks on conflict. The table **never** makes a GPU compute. `Detect::
-open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers over it.
+min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF
+open ≥570 (GB10 2E12 ≥580: first listed in 580.119.02) / B300 / GB300 open ≥580;
+Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; <1340 Kepler or older ≤470 (rejected).
+Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs and croaks on
+conflict (`conflicts` lists without dying). The table **never** makes a GPU compute.
+`Detect::open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers.
+
+**Selection is data, not branches** (k33): each Setup class has ordered `sources`
+(`{name, kernel_module, branch | branch_at_least, packages, verify, unavailable, …}`);
+`plan` rejects Kepler (any GPU), builds `requirement` (intersection of **all** GPUs; conflict
+dies untouched), then `select_source` takes the first candidate `satisfied_by` accepts —
+after `resolve_source` (Ubuntu's read-only `apt-cache search`) and a re-check — else dies
+listing every candidate + reason. `branch_at_least N` = "repo's newest, known ≥ N": passes
+a min bound up to N, **never** a max bound; no branch at all passes only an unbounded
+requirement. Don't invent a branch number for a "latest" source; give the floor the repo
+provably carries.
 
 ## The driver matrix — one dispatch, three families
 
@@ -69,12 +80,13 @@ family has a trap that is already solved in the code; do not "simplify" these aw
 - **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
   archive entry in both `sources.list` and deb822 `*.sources` (k36/k40; unknown mirrors are
   left alone and warn); install `nvidia-driver` + `nvidia-smi` + the *running* kernel's
-  headers only. Blackwell on Debian 12/13 instead uses NVIDIA's CUDA repo (`cuda-keyring`,
-  `nvidia-driver-cuda` + `nvidia-kernel-open-dkms`, no non-free; k18). Never the `linux-headers-$arch`
+  headers only; non-free branch from a fixed table (11→470, 12→535, 13→550, else unknown).
+  Blackwell on Debian 12/13 instead uses NVIDIA's CUDA repo (`cuda-keyring`,
+  `nvidia-driver-cuda` + `nvidia-kernel-open-dkms`, no non-free; k18; `unavailable` elsewhere). Never the `linux-headers-$arch`
   metapackage — it pulls a new kernel whose grub/initramfs post-install returns non-zero.
-- **Ubuntu** — auto-detect the newest `nvidia-driver-NNN-server` via `apt-cache search`,
-  filtering out `-open`; Blackwell gets `-server-open` (k16), pre-Turing is pinned to
-  `nvidia-driver-580-server` (k26). **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
+- **Ubuntu** — sources `-server` (newest via `apt-cache search`, `-open` filtered, ≥580),
+  `-server-open` (≥580; Blackwell), pinned `nvidia-driver-580-server` (pre-Turing, candidate
+  checked after `apt-get update`); empty search falls back to 570, re-checked. **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
   virtual package with no install candidate and the driver metapackage pulls it anyway.
 - **RHEL/Rocky/Alma/CentOS** — EPEL + `crb`(≥9)/`powertools`(<9) + the CUDA repo. **v10+
   has no module streams**: install `kmod-nvidia-open-dkms` + `nvidia-driver` +

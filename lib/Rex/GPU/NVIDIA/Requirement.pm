@@ -143,11 +143,16 @@ C<31C2>/C<31C3>, listed one by one, not as a block): the supported-GPU table
 in NVIDIA's open-gpu-kernel-modules README (driver 615.71.09). The last Ada ID
 there is C<28F8>, and every listed ID from C<2901> to C<2F58> is Blackwell,
 so an unlisted ID in C<2900>-C<2FFF> is taken as Blackwell too. Open kernel
-module only; oldest branch 570 (Blackwell) and 580 (Blackwell Ultra).
+module only; oldest branch 570 (Blackwell; GB10: 580, next item) and 580
+(Blackwell Ultra).
 
 =item * GB10 C<2E12> (DGX Spark, aarch64) has its own row ahead of the
-Blackwell block with the same values: it is the one Blackwell part verified
-on real hardware (karr #15).
+Blackwell block: open kernel module, oldest branch B<580>, not 570. NVIDIA
+lists C<2E12> first in driver 580.119.02 (open-gpu-kernel-modules README of
+tag C<580.119.02>, and the aarch64 C<supportedchips> README of that driver);
+580.105.08 and every 570/575 release lack it, and so does 590.44.01 (590.48.01
+has it). The table counts whole branches, so it cannot say "580.119.02 or
+newer": a host that installs an older 580 point release is not caught here.
 
 =item * Maxwell/Pascal/Volta C<1340>-C<1DF6> (Tesla M60/M40, P100, P40, P4, V100,
 V100S, TITAN V, ...): the 580 legacy list of NVIDIA's C<supportedchips>
@@ -178,7 +183,17 @@ than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
 # Turing on). Blackwell Ultra (B300 3182, GB300 31C2/31C3) is listed
 # explicitly, NOT as a block — whatever else lands at 0x3000+ is unknown.
 # min_branch 570 / 580: the first branch with Blackwell / Blackwell Ultra
-# support (research for epic karr #25). Not used by any install path yet.
+# support (research for epic karr #25).
+#
+# GB10 (2E12, DGX Spark) is the exception inside the Blackwell block: min 580
+# (karr #33, checked 2026-09-23 against NVIDIA's primary sources). 2E12 is
+# absent from the open-gpu-kernel-modules README.md of every 570.x and 575.x
+# tag and of 580.65.06 .. 580.105.08; it first appears in tag 580.119.02
+# ("NVIDIA GB10 | 2E12 10DE 21EC"), and is in 580.126.09, 590.48.01, 595.44.02
+# and 615.71.09 -- but NOT in 590.44.01. The aarch64 driver README
+# (us.download.nvidia.com/XFree86/aarch64/<ver>/README/supportedchips.html)
+# agrees: absent in 580.95.05 and 590.44.01, present in 580.119.02 and
+# 590.48.01. A branch-granular row cannot express "580.119.02 or newer".
 #
 # Pre-Turing (karr #26). Source: the legacy sections of NVIDIA's
 # supportedchips README (driver 615.71.09, us.download.nvidia.com/XFree86/
@@ -202,8 +217,8 @@ than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
 # which is the driver selection those GPUs get today.
 sub generations {
   return (
-    { generation => 'Blackwell', first => 0x2e12, last => 0x2e12,       # GB10, verified
-      kernel_module => 'open', min_branch => 570 },
+    { generation => 'Blackwell', first => 0x2e12, last => 0x2e12,       # GB10, see above
+      kernel_module => 'open', min_branch => 580 },
     { generation => 'Blackwell', first => 0x2900, last => 0x2fff,       # GB100/GB102, GB20x, GB10
       kernel_module => 'open', min_branch => 570 },
     { generation => 'Blackwell Ultra', first => 0x3182, last => 0x3182, # B300 SXM6 AC
@@ -277,36 +292,84 @@ sub _lookup {
 =method satisfied_by
 
   $req->satisfied_by({ kernel_module => 'open', branch => 580 });   # 1 or 0
+  $req->satisfied_by({ kernel_module => 'open', branch_at_least => 590 });
 
-Whether a driver source — a concrete package set with a C<kernel_module>
-(C<open> or C<proprietary>) and an integer C<branch> — satisfies this
-requirement. A requirement of C<either> takes any kernel module; otherwise the
-module must match exactly. The branch must lie within
-L</min_branch>..L</max_branch>, both inclusive. A source whose C<branch> is
-C<undef> (not known yet) satisfies only a requirement without bounds, and one
-whose C<kernel_module> is missing only a requirement of C<either>: an unknown
-never passes a real constraint. Croaks unless C<$source> is a hashref, or if
-its C<branch> is not an integer.
+Whether a driver source satisfies this requirement: 1 or 0, the negation of
+L</why_not>. A source is a hashref with a C<kernel_module> (C<open> or
+C<proprietary>) and what is known about its driver branch, one of:
+
+=over
+
+=item * C<branch> -- an integer: the source installs exactly that branch
+(C<nvidia-driver-580-server>, Debian 12's C<nvidia-driver> 535).
+
+=item * C<branch_at_least> -- an integer, C<branch> undefined: the source
+installs the B<newest> branch its repository carries, which is not known
+before the install but is known to be at least this one (the repository
+carries it, and a repository does not lose its newest branch). It satisfies
+a L</min_branch> up to that floor and B<never> a L</max_branch>: a newer
+branch can appear in the repository at any time and move past the bound.
+
+=item * neither -- the branch is not known at all. That satisfies only a
+requirement with no bounds.
+
+=back
+
+A requirement of C<either> takes any kernel module; otherwise the module must
+match exactly. An exact C<branch> must lie within
+L</min_branch>..L</max_branch>, both inclusive. A missing C<kernel_module>
+satisfies only C<either>: an unknown never passes a real constraint. Croaks
+unless C<$source> is a hashref, or if C<branch> or C<branch_at_least> is not
+an integer.
+
+=method why_not
+
+  my $reason = $req->why_not($source);   # undef if it fits
+
+C<undef> if L</satisfied_by> would say 1, otherwise a short reason for
+messages (C<"proprietary kernel module, the open one is needed">,
+C<"branch 590 is newer than 580">).
 
 =cut
 
 sub satisfied_by {
   my ( $self, $source ) = @_;
+  return defined $self->why_not( $source ) ? 0 : 1;
+}
+
+sub why_not {
+  my ( $self, $source ) = @_;
   croak __PACKAGE__.'->satisfied_by needs a source hashref { kernel_module, branch }'
     unless ref $source eq 'HASH';
-  my $branch = $source->{branch};
-  croak __PACKAGE__.'->satisfied_by: branch must be an integer like 580, not '."'".$branch."'"
-    if defined $branch && $branch !~ /^\d+\z/;
+  my ( $branch, $floor ) = @{ $source }{qw( branch branch_at_least )};
+  for my $n ( $branch, $floor ) {
+    croak __PACKAGE__.'->satisfied_by: branch must be an integer like 580, not '."'".$n."'"
+      if defined $n && $n !~ /^\d+\z/;
+  }
 
   if ( $self->kernel_module ne 'either' ) {
     my $module = $source->{kernel_module};
-    return 0 unless defined $module && $module eq $self->kernel_module;
+    return ( defined $module ? $module : 'unknown' ).' kernel module, the '
+        .$self->kernel_module.' one is needed'
+      unless defined $module && $module eq $self->kernel_module;
   }
-  return 1 unless defined $self->min_branch || defined $self->max_branch;
-  return 0 unless defined $branch;
-  return 0 if defined $self->min_branch && $branch < $self->min_branch;
-  return 0 if defined $self->max_branch && $branch > $self->max_branch;
-  return 1;
+  my ( $min, $max ) = ( $self->min_branch, $self->max_branch );
+  return unless defined $min || defined $max;
+
+  if ( defined $branch ) {
+    return 'branch '.$branch.' is older than '.$min if defined $min && $branch < $min;
+    return 'branch '.$branch.' is newer than '.$max if defined $max && $branch > $max;
+    return;
+  }
+  return 'driver branch not known, '.( defined $min ? $min.' or newer' : $max.' or older' )
+      .' is needed'
+    unless defined $floor;
+  return 'installs the newest branch it carries, which can be newer than '.$max
+    if defined $max;
+  return 'installs the newest branch it carries, known only to be '.$floor
+      .' or newer; '.$min.' is needed'
+    if $floor < $min;
+  return;
 }
 
 =method intersect
@@ -323,55 +386,87 @@ unchanged; several give a new object whose L</members> lists them (nested
 intersections flattened) and whose C<generation>, C<device_id> and C<name>
 are C<undef>.
 
-Croaks, naming the GPUs on each side, if members need different kernel
-modules (a V100 needs C<proprietary>, a B200 C<open>) or the bounds leave no
-branch (one GPU needs at least 590, another at most 580). Also croaks for an
-empty list or anything that is not a requirement object.
+Croaks with the L</conflicts>, naming the GPUs on each side, if members need
+different kernel modules (a V100 needs C<proprietary>, a B200 C<open>) or the
+bounds leave no branch (one GPU needs at least 590, another at most 580).
+Also croaks for an empty list or anything that is not a requirement object.
+
+=method conflicts
+
+  my @why = Rex::GPU::NVIDIA::Requirement->conflicts(@requirements);
+
+What L</intersect> would croak about, as a list of messages, one per
+conflict; empty when the requirements can be combined. For a caller that
+wants to phrase the failure itself.
 
 =cut
 
 sub intersect {
   my ( $self, @requirements ) = @_;
   unshift @requirements, $self if ref $self;
+  my @members = $self->_members_of( @requirements );
+  return $requirements[0] if @requirements == 1;
+
+  my @conflicts = $self->conflicts( @members );
+  croak __PACKAGE__.'->intersect: no single NVIDIA driver supports all GPUs on this host: '
+    .join( '; ', @conflicts )
+    if @conflicts;
+
+  my %module = map { $_->kernel_module => 1 } @members;
+  my ( $lower, $upper ) = $self->_bounds( @members );
+  my $class = ref $self || $self;
+  return $class->new(
+    kernel_module => $module{open}        ? 'open'
+                   : $module{proprietary} ? 'proprietary'
+                   :                        'either',
+    $lower ? ( min_branch => $lower->min_branch ) : (),
+    $upper ? ( max_branch => $upper->max_branch ) : (),
+    members => \@members
+  );
+}
+
+sub conflicts {
+  my ( $self, @requirements ) = @_;
+  unshift @requirements, $self if ref $self;
+  my @members = $self->_members_of( @requirements );
+
+  my %by_module;
+  push @{ $by_module{ $_->kernel_module } }, $_ for @members;
+  my ( $lower, $upper ) = $self->_bounds( @members );
+
+  my @conflicts;
+  push @conflicts, join( ', ', map { $_->who } @{ $by_module{open} } )
+      .' need'.( @{ $by_module{open} } == 1 ? 's' : '' ).' the open kernel module, but '
+      .join( ', ', map { $_->who } @{ $by_module{proprietary} } )
+      .' need'.( @{ $by_module{proprietary} } == 1 ? 's' : '' ).' the proprietary one'
+    if $by_module{open} && $by_module{proprietary};
+  push @conflicts, $lower->who.' needs driver branch '.$lower->min_branch
+      .' or newer, but '.$upper->who.' is supported only up to branch '.$upper->max_branch
+    if $lower && $upper && $lower->min_branch > $upper->max_branch;
+  return @conflicts;
+}
+
+# Validated, flattened members of a list of requirements.
+sub _members_of {
+  my ( $self, @requirements ) = @_;
   croak __PACKAGE__.'->intersect needs at least one requirement'
     unless @requirements;
   for my $req ( @requirements ) {
     croak __PACKAGE__.'->intersect: not a '.__PACKAGE__.' object: '.( $req // 'undef' )
       unless blessed( $req ) && $req->isa( __PACKAGE__ );
   }
-  return $requirements[0] if @requirements == 1;
+  return map { @{ $_->members } ? @{ $_->members } : $_ } @requirements;
+}
 
-  my @members = map { @{ $_->members } ? @{ $_->members } : $_ } @requirements;
-
-  my %by_module;
-  push @{ $by_module{ $_->kernel_module } }, $_ for @members;
+# The member with the highest lower bound and the one with the lowest upper
+# bound (either may be undef).
+sub _bounds {
+  my ( $self, @members ) = @_;
   my ( $lower ) = sort { $b->min_branch <=> $a->min_branch }
     grep { defined $_->min_branch } @members;
   my ( $upper ) = sort { $a->max_branch <=> $b->max_branch }
     grep { defined $_->max_branch } @members;
-
-  my @conflicts;
-  push @conflicts, join( ', ', map { $_->_who } @{ $by_module{open} } )
-      .' need'.( @{ $by_module{open} } == 1 ? 's' : '' ).' the open kernel module, but '
-      .join( ', ', map { $_->_who } @{ $by_module{proprietary} } )
-      .' need'.( @{ $by_module{proprietary} } == 1 ? 's' : '' ).' the proprietary one'
-    if $by_module{open} && $by_module{proprietary};
-  push @conflicts, $lower->_who.' needs driver branch '.$lower->min_branch
-      .' or newer, but '.$upper->_who.' is supported only up to branch '.$upper->max_branch
-    if $lower && $upper && $lower->min_branch > $upper->max_branch;
-  croak __PACKAGE__.'->intersect: no single NVIDIA driver supports all GPUs on this host: '
-    .join( '; ', @conflicts )
-    if @conflicts;
-
-  my $class = ref $self || $self;
-  return $class->new(
-    kernel_module => $by_module{open}        ? 'open'
-                   : $by_module{proprietary} ? 'proprietary'
-                   :                           'either',
-    $lower ? ( min_branch => $lower->min_branch ) : (),
-    $upper ? ( max_branch => $upper->max_branch ) : (),
-    members => \@members
-  );
+  return ( $lower, $upper );
 }
 
 =method describe
@@ -396,10 +491,19 @@ sub describe {
   return $module.', '.$branch;
 }
 
-# "GV100GL [Tesla V100] (Maxwell/Pascal/Volta, 10de:1db4)" — who a member is,
-# for conflict messages.
-sub _who {
+=method who
+
+  print $req->who;   # "GV100GL [Tesla V100] (Maxwell/Pascal/Volta, 10de:1db4)"
+
+Who the requirement is for, for messages: the GPU's name, generation and
+device ID, or for an intersected requirement the L</members>, comma
+separated. C<NVIDIA GPU> when nothing is known.
+
+=cut
+
+sub who {
   my ( $self ) = @_;
+  return join( ', ', map { $_->who } @{ $self->members } ) if @{ $self->members };
   my @what = grep { defined } $self->generation,
     defined $self->device_id ? '10de:'.$self->device_id : undef;
   my $who = $self->name // 'NVIDIA GPU';
@@ -426,10 +530,11 @@ sub _who {
 =head1 DESCRIPTION
 
 B<Experimental.> This API may change without a deprecation cycle for one
-release. L<Rex::GPU::NVIDIA>'s install paths do not use it yet — they still
-choose the driver exactly as before; only
-L<Rex::GPU::Detect/open_kernel_module_required> and
-L<Rex::GPU::Detect/legacy_driver_requirement> read from it.
+release. L<Rex::GPU::NVIDIA/install_driver> chooses the driver with it: the
+L<Rex::GPU::NVIDIA::Setup> classes intersect the requirements of every GPU
+they install for and take the first of their driver sources that
+L</satisfied_by> accepts. L<Rex::GPU::Detect/open_kernel_module_required>
+and L<Rex::GPU::Detect/legacy_driver_requirement> read from it too.
 
 A requirement says which NVIDIA driver a GPU can work with: the kernel module
 (L</kernel_module>) and the range of driver branches

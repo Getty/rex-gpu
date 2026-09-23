@@ -38,22 +38,20 @@ sub apt_get {
   return 'apt-get -o DPkg::Lock::Timeout='.$self->apt_lock_timeout;
 }
 
-=method plan
+=method kernel_packages
 
-Reads the architecture (so C<dpkg --print-architecture> runs first, whether
-or not the distro class needs it) and starts the package list with the
-running kernel's headers, C<linux-headers-$kernel>: enough for DKMS. Never
-the C<linux-headers-$arch> metapackage, which pulls a new kernel whose
-grub/initramfs post-install can exit non-zero.
+The running kernel's headers, C<linux-headers-$kernel>: enough for DKMS.
+Never the C<linux-headers-$arch> metapackage, which pulls a new kernel whose
+grub/initramfs post-install can exit non-zero. Reads the architecture first,
+so C<dpkg --print-architecture> runs before any source is looked at, whether
+or not the distro class needs it.
 
 =cut
 
-sub plan {
+sub kernel_packages {
   my ( $self ) = @_;
-  my $plan = $self->SUPER::plan;
   $self->arch;
-  push @{ $plan->{packages} }, 'linux-headers-'.$self->kernel;
-  return $plan;
+  return 'linux-headers-'.$self->kernel;
 }
 
 =method prepare_host

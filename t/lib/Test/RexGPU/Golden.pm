@@ -179,12 +179,15 @@ sub host_profile {
 #### GPU fixtures #############################################################
 #
 # Built through the real lspci parser, so device_id/compute are what
-# gpu_setup would pass as $compute[0].
+# gpu_setup would pass in gpus => [...].
 
 my %GPU_LINE = (
   ada       => '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation AD104GL [RTX 4000 SFF Ada Generation] [10de:27b0] (rev a1)',
   blackwell => '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GB202 [GeForce RTX 5090] [10de:2b85] (rev a1)',
   volta     => '3b:00.0 3D controller [0302]: NVIDIA Corporation GV100GL [Tesla V100 PCIe 16GB] [10de:1db4] (rev a1)',
+  # multi-GPU fixtures (karr #33); names hand-written like the others
+  b200      => '18:00.0 3D controller [0302]: NVIDIA Corporation GB100 [B200] [10de:2901] (rev a1)',
+  b300      => '19:00.0 3D controller [0302]: NVIDIA Corporation GB110 [B300 SXM6 AC] [10de:3182] (rev a1)',
   kepler    => '04:00.0 3D controller [0302]: NVIDIA Corporation GK210GL [Tesla K80] [10de:102d] (rev a1)'
 );
 

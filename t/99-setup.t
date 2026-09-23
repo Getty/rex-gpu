@@ -137,7 +137,7 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
     code => sub { $plan = $RHEL->new(gpu => gpu_fixture('volta'))->plan });
   is_deeply($plan->{verify}, [ 'nvidia-driver', 'kmod-nvidia-latest-dkms' ],
     'rocky-9 + V100: the proprietary kmod is verified too');
-  is($plan->{legacy}{module_stream}, '580-dkms', '... stream 580-dkms decided in plan');
+  is($plan->{source}{module_stream}, '580-dkms', '... stream 580-dkms decided in plan');
 
   my $rec = record_host(host => host_profile('rocky-9'), code => sub {
     $plan = $RHEL->new(os => 'Redhat', release => '8.10', kernel => '4.18.0-553.el8_10.x86_64')->plan;
@@ -329,10 +329,76 @@ is(Rex::GPU::NVIDIA::Setup->_cuda_repo_arch('arm64'), 'sbsa', '_cuda_repo_arch o
 is(Rex::GPU::NVIDIA::Setup->_major_version('10.1'), 10, '_major_version keeps the dots in mind');
 is(Rex::GPU::NVIDIA::_os_major_version('15.6'), 15, 'old wrapper _os_major_version still answers');
 is($RPM->_rpm_version_in_branch('580.95.05', 580), 1, '_rpm_version_in_branch on the class');
-is_deeply([ $SUSE->nvidia_repo_params('15.6') ],
-  [ 'https://download.nvidia.com/opensuse/leap/15.6/', 'nvidia-open-driver-G06-signed-kmp-meta' ],
-  'nvidia_repo_params on the class');
-is($RHEL->legacy_driver_plan(10, gpu_fixture('volta'))->{versionlock}, '*nvidia*580*',
-  'legacy_driver_plan on the class');
+is($SUSE->repo_url('15.6'), 'https://download.nvidia.com/opensuse/leap/15.6/',
+  'repo_url on the class');
+
+#### Sources and their selection (karr #33)
+
+{
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { };
+
+  # sources only read facts: with them injected, no host is needed
+  my %facts = ( kernel => '6.1.0-test', arch => 'amd64' );
+  is_deeply([ map { $_->{name} } $DEB->new(%facts, release => '12.11')->sources ],
+    [ 'debian-nonfree', 'nvidia-cuda-repo' ], 'Debian: non-free, then the CUDA repo');
+  is_deeply([ map { $_->{branch} } $DEB->new(%facts, release => $_->[0])->sources ],
+    [ $_->[1], undef ], "Debian $_->[0]: non-free is branch ".($_->[1] // 'unknown'))
+    for [ '11.11', 470 ], [ '12.11', 535 ], [ '13.1', 550 ], [ '14.0', undef ], [ 'forky/sid', undef ];
+  like(($DEB->new(%facts, release => '14.0')->sources)[1]{unavailable},
+    qr/only covers Debian 12 and 13, not release '14.0'/, 'Debian 14: CUDA repo unavailable, says why');
+  is_deeply([ map { $_->{name} } $UBU->new(%facts, release => '24.04')->sources ],
+    [ 'ubuntu-server', 'ubuntu-server-open', 'ubuntu-server-580' ], 'Ubuntu: order');
+  is_deeply([ map { $_->{name} } $RHEL->new(%facts, release => '9.6')->sources ],
+    [ 'cuda-open-dkms', 'cuda-580-dkms' ], 'RHEL: order');
+  is_deeply([ map { $_->{name} } $SUSE->new(%facts, release => '16.0')->sources ],
+    [ 'nvidia-gfx-G07-open', 'nvidia-gfx-G06' ], 'Leap 16: order');
+  is_deeply([ map { $_->{name} } $SUSE->new(%facts, release => '15.6')->sources ],
+    [ 'nvidia-gfx-G06-open', 'nvidia-gfx-G06' ], 'Leap 15: order');
+
+  # gpu / gpus
+  is_deeply($DEB->new(gpu => gpu_fixture('ada'))->gpus, [ gpu_fixture('ada') ], 'gpu => [gpu]');
+  is_deeply($DEB->new(gpu => undef)->gpus, [], 'gpu => undef => no GPU');
+  ok(!eval { $DEB->new(gpu => gpu_fixture('ada'), gpus => [ gpu_fixture('ada') ]); 1 },
+    'gpu and gpus together croak');
+  ok(!eval { $DEB->new(gpus => gpu_fixture('ada')); 1 }, 'gpus not an arrayref croaks');
+
+  # the requirement is the intersection
+  my $req = $UBU->new(gpus => [ gpu_fixture('ada'), gpu_fixture('blackwell') ])->requirement;
+  is($req->describe, 'open kernel module, driver branch 570 or newer', 'Ada + Blackwell => open, 570+');
+  like($req->who, qr/RTX 4000 SFF Ada.*, .*RTX 5090/, '... naming both GPUs');
+  is($UBU->new->requirement->describe, 'any kernel module, any driver branch', 'no GPU => no constraint');
+  ok(!eval { $UBU->new(gpus => [ gpu_fixture('volta'), gpu_fixture('b200') ])->requirement; 1 },
+    'V100 + B200: building the requirement dies');
+  like($@, qr/^No single NVIDIA driver supports all GPUs on this host: .*B200.* needs the open kernel module, but .*V100.* needs the proprietary one\. Nothing was changed on the host/,
+    '... naming both GPUs, without a Perl file/line');
+
+  # a subclass reorders its sources: a GPU without constraints takes the new first
+  {
+    package My::Ubuntu::Pinned;
+    use Moo;
+    extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+    sub sources { my ( $self ) = @_; return reverse $self->SUPER::sources }
+  }
+  my $plan = My::Ubuntu::Pinned->new(%facts, os => 'Ubuntu', release => '24.04')->plan;
+  is($plan->{source}{name}, 'ubuntu-server-580', 'subclass sources: its order wins');
+  is_deeply($plan->{packages}, [ 'linux-headers-6.1.0-test', 'linux-headers-generic', 'nvidia-driver-580-server' ],
+    '... and its package lands after the kernel headers');
+
+  # a requirement passed to new(): no candidate on RHEL / Leap dies, listing each
+  my $R = 'Rex::GPU::NVIDIA::Requirement';
+  ok(!eval {
+    $RHEL->new(%facts, os => 'Redhat', release => '9.6',
+      requirement => $R->new(kernel_module => 'proprietary', min_branch => 590))->plan; 1 },
+    'RHEL, proprietary 590+: no source fits');
+  like($@, qr/^No NVIDIA driver source on this Redhat 9\.6 host fits NVIDIA GPU \(proprietary kernel module, driver branch 590 or newer\) -- cuda-open-dkms: open kernel module, the proprietary one is needed; cuda-580-dkms: branch 580 is older than 590\. Nothing was changed on the host/,
+    '... every candidate with its reason');
+  ok(!eval {
+    $SUSE->new(%facts, os => 'SuSE', release => '16.0',
+      requirement => $R->new(kernel_module => 'open', max_branch => 580))->plan; 1 },
+    'Leap 16, open up to 580: no source fits');
+  like($@, qr/nvidia-gfx-G07-open: installs the newest branch it carries, which can be newer than 580; nvidia-gfx-G06: proprietary kernel module, the open one is needed/,
+    '... the newest-branch source never passes a max bound');
+}
 
 done_testing;

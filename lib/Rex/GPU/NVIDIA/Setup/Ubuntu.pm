@@ -8,110 +8,129 @@ use namespace::autoclean;
 
 extends 'Rex::GPU::NVIDIA::Setup::Apt';
 
-=method plan
+=method kernel_packages
 
-Adds C<linux-headers-generic> and one driver package, which is also the one
-verified:
+The apt layer's running-kernel headers, plus C<linux-headers-generic>.
+
+=cut
+
+sub kernel_packages {
+  my ( $self ) = @_;
+  return ( $self->SUPER::kernel_packages, 'linux-headers-generic' );
+}
+
+=method sources
+
+Ubuntu's own C<-server> driver packages, in this order; each installs one
+package, which is also the one verified:
 
 =over
 
-=item * Pre-Turing (Maxwell/Pascal/Volta): C<nvidia-driver-580-server>
-(L</legacy_driver_package>), proprietary, no other branch substituted;
-C<< $plan->{legacy_package} >> is set so L</prepare_source> checks its
-candidate.
-
-=item * Blackwell: the newest C<nvidia-driver-NNN-server-open> that
-C<apt-cache search> finds, else C<nvidia-driver-570-server-open>.
-
-=item * Every other GPU: the newest C<nvidia-driver-NNN-server> (C<-open>
+=item * C<ubuntu-server> -- the newest C<nvidia-driver-NNN-server>
+(proprietary kernel module) that C<apt-cache search> finds (C<-open>
 filtered out), else C<nvidia-driver-570-server>.
 
+=item * C<ubuntu-server-open> -- the newest
+C<nvidia-driver-NNN-server-open> (open kernel module), else
+C<nvidia-driver-570-server-open>.
+
+=item * C<ubuntu-server-580> -- C<nvidia-driver-580-server>, proprietary,
+branch 580 exactly. Its installation candidate is checked after
+C<apt-get update> (L</prepare_source>); no other branch is substituted.
+
 =back
+
+Before the search, the first two count as "newest branch, at least 580":
+580 is in the archive of every supported release, so they fit a GPU that
+needs 570 or 580 or newer but never one that stops at 580. The search
+(L</resolve_source>) then gives the exact branch, which is checked again: an
+empty search falls back to 570, which a GPU needing 580 or newer rejects.
+
+So a GPU without constraints (Turing to Hopper, no GPU) gets
+C<ubuntu-server>, Blackwell C<ubuntu-server-open>, Maxwell/Pascal/Volta
+C<ubuntu-server-580>.
 
 Never C<nvidia-smi>: on 24.04 it is a virtual package with no installation
 candidate, and the driver metapackage pulls it in anyway.
 
 =cut
 
-sub plan {
+# 580 is published for jammy and noble (Launchpad, source
+# nvidia-graphics-drivers-580-server, checked 2026-09-23: 580.178.04 on both,
+# next to 590 and 595). The apt-cache search runs in plan, against the index
+# of the last `apt-get update` -- stale on a fresh host (karr #35).
+sub sources {
   my ( $self ) = @_;
-  my $plan = $self->SUPER::plan;
-  push @{ $plan->{packages} }, 'linux-headers-generic';
-
-  # Blackwell-architecture silicon (B200/GB200, GeForce RTX 50xx, RTX PRO
-  # Blackwell, the GB10 / DGX Spark) ships with NO proprietary kernel module
-  # -- only the -open variant binds, on x86_64 as on arm64 (karr
-  # #14/#15/#16). Keyed on the PCI device ID only; any other GPU, or none,
-  # keeps -server.
-  #
-  # Pre-Turing (Maxwell/Pascal/Volta, e.g. V100) (karr #26): the newest
-  # -server is a branch that no longer supports them, so pin the last one
-  # that does, proprietary. Its candidate is checked after apt-get update --
-  # fail loud, never a silent fallback to another branch.
-  my $legacy_pkg = $self->legacy_driver_package($self->gpu);
-  if ($legacy_pkg) {
-    Rex::Logger::info("  Pre-Turing GPU — pinning the proprietary $legacy_pkg");
-    push @{ $plan->{packages} }, $legacy_pkg;
-    $plan->{legacy_package} = $legacy_pkg;
-  }
-  else {
-    my $open = $self->_needs_open_kernel_module($self->gpu);
-    if ($open) {
-      Rex::Logger::info('  Blackwell-class GPU on '.$self->arch.' — selecting the open-kernel-module driver');
+  return (
+    {
+      name            => 'ubuntu-server',
+      kernel_module   => 'proprietary',
+      branch_at_least => 580,
+      search          => '^nvidia-driver-[0-9].*-server$',
+      fallback        => 'nvidia-driver-570-server'
+    },
+    {
+      name            => 'ubuntu-server-open',
+      kernel_module   => 'open',
+      branch_at_least => 580,
+      search          => '^nvidia-driver-[0-9].*-server-open$',
+      fallback        => 'nvidia-driver-570-server-open'
+    },
+    {
+      name            => 'ubuntu-server-580',
+      kernel_module   => 'proprietary',
+      branch          => 580,
+      packages        => [ 'nvidia-driver-580-server' ],
+      verify          => [ 'nvidia-driver-580-server' ],
+      check_candidate => 'nvidia-driver-580-server'
     }
-    my $search_pattern = $open
-      ? '^nvidia-driver-[0-9].*-server-open$'
-      : '^nvidia-driver-[0-9].*-server$';
-    my $latest = $self->run_cmd("apt-cache search '$search_pattern' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
-      auto_die => 0);
-    chomp $latest if $latest;
-    unless ($open) {
-      # Filter out *-open variants from auto-detect (use regular server driver)
-      $latest = undef if $latest && $latest =~ /-open$/;
-    }
-    push @{ $plan->{packages} },
-      ($latest || ($open ? 'nvidia-driver-570-server-open' : 'nvidia-driver-570-server'));
-  }
+  );
+}
 
-  # The driver package actually chosen, e.g. nvidia-driver-590-server(-open)
-  $plan->{verify} = [ $plan->{packages}[-1] ];
-  return $plan;
+=method resolve_source
+
+For a source with a C<search> pattern: runs C<apt-cache search> (read-only)
+for the newest matching package, else takes the C<fallback>, and returns the
+source with that one package and the branch in its name.
+
+=cut
+
+sub resolve_source {
+  my ( $self, $source ) = @_;
+  return $source unless defined $source->{search};
+  my $latest = $self->run_cmd("apt-cache search '$source->{search}' 2>/dev/null | sort -t- -k3 -n | tail -1 | awk '{print \$1}'",
+    auto_die => 0);
+  chomp $latest if $latest;
+  # Filter out *-open variants from auto-detect (use regular server driver)
+  $latest = undef if $latest && $source->{kernel_module} ne 'open' && $latest =~ /-open$/;
+  my $pkg = $latest || $source->{fallback};
+  my ($branch) = $pkg =~ /^nvidia-driver-(\d+)-server/;
+  return {
+    %$source,
+    packages => [ $pkg ],
+    verify   => [ $pkg ],
+    defined $branch ? ( branch => $branch ) : ()
+  };
 }
 
 =method prepare_source
 
-After the apt layer's C<apt-get update>, for a pinned pre-Turing package:
-dies unless C<apt-cache policy> shows an installation candidate for it. No
-other branch is substituted and nothing has been installed yet.
+After the apt layer's C<apt-get update>, for a source with
+C<check_candidate> (C<ubuntu-server-580>): dies unless C<apt-cache policy>
+shows an installation candidate for it. No other branch is substituted and
+nothing has been installed yet.
 
 =cut
 
 sub prepare_source {
   my ( $self, $plan ) = @_;
   $self->SUPER::prepare_source($plan);
-  my $legacy_pkg = $plan->{legacy_package} or return;
-  my $policy = $self->run_cmd("LC_ALL=C apt-cache policy $legacy_pkg 2>/dev/null", auto_die => 0);
-  die "$legacy_pkg has no installation candidate on this ".$self->os." host — it is the "
+  my $pinned = $plan->{source} && $plan->{source}{check_candidate} or return;
+  my $policy = $self->run_cmd("LC_ALL=C apt-cache policy $pinned 2>/dev/null", auto_die => 0);
+  die "$pinned has no installation candidate on this ".$self->os." host — it is the "
     . "newest driver that supports this pre-Turing GPU and no other branch is "
     . "substituted; no driver was installed\n"
     unless $self->_apt_candidate_present($policy);
-}
-
-=method legacy_driver_package
-
-  my $pkg = $self->legacy_driver_package($gpu);
-
-Pure. C<nvidia-driver-580-server> (the proprietary package: the C<-open>
-variant does not support these chips) for a pre-Turing GPU, C<undef> for
-every other. A Kepler-or-older GPU never gets here: L</plan> rejected it.
-
-=cut
-
-sub legacy_driver_package {
-  my ( $self, $gpu ) = @_;
-  my $legacy = $self->_legacy_requirement($gpu);
-  return unless $legacy;
-  return "nvidia-driver-$legacy->{max_branch}-server";
 }
 
 1;

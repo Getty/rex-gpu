@@ -21,6 +21,11 @@ use lib "$Bin/lib";
 # was changed" message after the nvidia-smi probe and before any other host
 # interaction.
 #
+# Several GPUs (karr #33): install_driver(gpus => [...]) must emit exactly
+# what the most constrained GPU gets alone, and a V100 next to a B200 or a K80
+# anywhere must die after the probe only. Every "no driver source fits" case
+# must die with only read-only probes before it.
+#
 # NOT covered -- none of this runs without a real GPU host, and a green prove
 # is NOT evidence that a driver installs:
 #   * what the remote shell does with a command string (pipes, sed, awk,
@@ -48,7 +53,7 @@ sub driver_on {
 }
 
 subtest 'fixtures come from the real lspci parser' => sub {
-  for my $name (qw( ada blackwell volta kepler )) {
+  for my $name (qw( ada blackwell volta kepler b200 b300 )) {
     my $gpu = gpu_fixture($name);
     is($gpu->{compute}, 1, "$name is compute");
     like($gpu->{device_id}, qr/^[0-9a-f]{4}$/, "$name has a device id");
@@ -190,7 +195,8 @@ golden_is(
 );
 
 # Blackwell on a Debian release NVIDIA has no CUDA repo for: dies before any
-# host change.
+# host change. Since karr #33 the message is the no-source-fits one, listing
+# each candidate; the CUDA-repo reason still names the supported releases.
 {
   my $rec = driver_on(host_profile('debian-12', release => '11.11'), gpu_fixture('blackwell'));
   like($rec->{error}, qr/NVIDIA's CUDA repo only covers Debian 12 and 13/,
@@ -198,6 +204,86 @@ golden_is(
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [],
     'debian-11 + RTX 5090: only read-only probes before the die');
   golden_is($rec, 'driver/debian-11--blackwell');
+}
+
+#### Several GPUs on one host (karr #33)
+#
+# install_driver(gpus => [...]) chooses for the intersection of all GPUs'
+# requirements. A mixed host gets exactly what its most constrained GPU gets
+# alone -- same transcript, command for command -- and GPUs that cannot share
+# a driver die after the nvidia-smi probe, before anything else.
+
+sub driver_for {
+  my ( $host, @names ) = @_;
+  return record_host(
+    host => $host,
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpus => [ map { gpu_fixture($_) } @names ]) }
+  );
+}
+
+for my $os (host_names()) {
+  my %single = map { $_ => driver_on(host_profile($os), gpu_fixture($_)) } qw( ada blackwell volta );
+  for my $case ([ [qw( ada ada )], 'ada' ], [ [qw( ada blackwell )], 'blackwell' ],
+                [ [qw( blackwell ada )], 'blackwell' ], [ [qw( ada volta )], 'volta' ]) {
+    my ( $pair, $as ) = @$case;
+    my $rec = driver_for(host_profile($os), @$pair);
+    is($rec->{error}, $single{$as}{error}, "$os + ".join('+', @$pair).": dies/lives like $as alone");
+    is_deeply($rec->{lines}, $single{$as}{lines}, "$os + ".join('+', @$pair).": same commands as $as alone");
+  }
+
+  my $rec = driver_for(host_profile($os), qw( volta b200 ));
+  like($rec->{error}, qr/^No single NVIDIA driver supports all GPUs on this host: GB100 \[B200\] \(Blackwell, 10de:2901\) needs the open kernel module, but GV100GL \[Tesla V100 PCIe 16GB\] \(Maxwell\/Pascal\/Volta, 10de:1db4\) needs the proprietary one\. Nothing was changed on the host/,
+    "$os + V100+B200 dies naming both GPUs");
+  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], "$os + V100+B200: only the nvidia-smi probe ran");
+
+  $rec = driver_for(host_profile($os), qw( ada kepler ));
+  like($rec->{error}, qr/GK210GL \[Tesla K80\].*Kepler or older.*Nothing was changed on the host/,
+    "$os + Ada+K80: a Kepler anywhere in the list is rejected");
+  is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], "$os + Ada+K80: only the nvidia-smi probe ran");
+}
+
+golden_is(driver_for(host_profile('ubuntu-24.04'), qw( ada blackwell )),
+  'driver/ubuntu-24.04--ada+blackwell');
+golden_is(driver_for(host_profile('ubuntu-24.04'), qw( ada volta )),
+  'driver/ubuntu-24.04--ada+volta');
+golden_is(driver_for(host_profile('ubuntu-24.04'), qw( volta b200 )),
+  'driver/ubuntu-24.04--volta+b200');
+
+# gpu => stays an alias of a one-element gpus =>; both at once die untouched
+is_deeply(driver_for(host_profile('debian-12'), 'ada')->{lines},
+  driver_on(host_profile('debian-12'), gpu_fixture('ada'))->{lines}, 'gpus => [ada] is gpu => ada');
+is_deeply(driver_for(host_profile('debian-12'))->{lines},
+  driver_on(host_profile('debian-12'), undef)->{lines}, 'gpus => [] is no GPU');
+{
+  my $rec = record_host(host => host_profile('debian-12'), code => sub {
+    Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada'), gpus => [ gpu_fixture('ada') ]) });
+  like($rec->{error}, qr/^install_driver: pass gpu or gpus, not both$/, 'gpu and gpus together die');
+  is_deeply($rec->{lines}, [], '... before any host interaction');
+}
+
+#### No source fits: dies before any host change, listing every candidate
+
+{
+  # Debian without a CUDA repo, Blackwell and V100 (non-free branch unknown)
+  my $rec = driver_on(host_profile('debian-13', release => '14.0'), gpu_fixture('blackwell'));
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], 'debian-14 + RTX 5090: only read-only probes');
+  golden_is($rec, 'driver/debian-14--blackwell');
+
+  $rec = driver_on(host_profile('debian-13', release => '14.0'), gpu_fixture('volta'));
+  like($rec->{error}, qr/debian-nonfree: driver branch not known, 580 or older is needed/,
+    'debian-14 + V100: non-free has no known branch there');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
+  golden_is($rec, 'driver/debian-14--volta');
+
+  # Ubuntu, B300 (580 or newer), apt-cache search empty: the 570 fallback of
+  # -server-open is resolved and rejected, the pinned 580 is proprietary.
+  $rec = driver_on(host_profile('ubuntu-24.04', responses => [
+    [ qr{^apt-cache search } => '', 0 ]
+  ]), gpu_fixture('b300'));
+  like($rec->{error}, qr/ubuntu-server-open: branch 570 is older than 580/,
+    'ubuntu-24.04 + B300, empty search: the resolved fallback is rejected');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
+  golden_is($rec, 'driver/ubuntu-24.04--b300--empty-search');
 }
 
 #### The harness itself

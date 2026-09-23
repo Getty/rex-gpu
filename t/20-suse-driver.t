@@ -11,15 +11,22 @@ use Test::More;
 # the G07 meta package (the correct leap/15.x/ + G06 branch was unreachable).
 # The major must be derived from the raw operating_system_release() string.
 #
-# _suse_nvidia_repo_params($raw_release) is pure (regex only, no run/zypper), so
-# it is unit-testable offline. The zypper I/O stays in _install_driver_suse and
-# is NOT exercised here — see the t/10-detect.t header: install_driver on a real
-# distro node is a maintainer step, a green prove is not evidence it works.
+# The selection lives in Rex::GPU::NVIDIA::Setup::SUSE->sources (karr #33; it
+# was _suse_nvidia_repo_params before). With the release injected into new()
+# it reads nothing from the host, so it is unit-testable offline. The first
+# source is the one a GPU without constraints (and no GPU) gets. The zypper
+# I/O is NOT exercised here -- see the t/10-detect.t header: install_driver on
+# a real distro node is a maintainer step, a green prove is not evidence it
+# works.
 # -----------------------------------------------------------------------------
 
 use Rex::GPU::NVIDIA;
 
-sub params { Rex::GPU::NVIDIA::_suse_nvidia_repo_params(@_) }
+sub params {
+  my ( $release ) = @_;
+  my ( $first ) = Rex::GPU::NVIDIA::Setup::SUSE->new(release => $release)->sources;
+  return ( $first->{repo_url}, $first->{packages}[0] );
+}
 
 subtest 'Leap 15.6 => leap/15.6 repo + G06 meta' => sub {
   my ($repo, $meta) = params('15.6');

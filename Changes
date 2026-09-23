@@ -1,6 +1,18 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - gpu_setup hands every CUDA-capable NVIDIA GPU to install_driver (new
+    option gpus => [...]; gpu => $one still works) and installs one driver
+    that fits all of them: an Ada next to a B200 gets the open driver, an
+    Ada next to a V100 the proprietary 580 one. GPUs that cannot share a
+    driver (a V100 next to a B200) or a Kepler anywhere make install_driver
+    and gpu_setup die before the host is changed, naming the GPUs.
+    Rex::Rancher's gpu => 1 gets this without a change there. Each distro's
+    Setup class tries an ordered list of driver sources and installs the
+    first that fits; if none does it dies untouched, listing each source and
+    why it was rejected (e.g. a V100 on a Debian release other than
+    11/12/13, whose non-free branch is not known). Not hardware-verified
+    (karr #33)
   - install_driver now runs through new Setup classes (experimental API:
     Rex::GPU::NVIDIA::Setup; the apt layer ::Setup::Apt with ::Setup::Debian
     / ::Setup::Ubuntu, the rpm layer ::Setup::Rpm with ::Setup::RHEL /
@@ -22,9 +34,10 @@ Revision history for Rex-GPU
   - New Rex::GPU::NVIDIA::Requirement (experimental API): which kernel
     module (open/proprietary/either) and driver branch range a GPU needs,
     looked up by PCI device ID in a table a subclass can extend, with
-    satisfied_by and an intersect that dies on a multi-GPU conflict. The
-    driver install does not use it yet; driver selection is unchanged
-    (karr #30)
+    satisfied_by/why_not (exact branches and "newest, at least N" sources)
+    and an intersect that dies on a multi-GPU conflict. install_driver
+    chooses the driver with it. GB10 (DGX Spark) needs branch 580 or newer:
+    NVIDIA lists it first in 580.119.02 (karr #30, #33)
   - install_driver on Debian also enables contrib/non-free/non-free-firmware
     in deb822 /etc/apt/sources.list.d/*.sources (debian.sources: Debian 13,
     Debian cloud images), adding only missing components to Debian archive
