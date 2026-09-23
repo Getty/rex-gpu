@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-23T19:28:28Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T19:28:28Z
+created: 2026-09-23T17:22:59Z
+id: 32
+priority: medium
+started: 2026-09-23T19:22:02Z
+status: done
+title: 'T3: RHEL + SUSE in Setup-Klassen verschoben (Teil von #25)'
+updated: 2026-09-23T19:28:28Z
+---
+
+Siehe Epic #25 (Architektur, Migrationsschritte, Entscheidungen). T0-T3 und T5 verhaltensneutral bzw. rein additiv; Golden-Sequenzen aus T0 muessen exakt passen.
+
+Hinweise aus T2: RHEL liest uname -m erst nach EPEL/crb -> arch nicht frueh lazy lesen (Golden). Pre-Turing module enable/versionlock gehoeren in prepare_source (koennen sterben). SUSE rpm -e-Purge = Host-Aenderung -> prepare_host. Danach _blacklist_nouveau in NVIDIA.pm loeschen (Duplikat); reboot/verify evtl. nach post_install, wenn der Zyklus NVIDIA.pm<->Setup (verify_nvidia) geloest ist. setup_class_for_os liest is_debian/operating_system jetzt vor nvidia-smi -L (nur Lesezugriff).
