@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-09-23T03:03:51Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-23T03:03:51Z
+created: 2026-09-23T02:09:30Z
+id: 18
+priority: low
+started: 2026-09-23T02:53:19Z
+status: done
+tags:
+- nvidia
+- driver
+- debian
+- research
+title: 'Verifizieren: waehlt Debians nvidia-driver-Metapaket bei Blackwell automatisch
+  open-Module? (non-Ubuntu-Zweig)'
+updated: 2026-09-23T03:03:51Z
+---
+
+NVIDIA.pm:349-354 (Debian-Nicht-Ubuntu-Zweig von _install_driver_debian): push \@packages, 'nvidia-driver', 'nvidia-smi'; -- kein apt-cache-Autodetect, keine -open/-server-Unterscheidung wie im Ubuntu-Zweig. Da dieselbe RTX/Quadro-Namens-Heuristik (Detect.pm:151, siehe #16) denselben Pfad auf Debian-Hosts erreicht, ist ungeklaert, ob Debians nvidia-driver-Metapaket auf trixie GPU-abhaengig automatisch die offenen Module zieht oder immer die proprietaeren installiert. Vor jeder Code-Aenderung: gegen echte Debian-Paketmetadaten/-Policy verifizieren (Recherche, kein Hardware-Test noetig), ob das ueberhaupt ein eigenstaendiges Problem ist -- Verdacht, kein bestaetigter Bug.
+
+Herkunft: Audit-Auftrag zur #14/#15-Fehlerklasse, Kandidat 3.
+
+Recherche: ECHTER BUG, release-unabhaengig. Debian bookworm 535, trixie/sid 550 -- Blackwell braucht >=570 und open-Module; wiki.debian.org: 'no Debian-packaged version supports Blackwell'. nvidia-driver waehlt per Dependency-Alternative immer nvidia-kernel-dkms (proprietaer); nvidia-open-kernel-dkms zu ergaenzen hilft NICHT (zu alt). Fix: fuer Blackwell auf Debian NVIDIAs CUDA-apt-Repo (cuda-keyring debian12|debian13 / x86_64|sbsa) + nvidia-driver-cuda nvidia-kernel-open-dkms; Paketname nvidia-driver kollidiert mit Debian, Verify muss das tatsaechlich installierte Paket pruefen, kein Mischen mit Debian-non-free. Gate auf Blackwell-Signal aus #16, Nicht-Blackwell bleibt beim Debian-Pfad. Umsetzung nach #16.
