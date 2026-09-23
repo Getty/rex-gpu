@@ -146,8 +146,8 @@ golden_is(
   'driver/debian-13--ada--nonfree-enabled'
 );
 
-# Both formats on one host: the classic sed runs unchanged, then the deb822
-# file (Hetzner mirror) is rewritten; a third-party .sources file is read but
+# Both formats on one host: sources.list is rewritten first, then the deb822
+# file (Hetzner mirror); a third-party .sources file is read but
 # not written, and a name apt ignores is not even read.
 golden_is(
   driver_on(host_profile('debian-12', responses => [
@@ -161,6 +161,32 @@ golden_is(
       . "Signed-By: /usr/share/keyrings/hashicorp-archive-keyring.gpg", 0 ]
   ]), gpu_fixture('ada')),
   'driver/debian-12--ada--both-formats'
+);
+
+# Classic sources.list as the bookworm installer writes it (karr #40): "main
+# non-free-firmware" must not pass for non-free -- contrib non-free are
+# appended to the deb lines; deb-src, the commented cdrom line and a
+# third-party line are written back unchanged.
+golden_is(
+  driver_on(host_profile('debian-12', responses => [
+    [ 'cat /etc/apt/sources.list 2>/dev/null' =>
+        "#deb cdrom:[Debian GNU/Linux 12.11.0 _Bookworm_]/ bookworm contrib main non-free-firmware\n"
+      . "deb http://deb.debian.org/debian/ bookworm main non-free-firmware\n"
+      . "deb-src http://deb.debian.org/debian/ bookworm main non-free-firmware\n"
+      . "deb http://security.debian.org/debian-security bookworm-security main non-free-firmware\n"
+      . "deb http://deb.debian.org/debian/ bookworm-updates main non-free-firmware\n"
+      . "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com bookworm main", 0 ]
+  ]), gpu_fixture('ada')),
+  'driver/debian-12--ada--installer-sources'
+);
+
+# Classic sources.list already complete: read, not rewritten (no file: line).
+golden_is(
+  driver_on(host_profile('debian-12', responses => [
+    [ 'cat /etc/apt/sources.list 2>/dev/null' =>
+        "deb http://deb.debian.org/debian bookworm main contrib non-free non-free-firmware", 0 ]
+  ]), gpu_fixture('ada')),
+  'driver/debian-12--ada--nonfree-enabled'
 );
 
 # Blackwell on a Debian release NVIDIA has no CUDA repo for: dies before any

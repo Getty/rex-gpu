@@ -92,7 +92,8 @@ my %HOST = (
     os => 'Debian', release => '12.11',
     responses => [
       [ 'uname -r' => '6.1.0-37-amd64', 0 ],
-      # classic one-line sources.list without non-free: the sed fires
+      # classic one-line sources.list, main only: rewritten with every
+      # component added (the same text the pre-#40 sed produced)
       [ 'cat /etc/apt/sources.list 2>/dev/null' =>
           "deb http://deb.debian.org/debian bookworm main\n"
         . "deb http://deb.debian.org/debian bookworm-updates main\n"
