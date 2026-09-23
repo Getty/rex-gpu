@@ -48,6 +48,10 @@ The verified target set is the RKE2 Linux family above. **openSUSE Leap / SLES i
 
 GPUs tested include the **NVIDIA RTX 4000 SFF Ada Generation** (PCI class `0302`, datacenter compute profile).
 
+### MIG (A100 / H100 / B200)
+
+The CDI spec captures the MIG layout as it was when the spec was generated. Neither the static `/etc/cdi/nvidia.yaml` nor the `nvidia-cdi-refresh` unit regenerates it when MIG is reconfigured. After changing MIG mode or instances, regenerate the spec: run `systemctl restart nvidia-cdi-refresh.service`, or on hosts without that unit, `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`. The MIG strategy that Kubernetes exposes (`single` / `mixed`) is configured in the NVIDIA device plugin or GPU Operator, which writes its own CDI spec. MIG has not been tested on hardware with Rex::GPU.
+
 ## Requirements
 
 This module requires [Rex::LibSSH](https://metacpan.org/pod/Rex::LibSSH) (or SFTP) on the connection backend. Hetzner servers don't enable SFTP by default:
