@@ -198,13 +198,6 @@ Revision history for Rex-GPU
     and an intersect that dies on a multi-GPU conflict. install_driver
     chooses the driver with it. GB10 (DGX Spark) needs branch 580 or newer:
     NVIDIA lists it first in 580.119.02 (karr #30, #33)
-  - install_driver on Debian also enables contrib/non-free/non-free-firmware
-    in deb822 /etc/apt/sources.list.d/*.sources (debian.sources: Debian 13,
-    Debian cloud images), adding only missing components to Debian archive
-    stanzas (*.debian.org, Hetzner's /debian/ mirror, the cloud mirror+file
-    list; third-party sources untouched). Such hosts used to get no non-free,
-    so nvidia-driver had no candidate and the install died. Warns if no
-    Debian archive entry is recognised. Not hardware-verified (karr #36)
   - install_driver keeps pre-Turing GPUs (Maxwell/Pascal/Volta: V100, P100,
     P40, M60, ...; 10de:1340-1DF6) on the proprietary 580 branch, their last
     one: Ubuntu nvidia-driver-580-server (dies if apt has no candidate),
