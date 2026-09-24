@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T00:25:14Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T00:25:14Z
+created: 2026-09-23T02:57:36Z
+id: 23
+priority: low
+started: 2026-09-24T00:01:40Z
+status: done
+title: HGX B200/GB200 mit NVSwitch brauchen nvidia-fabricmanager
+updated: 2026-09-24T00:25:14Z
+---
+
+Aus #16: Multi-GPU-HGX-Systeme (NVSwitch) brauchen nvidia-fabricmanager (Version passend zum Treiber) + laufenden Dienst, sonst bleiben GPUs im Init-Zustand. Heute nicht installiert. Scope-Entscheidung: erkennen (NVSwitch-PCI-Device) und installieren, oder nur dokumentieren.
+
+ENTSCHEIDUNG Maintainer 2026-09-24: NVSwitch per lspci erkennen, dann nvidia-fabricmanager passend zum Treiber-Branch installieren + Dienst aktivieren; ohne NVSwitch unveraendert.
