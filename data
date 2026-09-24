@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T01:35:16Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:35:16Z
+created: 2026-09-24T00:25:26Z
+id: 51
+priority: low
+started: 2026-09-24T01:33:32Z
+status: done
+title: 'Detect.pm POD: detect() nennt nur nvidia/amd -- nvswitch-Key fehlt in der
+  Rueckgabe-Beschreibung'
+updated: 2026-09-24T01:35:16Z
+---
+
+Merge-Rest aus #23/#46: "Returns a hashref with nvidia and amd array refs" / "both arrays are empty" -- Beispiel und Folgeabsatz dokumentieren nvswitch bereits. Reiner POD-Fix.
+
+Erledigt in fa3d17a: Detect.pm + GPU.pm POD nennen alle drei Keys. Rest: Satz 'The key is additive; nvidia and amd are unchanged.' liest sich wie Changelog -- bei Gelegenheit streichen.
