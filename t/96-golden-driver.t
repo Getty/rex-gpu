@@ -35,7 +35,8 @@ use lib "$Bin/lib";
 #     `|| true`, `$(...)` are recorded verbatim, never evaluated);
 #   * whether a recorded package exists / installs / DKMS-builds on the real
 #     release, or the module binds after the nouveau reboot;
-#   * install_driver(reboot => 1) (_reboot_and_wait sleeps and reconnects);
+#   * install_driver(reboot => 1) here (t/41-reboot.t covers the emitted
+#     shutdown and the reconnect loop with a scripted connection);
 #   * the host outputs are hand-written stand-ins (uname -r, apt-cache search,
 #     rpm -q ...), not captures from real hosts.
 # -----------------------------------------------------------------------------
