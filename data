@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-24T00:01:19Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T00:01:19Z
+created: 2026-09-23T17:42:08Z
+id: 39
+priority: medium
+started: 2026-09-23T23:51:45Z
+status: done
+title: 'Rocky/Alma mit lsb_release: Rex liefert ''Rocky'', is_redhat kennt es nicht
+  -> Unsupported OS; echtes RHEL: epel-release ohne Candidate'
+updated: 2026-09-24T00:01:19Z
+---
+
+Aus T0 (#29): (a) Rex 1.16 gibt bei installiertem lsb_release operating_system=Rocky zurueck, Rex is_redhat-Liste enthaelt es nicht -> install_driver stirbt Unsupported OS. Ggf. Upstream-Rex-Problem -> Ticket dort? (b) Auf echtem RHEL (nicht Rocky/Alma) hat pkg epel-release keinen Candidate, Rex::Pkg stirbt. Beides nicht in der Golden-Matrix.
