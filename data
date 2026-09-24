@@ -1,0 +1,15 @@
+---
+claimed_at: 2026-09-24T00:01:15Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T00:01:15Z
+created: 2026-09-23T20:26:51Z
+id: 44
+priority: low
+started: 2026-09-23T23:51:41Z
+status: done
+title: 'RHEL-Toolkit: .repo per curl -s -L ohne -f -- HTTP-Fehlerseite landet in /etc/yum.repos.d'
+updated: 2026-09-24T00:01:15Z
+---
+
+Aus dem Toolkit-Fix (k37/k38): _install_toolkit_redhat holt die nvidia-container-toolkit.repo mit curl -s -L ohne -f; bei HTTP-Fehler wird die Fehlerseite als .repo geschrieben und dnf bricht spaeter kryptisch ab. Fix: -f + Pruefung, dass eine [nvidia-container-toolkit]-Sektion drin ist.
