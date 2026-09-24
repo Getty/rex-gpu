@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T04:22:44Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:22:44Z
+created: 2026-09-24T04:11:35Z
+id: 61
+priority: medium
+started: 2026-09-24T04:14:56Z
+status: done
+title: README.md erwaehnt NVIDIA-vGPU-Gastererkennung (k24) nirgends
+updated: 2026-09-24T04:22:44Z
+---
+
+Seit k24 erkennt gpu_detect NVIDIA-vGPU-Gaeste (Azure NVadsA10 v5, AWS G6f, ...) ueber (device_id, subsystem_id) und install_driver/gpu_setup sterben vor jeder Host-Aenderung, wenn kein funktionierender (lizenzierter GRID-)Treiber bereits laeuft -- ein Verhalten, das genau die Deploy-Zielgruppe (Cloud-GPU-VMs) betrifft. README.md (Projekt-Wurzel) beschreibt die Pipeline, unterstuetzte Distros, HGX/Fabric-Manager (eigener Abschnitt) und die eigene Setup-Klasse, aber 'vgpu'/'vGPU' kommt im gesamten Dokument kein einziges Mal vor (grep -ni vgpu README.md -> leer). Ein Nutzer, der gpu_setup auf einer Azure-/AWS-vGPU-Instanz aufruft, erfaehrt aus dem README nichts von diesem Abbruchverhalten. Fix: kurzer Abschnitt analog zum bestehenden 'NVSwitch / HGX (Fabric Manager)'-Abschnitt, der zusammenfasst was lib/Rex/GPU.pm (=method gpu_setup, ab Zeile 106) bereits gut beschreibt. Nicht code-aendernd, reine Doku; kein rex-gpu-worker noetig, kann direkt am README gemacht werden (README ist laut CLAUDE.md nicht behavior-relevant).
+
+Erledigt in 3953362.
