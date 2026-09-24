@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-09-24T16:06:33Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T16:06:33Z
+created: 2026-09-24T03:44:04Z
+id: 56
+priority: low
+started: 2026-09-24T15:48:36Z
+status: done
+title: 'HGX B200/B300: Fabric Manager + NVLSM + OFED automatisch installieren (Folge
+  von #49)'
+updated: 2026-09-24T16:06:33Z
+---
+
+Voraussetzung: dokumentierter, versionierter nvlsm-Installationsweg pro Distro (Ubuntu 22.04/24.04, RHEL 9/10); nvlink5 ab 610 Dummy bzw. auf RHEL 9 fehlend. Umfang: FM exakt Treiberversion (wie k23), nvlsm, libibumad3, infiniband-diags (oder MOFED) per run + dpkg/rpm-Verify, nie pkg; Dienstreihenfolge; Kernel>=5.17-Politik; k49-Warnung durch echten Check ersetzen. Abnahme nur auf echter B200/B300 (Fabric State Completed). Nicht enthalten: GB200/GB300-IMEX.
+
+Recherche 2026-09-24 (Primaerquellen, nicht auf Hardware; Volltext scratchpad k56-research.md): Alte Befunde bestaetigt (nvlink5 ab 610 Dummy auf Ubuntu/Debian, fehlt RHEL 9/10; nvlsm nur CUDA-Repo 2025.12.211; kein Ersatz-Meta; nicht in DOCA/Ubuntu-Archiv). Neu: nvlsm hat keinen eigenen Dienst -- nvidia-fabricmanager-start.sh erkennt NVL5 (SW_MNG-VPD + ibstat) und startet nvlsm vor nv-fabricmanager, FM bleibt also Pflicht. NVIDIA (gpu-driver-container 39e0cfd) pinnt nvlsm+infiniband-diags NICHT an den Treiber, nur FM exakt+versionlock; nvlink5-Metas setzten nur Untergrenze (nvlsm>=2025.10.14). FM-Namen: Ubuntu nvidia-fabricmanager-570/575, ab 580 nvidia-fabricmanager; RHEL 9 nvidia-fabric-manager (570/575), ab 580 nvidia-fabricmanager; ab 620 RHEL *-direct angekuendigt. OFED: Inbox reicht laut Guide (Ubuntu libibumad3+infiniband-diags+linux-modules-extra; RHEL libibumad+infiniband-diags), ib_umad muss geladen sein. Verify: nvidia-smi -q Fabric State Completed. Kernel>=5.17 nicht per uname pruefbar (RHEL 9.6/9.8 5.14 offiziell supported; Ubuntu 22.04 nur mit HWE). Dokumentiert versioniert nur 570-595 via nvlink5[-NNN]; 610+ nur 'latest nvlsm' (Container-Code, nicht Doku). Haken: Rex::GPU-Ubuntu-Pfad nutzt Ubuntu-Archiv, dort kein nvlsm -> CUDA-Repo noetig. FM-Guide hat Fehler (nvlink-570, Skriptname, Pfade).
+
+Maintainer-Entscheidung 2026-09-24: (1) nvlsm + infiniband-diags unversioniert 'latest' (wie NVIDIA gpu-driver-container), nur FM exakt Treiberversion. (2) Ubuntu: CUDA-Repo NUR auf B200/B300-Hosts zusaetzlich einbinden (fuer nvlsm), Treiberpfad sonst unveraendert Ubuntu-Archiv.
+
+Maintainer 2026-09-24: Umsetzung jetzt ohne Hardware (Abnahme spaeter). Kernel-Regel: kein harter Stopp; Warnung wenn Kernel < 5.17 und nicht RHEL-Familie. k49-Warnung ersetzen durch echten Check (nvidia-smi -q Fabric State nach Start); bei Fehlschlag nur laute Warnung, verify bleibt ok / Setup bricht nicht ab.
+
+Umgesetzt in 4ba51cf (nicht gepusht, nicht auf Hardware). Maintainer: Plan-Die fuer openSUSE/Ubuntu 26.04/arm64/RHEL 8 mit B200/B300 ok; Retrofit fuegt kein Repo hinzu (bleibt so). Abnahme auf echter B200/B300 offen.
