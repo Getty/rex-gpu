@@ -1,0 +1,15 @@
+---
+claimed_at: 2026-09-24T04:24:51Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:24:51Z
+created: 2026-09-24T04:14:41Z
+id: 65
+priority: medium
+started: 2026-09-24T04:15:14Z
+status: done
+title: '_reboot_and_wait: Reconnect-Probe prueft nur, dass run nicht stirbt (NVIDIA.pm:1412)'
+updated: 2026-09-24T04:24:51Z
+---
+
+my $test = eval { run 'echo ok', auto_die => 0; 'ok' }; liefert immer das Literal 'ok', nicht die Ausgabe von run. Die Pruefung beweist nur, dass run nicht gestorben ist, nicht dass der Befehl auf dem wieder gestarteten Host lief. Fix + Test (Reboot-Test aus dem Kern-Test-Ticket).
