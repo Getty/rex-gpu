@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T16:11:14Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T16:11:14Z
+created: 2026-09-24T14:49:02Z
+id: 67
+priority: low
+started: 2026-09-24T16:08:20Z
+status: done
+title: 'Doc: gpu_setup dies are not strictly before any host change'
+updated: 2026-09-24T16:11:14Z
+---
+
+Found downstream in rex-rancher k25 (fixed there in 0b97665). lib/Rex/GPU.pm POD (~lines 90-125, HEAD 26f0adf) says several die paths (unsupported Debian release, V100+B200 mix, vGPU guest in install_driver, Debian 11/openSUSE) happen "before the host is changed" / "before anything on the host is changed". Not strictly true:
+- gpu_detect -> Detect::_ensure_lspci installs pciutils when lspci is missing, before any die in plan.
+- Dies in resolve_plan (source missing only visible after an index refresh, e.g. Ubuntu with no fitting driver package / nvidia-driver-580-server without candidate) come after prepare_host/prepare_source: unattended-upgrades + apt-daily stopped, contrib/non-free enabled (Debian), cuda-keyring + repo + apt-get update; RHEL EPEL/CRB, CUDA repo, dnf module enable/versionlock; SUSE rpm -e of existing nvidia*/libnvidia* + zypper addrepo.
+Accurate wording already exists: Setup/Ubuntu.pm "dies before any driver package is installed", plan POD "known without a refreshed package index". Align GPU.pm POD with that (before any driver package is installed; at most pciutils, or prepared package sources for index-dependent dies). Doc only; verify against current source first.
+
+Erledigt in e412eac: nur Doku (GPU.pm POD, README, Changes).
