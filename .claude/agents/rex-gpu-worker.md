@@ -50,6 +50,11 @@ dpkg lock, a cold host where nouveau has not been unloaded yet.
   it breaks the whole point. AMD is detect-only by decision — no driver path without a
   ticket that says to build one.
 
+- **Hardware data is not your lane.** Generation rows, compute name rules, NVSwitch and
+  NVLink-platform IDs and the vGPU table belong to `rex-gpu-hardware-curator`, which
+  researches and cites NVIDIA's sources for each row. If your change needs a row that does
+  not exist, report that to the dispatcher and don't add one from memory.
+
 - **Check the karr board before you "discover" a limitation.** Known gaps and deliberate
   choices (AMD unsupported, the `linux-headers-$arch` avoidance, the openSUSE lock) are
   recorded. Rediscovering one and writing a fresh analysis is wasted work; record genuinely
@@ -63,7 +68,9 @@ prove -lr t/          # -r matters: helpers live in t/lib, goldens in t/golden
 
 A green suite means the modules compile, the pure selection logic holds and the emitted
 commands match `t/golden/` (regenerate only on purpose: `REX_GPU_GOLDEN_UPDATE=1`, then
-explain every changed golden) — nothing more. It cannot see a wrong
+explain every changed golden) — nothing more. Goldens your change moves are yours, in the
+same commit; new coverage, regression scaffolding and harness changes belong to
+`rex-gpu-test-writer` — ask the dispatcher for it rather than growing `t/` yourself. The suite cannot see a wrong
 package name, a broken version branch or a mis-ordered pipeline, because none of that runs
 without a real GPU host. Never report a green `prove` as evidence that a
 detection or install change works; say plainly that it was not exercised against hardware,

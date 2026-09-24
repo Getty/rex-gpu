@@ -18,6 +18,8 @@ principle and lane are in `.claude/rules/rex-gpu-rules.md`.
 | Task | Agent |
 |---|---|
 | Implement / refactor / debug anything under `lib/` | `rex-gpu-worker` (default) |
+| New tests, regression tests, failure-path coverage, golden harness | `rex-gpu-test-writer` |
+| New GPU / driver branch / NVIDIA support list: generation rows, name rules, NVSwitch/NVLink IDs, vGPU table | `rex-gpu-hardware-curator` |
 | Pre-release audit | `rex-gpu-release-checker` |
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main agent

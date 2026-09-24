@@ -32,6 +32,8 @@ Depends on whether the Agent/Task tool is available to you.
   | Task | Agent |
   |---|---|
   | Implement / refactor / debug anything under `lib/` | `rex-gpu-worker` (default) |
+  | New tests, regression tests, failure-path coverage, golden harness | `rex-gpu-test-writer` |
+  | New GPU / driver branch / NVIDIA support list: generation rows, name rules, NVSwitch/NVLink IDs, vGPU table | `rex-gpu-hardware-curator` |
   | Pre-release audit | `rex-gpu-release-checker` |
 
 - **You cannot spawn subagents** (you ARE a `rex-gpu-*` agent): The delegation lock does not
