@@ -1,0 +1,19 @@
+---
+claimed_at: 2026-09-24T04:23:22Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:23:22Z
+created: 2026-09-24T04:14:37Z
+id: 64
+priority: medium
+started: 2026-09-24T04:15:09Z
+status: done
+title: 'Offline-Tests fuer Distro-Fehlerpfade: RHEL10 versionlock, EL8 powertools,
+  Debian cuda-keyring, k50-Fehlerpfade, leere dnf/zypper-Ausgabe, vGPU-Slot-Randfaelle,
+  gen-vgpu-types.pl'
+updated: 2026-09-24T04:23:22Z
+---
+
+Aus Coverage-Audit 2026-09-24: RHEL.pm:329-330, RHEL.pm:258-260 (kein rocky-8-Golden), Debian.pm:199-200, Setup.pm:959-961/977/920, Apt.pm:139/217-219/239-240, Rpm.pm:104-106, RHEL.pm:305 + SUSE.pm:249 leere Ausgabe, Detect.pm:254/285/311, maint/gen-vgpu-types.pl ohne Test.
+
+Erledigt in feb377d: t/96-golden-driver-distro-failures.t, t/93/t/94 erweitert, xt/author/gen-vgpu-types.t (dzil test fuehrt xt vermutlich nicht aus). Keine Bugs gefunden.
