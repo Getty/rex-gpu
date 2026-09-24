@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-24T00:05:45Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T00:05:45Z
+created: 2026-09-24T00:01:27Z
+id: 46
+priority: high
+started: 2026-09-24T00:01:58Z
+status: done
+title: 'gpu_detect stirbt auf Rocky/Alma mit lsb_release: pkg/is_installed pciutils
+  ueber Rex::Pkg'
+updated: 2026-09-24T00:05:45Z
+---
+
+Aus #39: Detect.pm ~100 ruft pkg ["pciutils"] unless is_installed("pciutils") -- beides geht ueber Rex::Pkg->get, das bei OS-Namen Rocky/RockyLinux/AlmaLinux/CentOSStream mit "OS/Provider not supported" stirbt. Folge: gpu_setup und Rancher gpu => 1 sterben auf solchen Hosts trotz #39-Fix. Fix: wie install_helpers in Setup::RHEL (dnf install -y + rpm -q) bzw. can_run lspci pruefen.
