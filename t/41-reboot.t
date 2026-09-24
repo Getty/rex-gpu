@@ -21,7 +21,8 @@ use lib "$Bin/lib";
 #     verification -- no `modprobe nvidia` (the reboot loads the module);
 #   * a host whose driver already works is not rebooted;
 #   * _reboot_and_wait sleeps 20 s, then reconnects every 5 s; a reconnect
-#     that dies is not "back", one that succeeds and runs the probe is;
+#     that dies is not "back", one that succeeds and whose `echo ok` prints
+#     an `ok` line is; empty or other probe output is not (karr #65);
 #   * after 60 failed reconnects it dies with "did not come back" and never
 #     ran the probe.
 #
@@ -136,6 +137,52 @@ subtest 'never comes back: dies after 60 tries' => sub {
   is_deeply($rec->{lines}, [ $SHUTDOWN ], 'the reboot command only -- the probe never ran');
   is($conn->{reconnects}, 60, '60 reconnects');
   is_deeply($slept, [ 20, (5) x 60 ], '20 s, then 60 x 5 s');
+};
+
+#### The probe's output counts, not that run() returned (karr #65)
+#
+# A reconnect that succeeds but whose `echo ok` prints nothing (sshd accepts
+# the session before the host can run commands) is not "back".
+
+subtest 'probe prints nothing: not back, keeps waiting' => sub {
+  my ( $rec, $conn, $slept ) = reboot_on(
+    host => host_profile('debian-12', responses => [ [ 'echo ok' => '', 0 ] ]),
+    code => sub { Rex::GPU::NVIDIA::_reboot_and_wait() }
+  );
+  like($rec->{error}, qr/^Host did not come back after reboot$/, 'dies with "did not come back"');
+  is(scalar(grep { $_ eq 'run: echo ok' } @{ $rec->{lines} }), 60, 'probed after each of the 60 reconnects');
+  ok(!(grep { $_->[1] =~ /back online/ } @{ $rec->{logs} }), 'never reported back online');
+};
+
+subtest 'probe prints nothing twice, then ok: back on the third try' => sub {
+  my $n = 0;
+  my ( $rec, $conn, $slept ) = reboot_on(
+    host => host_profile('debian-12', responses => [
+      [ 'echo ok' => sub { ++$n <= 2 ? ( '', 0 ) : ( "ok", 0 ) } ]
+    ]),
+    code => sub { Rex::GPU::NVIDIA::_reboot_and_wait() }
+  );
+  is($rec->{error}, undef, 'no die');
+  is($conn->{reconnects}, 3, 'three reconnects');
+  is_deeply($slept, [ 20, 5, 5 ], 'waited after the two empty probes');
+};
+
+subtest 'probe answers ok from a PTY (ok\\r\\n) or after other lines: back' => sub {
+  for my $out ("ok\r\n", "Last login: today\nok") {
+    my ( $rec ) = reboot_on(
+      host => host_profile('debian-12', responses => [ [ 'echo ok' => $out, 0 ] ]),
+      code => sub { Rex::GPU::NVIDIA::_reboot_and_wait() }
+    );
+    is($rec->{error}, undef, 'back for '.join('', map { sprintf('%%%02x', ord) } split //, $out));
+  }
+};
+
+subtest 'probe output that only contains ok is not ok' => sub {
+  my ( $rec ) = reboot_on(
+    host => host_profile('debian-12', responses => [ [ 'echo ok' => 'bash: echo: broken pipe', 1 ] ]),
+    code => sub { Rex::GPU::NVIDIA::_reboot_and_wait() }
+  );
+  like($rec->{error}, qr/did not come back/, 'an error message is not the probe answering');
 };
 
 done_testing;

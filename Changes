@@ -1,6 +1,13 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver(reboot => 1) (and so gpu_setup(reboot => 1)) counts the
+    host as back after the reboot only when `echo ok` over the new
+    connection prints ok. Before, any reconnect whose run() did not die
+    counted, even with empty output, so the driver check could run against
+    a host that was not up yet; now such a try waits 5 s and retries, and
+    60 of them die with "Host did not come back after reboot".
+    Not hardware-verified (karr #65)
   - gpu_detect recognises NVIDIA vGPU guest devices (Azure NVadsA10 v5, AWS
     G6f, ...) by PCI device and subsystem ID, read with a read-only
     `lspci -vmmnn -d 10de:` on hosts with an NVIDIA GPU: each NVIDIA GPU

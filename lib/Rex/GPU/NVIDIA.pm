@@ -67,7 +67,9 @@ Options:
 
 If true, the host is rebooted immediately after driver installation.
 The function waits up to 5 minutes for the host to come back (polling
-every 5 seconds via SSH reconnect), then continues with verification.
+every 5 seconds via SSH reconnect; the host counts as back once
+C<echo ok> run over the new connection prints C<ok>), then continues with
+verification.
 Default: C<0>.
 
 Rebooting is required on the first deployment when the C<nouveau>
@@ -1410,9 +1412,10 @@ sub _reboot_and_wait {
     eval { $conn->disconnect() };
     eval { $conn->reconnect() };
     unless ($@) {
-      # Verify we can actually run a command
-      my $test = eval { run "echo ok", auto_die => 0; "ok" };
-      if (defined $test && $test =~ /ok/) {
+      # Verify we can actually run a command: its output, not just that run
+      # returned (karr #65); a PTY session answers "ok\r"
+      my $test = eval { run "echo ok", auto_die => 0 };
+      if (defined $test && $test =~ /^ok\r?$/m) {
         Rex::Logger::info("  Host is back online (after ~" . ($i * 5 + 20) . "s)");
         $back = 1;
         last;
