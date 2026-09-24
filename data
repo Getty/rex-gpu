@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T01:36:12Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:36:12Z
+created: 2026-09-24T00:01:31Z
+id: 47
+priority: low
+started: 2026-09-24T01:33:28Z
+status: done
+title: 'RHEL-Treiberpfad: dnf config-manager --add-repo Exit-Code wird ignoriert'
+updated: 2026-09-24T01:36:12Z
+---
+
+Aus #44: Setup::RHEL fuegt das CUDA-Repo per dnf config-manager --add-repo hinzu (schreibt bei HTTP-Fehler nichts), der Exit-Code wird aber ignoriert -- Fehler zeigt sich erst als "nvidia-driver not installed after dnf install". Fix: Exit-Code pruefen, frueh und klar sterben.
+
+Erledigt in 643d229: add-repo mit 2>&1, Exit-Code geprueft, die mit URL+dnf-Ausgabe vor jeder Paketinstallation. 24 RHEL-Goldens bewusst regeneriert (nur Redirect), neuer Golden rocky-9--ada--add-repo-failed. Nicht auf Hardware: normaler Lauf, Lauf mit blockiertem developer.download.nvidia.com, Re-Run auf Rocky 9. Nebeneffekt: fehlt dnf-plugins-core, stirbt es jetzt hier statt spaeter.
