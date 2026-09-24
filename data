@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T04:26:52Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:26:52Z
+created: 2026-09-24T04:24:56Z
+id: 66
+priority: low
+started: 2026-09-24T04:25:06Z
+status: done
+title: 'configure_containerd: unbekannter Runtime-Name wird ohne nvidia-container-runtime
+  still akzeptiert'
+updated: 2026-09-24T04:26:52Z
+---
+
+Aus #63: configure_containerd prueft can_run vor dem Runtime-Namen. Auf einem Host ohne nvidia-container-runtime wird containerd_config => 'bogus' (Tippfehler) stillschweigend angenommen statt zu sterben. Fix: Namen zuerst validieren (rke2|k3s|containerd|none). Ist in t/31-containerd-write.t so festgehalten -> Test bewusst umstellen.
+
+Erledigt in 26f0adf (gepusht): configure_containerd validiert zuerst (rke2|k3s|containerd), gpu_setup frueh vor Detektion (+none). Rancher uebergibt nur rke2/k3s.
