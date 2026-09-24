@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T01:43:24Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:43:24Z
+created: 2026-09-24T01:36:17Z
+id: 52
+priority: low
+started: 2026-09-24T01:36:32Z
+status: done
+title: 'SUSE: zypper addrepo Exit-Code wird ignoriert (Treiber + Toolkit)'
+updated: 2026-09-24T01:43:24Z
+---
+
+Aus #47: Setup/SUSE.pm:172 und NVIDIA.pm:932 fuehren 'zypper addrepo ... 2>/dev/null' aus und ignorieren den Exit-Code. Nicht 1:1 wie #47: zypper addrepo scheitert (vermutlich) auch, wenn der Alias schon existiert -> Re-Runs muessen erst 'zypper lr ALIAS' pruefen bzw. den Fall unterscheiden. Unverifiziert, erst auf einem Leap-Host/Container klaeren.
+
+Erledigt in 0161409: Setup::SUSE->add_repo (rr, addrepo 2>&1, refresh 2>&1; die bei addrepo-Fehler; bei refresh-Fehler Eintrag wieder entfernen + die). Treiber und Toolkit nutzen es. Container-verifiziert (leap 15.6/16.0): addrepo einer Base-URL kontaktiert Server nicht -> Fehler erst im refresh (exit 4); gleicher Alias exit 4; zypp-Lock exit 7; kaputtes aktives Repo -> jede spaetere zypper install exit 106. Nicht auf GPU-Hardware.
