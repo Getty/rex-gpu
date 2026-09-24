@@ -78,6 +78,30 @@ golden_is(
   'toolkit/leap-15.6--install-failed'
 );
 
+# karr #52: the toolkit repo host does not resolve -- addrepo succeeds (it
+# does not contact the server), the refresh exits 4: the entry is removed
+# again and it dies before zypper install.
+{
+  my $url = 'https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64';
+  my $rec = toolkit_on(host_profile('leap-15.6', responses => [
+    [ 'zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>&1' =>
+        "Retrieving repository 'nvidia-container-toolkit' metadata [.error]\nRepository 'nvidia-container-toolkit' is invalid.\n[nvidia-container-toolkit|$url] Failed to retrieve new repository metadata.\nHistory:\n - [|] Error trying to read from '$url'\n - Download (curl) error for '$url/content':\n   Error code: Connection failed\n   Error message: Could not resolve host: nvidia.github.io\nSkipping repository 'nvidia-container-toolkit' because of the above error.\nCould not refresh the repositories because of errors.", 4 ]
+  ]));
+  like($rec->{error}, qr{^zypper refresh of repository nvidia-container-toolkit \(\Q$url\E\) failed \(exit 4\): .*Could not resolve host.*removed again; nothing was installed from it}s,
+    'leap-15.6: toolkit refresh fails => dies with alias, URL and zypper output');
+  is_deeply([ grep { /zypper install / } @{ $rec->{lines} } ], [], '... before zypper install');
+  golden_is($rec, 'toolkit/leap-15.6--refresh-failed');
+}
+{
+  my $rec = toolkit_on(host_profile('leap-16.0', responses => [
+    [ qr{^zypper addrepo --refresh } =>
+        "Adding repository 'nvidia-container-toolkit' [...error]\nRepository named 'nvidia-container-toolkit' already exists. Please use another alias.", 4 ]
+  ]));
+  like($rec->{error}, qr{^zypper addrepo of repository nvidia-container-toolkit \(.*\) failed \(exit 4\): .*already exists}s,
+    'leap-16.0: toolkit addrepo fails (rr could not remove the alias) => dies');
+  is_deeply([ grep { / refresh |zypper install / } @{ $rec->{lines} } ], [], '... no refresh, no install');
+}
+
 # ... and zypper's exit code is not the evidence: a non-zero exit with the
 # package installed (the harness's rpm -q default) passes.
 {

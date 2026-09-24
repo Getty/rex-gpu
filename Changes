@@ -1,6 +1,13 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver and install_container_toolkit on openSUSE Leap die when
+    zypper cannot add or refresh NVIDIA's GFX / container toolkit
+    repository (e.g. an HTTP error, an unresolvable host, the zypp lock),
+    naming alias, URL and zypper's output, before any package is installed.
+    A repository that fails its refresh is removed again instead of being
+    left enabled. Re-runs still replace an existing entry. Not
+    hardware-verified (karr #52)
   - install_driver on RHEL/Rocky/Alma/CentOS dies when dnf config-manager
     --add-repo cannot add NVIDIA's CUDA repository (e.g. an HTTP error on
     the .repo URL), naming the URL and dnf's output, before any driver

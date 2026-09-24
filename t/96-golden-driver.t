@@ -170,6 +170,46 @@ golden_is(
   'driver/leap-15.6--ada--install-failed'
 );
 
+# openSUSE (karr #52): the GFX repo URL answers 404. zypper addrepo of a base
+# URL does not contact the server (exit 0, checked in opensuse/leap:15.6 and
+# 16.0 containers), the refresh fails (exit 4) -- the entry is removed again
+# and it dies naming alias, URL and zypper's output, before any install.
+{
+  my $url = 'https://download.nvidia.com/opensuse/leap/15.6/';
+  my $rec = driver_on(host_profile('leap-15.6', responses => [
+    [ 'zypper --gpg-auto-import-keys refresh nvidia-gfx 2>&1' =>
+        "Retrieving repository 'nvidia-gfx' metadata [.error]\nRepository 'nvidia-gfx' is invalid.\n[nvidia-gfx|$url] Failed to retrieve new repository metadata.\nHistory:\n - [nvidia-gfx|$url] Repository type can't be determined.\nPlease check if the URIs defined for this repository are pointing to a valid repository.\nSkipping repository 'nvidia-gfx' because of the above error.\nCould not refresh the repositories because of errors.", 4 ]
+  ]), gpu_fixture('ada'));
+  like($rec->{error}, qr{^zypper refresh of repository nvidia-gfx \(\Q$url\E\) failed \(exit 4\): .*is invalid.*removed again; nothing was installed from it}s,
+    'leap-15.6 + Ada, GFX refresh fails: dies with alias, URL and zypper output');
+  my @lines = @{ $rec->{lines} };
+  is_deeply([ grep { / install |addlock|dracut/ } @lines ], [], '... no install after the failed refresh');
+  like($lines[-1], qr{^run: zypper rr nvidia-gfx }, '... and the broken entry is removed again');
+  golden_is($rec, 'driver/leap-15.6--ada--refresh-failed');
+}
+
+# ... addrepo itself fails (the zypp lock held by another process, exit 7):
+# dies there, no refresh, no install.
+{
+  my $rec = driver_on(host_profile('leap-16.0', responses => [
+    [ qr{^zypper addrepo --refresh } =>
+        "System management is locked by the application with pid 4242 (zypper).\nClose this application before trying again.", 7 ]
+  ]), gpu_fixture('ada'));
+  like($rec->{error}, qr{^zypper addrepo of repository nvidia-gfx \(https://download\.nvidia\.com/opensuse/leap/16\.0/\) failed \(exit 7\): System management is locked.*; nothing was installed from it}s,
+    'leap-16.0 + Ada, addrepo fails: dies with alias, URL and zypper output');
+  is_deeply([ grep { / install | refresh / } @{ $rec->{lines} } ], [], '... no refresh, no install');
+  golden_is($rec, 'driver/leap-16.0--ada--addrepo-failed');
+}
+
+# ... a re-run: the existing alias is removed before addrepo, which would
+# otherwise exit 4 ("Repository named 'nvidia-gfx' already exists").
+for my $os (qw( leap-15.6 leap-16.0 )) {
+  my @lines = @{ driver_on(host_profile($os), gpu_fixture('ada'))->{lines} };
+  my ($rr)  = grep { $lines[$_] =~ /^run: zypper rr nvidia-gfx / } 0..$#lines;
+  my ($add) = grep { $lines[$_] =~ /^run: zypper addrepo / } 0..$#lines;
+  ok(defined $rr && defined $add && $rr < $add, $os.': zypper rr nvidia-gfx precedes addrepo');
+}
+
 # ... the meta package is there but no package provides the kmp it requires.
 golden_is(
   driver_on(host_profile('leap-16.0', responses => [

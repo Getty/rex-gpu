@@ -161,16 +161,63 @@ sub prepare_host {
 =method prepare_source
 
 (Re-)adds NVIDIA's GFX repository as C<nvidia-gfx> by its base URL (zypper
-cannot parse the yum C<.repo> files) and refreshes it, importing its key.
+cannot parse the yum C<.repo> files) and refreshes it, importing its key --
+see L</add_repo>, which dies before any driver package is installed if the
+repository cannot be added or refreshed.
 
 =cut
 
 sub prepare_source {
   my ( $self, $plan ) = @_;
   Rex::Logger::info('  Adding NVIDIA GFX repo (Leap '.$self->release.'): '.$plan->{repo_url});
-  $self->run_cmd('zypper rr nvidia-gfx 2>/dev/null || true', auto_die => 0);
-  $self->run_cmd('zypper addrepo --refresh '.$plan->{repo_url}.' nvidia-gfx 2>/dev/null', auto_die => 0);
-  $self->run_cmd('zypper --gpg-auto-import-keys refresh nvidia-gfx 2>/dev/null', auto_die => 0);
+  $self->add_repo('nvidia-gfx', $plan->{repo_url});
+}
+
+=method add_repo
+
+  $setup->add_repo('nvidia-gfx', 'https://download.nvidia.com/opensuse/leap/15.6/');
+
+Replaces the zypper repository C<ALIAS> with one for C<URL>: C<zypper rr
+ALIAS> (a missing alias is fine), C<zypper addrepo --refresh URL ALIAS>,
+then C<zypper --gpg-auto-import-keys refresh ALIAS>. An existing entry is
+always replaced, never kept, so a re-run -- or a host upgraded to a Leap
+release with another URL -- ends up with this URL.
+
+B<Dies> if C<addrepo> exits non-zero (after the C<rr> that happens only for
+a real error, e.g. the zypp lock held by another process, exit 7), naming
+alias, URL, exit code and zypper's output. C<addrepo> of a base URL does not
+contact the server, so an HTTP error or an unresolvable host shows only in
+the C<refresh> (exit 4, "Repository ... is invalid"): then the entry just
+added is removed again -- an enabled, broken repository would make every
+later zypper command on the host exit 106 -- and it dies the same way.
+Used by L<Rex::GPU::NVIDIA/install_container_toolkit> too.
+
+=cut
+
+sub add_repo {
+  my ( $self, $alias, $url ) = @_;
+  # karr #52: both exit codes used to be ignored. rr first keeps re-runs from
+  # tripping over addrepo's "already exists" (exit 4).
+  $self->run_cmd('zypper rr '.$alias.' 2>/dev/null || true', auto_die => 0);
+  my $out = $self->run_cmd('zypper addrepo --refresh '.$url.' '.$alias.' 2>&1', auto_die => 0);
+  $self->_die_zypper_repo('addrepo', $alias, $url, $out) if $? != 0;
+  $out = $self->run_cmd('zypper --gpg-auto-import-keys refresh '.$alias.' 2>&1', auto_die => 0);
+  return if $? == 0;
+  my $exit = $?;
+  $self->run_cmd('zypper rr '.$alias.' 2>/dev/null || true', auto_die => 0);
+  $? = $exit;
+  $self->_die_zypper_repo('refresh', $alias, $url, $out);
+}
+
+sub _die_zypper_repo {
+  my ( $self, $step, $alias, $url, $out ) = @_;
+  my $exit = $? >> 8;
+  $out //= '';
+  $out =~ s/\s+\z//;
+  die 'zypper '.$step.' of repository '.$alias.' ('.$url.') failed (exit '.$exit.')'
+    .(length $out ? ': '.$out : '')
+    .($step eq 'refresh' ? '; the repository was removed again' : '')
+    ."; nothing was installed from it\n";
 }
 
 =method install_packages

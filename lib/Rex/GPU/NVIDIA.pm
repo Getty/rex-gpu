@@ -509,7 +509,12 @@ replaces C</etc/yum.repos.d/nvidia-container-toolkit.repo> only when it
 contains the C<[nvidia-container-toolkit]> section; a failed download (e.g.
 an HTTP error) or a file without that section dies and leaves an existing
 C<.repo> as it was. On openSUSE Leap the base repository
-URL is added directly (zypper cannot parse RPM C<.repo> files directly).
+URL is added directly (zypper cannot parse RPM C<.repo> files directly) and
+refreshed, replacing any existing C<nvidia-container-toolkit> entry; a
+failed C<zypper addrepo> or C<refresh> (e.g. an HTTP error or an
+unresolvable host, which only the refresh reveals) dies before
+C<zypper install>, and a repository that fails its refresh is removed again
+(L<Rex::GPU::NVIDIA::Setup::SUSE/add_repo>).
 
 The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
 through L<Rex::Commands::Pkg/pkg>, and the result is checked with C<dpkg -l>
@@ -926,13 +931,11 @@ sub _install_toolkit_suse {
   chomp $arch;
   $arch ||= 'x86_64';
 
-  run "zypper rr nvidia-container-toolkit 2>/dev/null || true", auto_die => 0;
   run "rpm --import https://nvidia.github.io/libnvidia-container/gpgkey 2>/dev/null",
     auto_die => 0;
-  run "zypper addrepo --refresh https://nvidia.github.io/libnvidia-container/stable/rpm/$arch nvidia-container-toolkit 2>/dev/null",
-    auto_die => 0;
-  run "zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>/dev/null",
-    auto_die => 0;
+  # karr #52: rr + addrepo + refresh, dying on a failed addrepo or refresh.
+  Rex::GPU::NVIDIA::Setup::SUSE->add_repo('nvidia-container-toolkit',
+    "https://nvidia.github.io/libnvidia-container/stable/rpm/$arch");
 
   # zypper's exit code is not the evidence (karr #27): rpm -q is, as on RHEL.
   run "zypper install -y nvidia-container-toolkit", auto_die => 0;
