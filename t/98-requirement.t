@@ -13,8 +13,8 @@ use Test::More;
 #   * intersect: either/min/max combine, conflicts croak naming both sides;
 #     conflicts() returns the same reasons without dying
 #   * a subclass overriding `generations` adds a row without touching the base
-#   * the Blackwell / Blackwell Ultra rows make a GPU compute in
-#     Detect::_is_nvidia_compute, no other row does (karr #45)
+#   * the compute flag by generation (karr #45, #54): Maxwell .. Blackwell
+#     Ultra rows 1, the Kepler-or-older row 0, no row undef
 #
 # GB10 (2e12) is its own row with min_branch 580, not the Blackwell block's
 # 570 (karr #33): NVIDIA's open-gpu-kernel-modules README and the aarch64
@@ -41,14 +41,15 @@ my $BW      = [ 'Blackwell', 'open', 570, undef ];
 my $BWU     = [ 'Blackwell Ultra', 'open', 580, undef ];
 my $GB10    = [ 'Blackwell', 'open', 580, undef ];
 my $MPV     = [ 'Maxwell/Pascal/Volta', 'proprietary', undef, 580 ];
+my $TAH     = [ 'Turing/Ampere/Ada/Hopper', 'either', undef, undef ];
 my $KEP     = [ 'Kepler or older', 'proprietary', undef, 470 ];
 
 subtest 'generation table at the range boundaries' => sub {
   my %want = (
     '0000' => $KEP, '0020' => $KEP, '102d' => $KEP, '133f' => $KEP,
     '1340' => $MPV, '1db4' => $MPV, '1DB4' => $MPV, '1df6' => $MPV,
-    '1df7' => $UNKNOWN, '1e02' => $UNKNOWN, '2330' => $UNKNOWN, '28f8' => $UNKNOWN,
-    '28ff' => $UNKNOWN,
+    '1df7' => $TAH, '1e02' => $TAH, '1f97' => $TAH, '2330' => $TAH, '28f8' => $TAH,
+    '28ff' => $TAH,
     '2900' => $BW, '2901' => $BW, '2e11' => $BW, '2e13' => $BW, '2fff' => $BW,
     '2e12' => $GB10, '2E12' => $GB10,
     '3000' => $UNKNOWN, '3181' => $UNKNOWN,
@@ -226,7 +227,8 @@ subtest 'intersect' => sub {
   like( $why[0], qr/^B200 \(Blackwell, 10de:2901\) needs the open kernel module, but Tesla V100/,
     '... module conflict first, naming the GPUs' );
   is( $R->intersect( $b200, $h100 )->who,
-    'B200 (Blackwell, 10de:2901), H100 (10de:2330)', 'who of an intersection lists its members' );
+    'B200 (Blackwell, 10de:2901), H100 (Turing/Ampere/Ada/Hopper, 10de:2330)',
+    'who of an intersection lists its members' );
 
   ok( !eval { $R->intersect; 1 }, 'empty list dies' );
   ok( !eval { $R->intersect( $v100, { kernel_module => 'open' } ); 1 }, 'a hashref dies' );
@@ -250,31 +252,46 @@ subtest 'subclass overrides generations' => sub {
   isa_ok( $h100, 'My::Test::Requirement' );
   is_deeply( shape($h100), [ 'Hopper (site)', 'open', 575, undef ], 'added row wins' );
   is_deeply( shape( My::Test::Requirement->for_device_id('1db4') ), $MPV, 'built-in rows kept' );
-  is_deeply( shape( $R->for_device_id('2330') ), $UNKNOWN, 'base class unaffected' );
+  is_deeply( shape( $R->for_device_id('2330') ), $TAH, 'base class unaffected' );
   isa_ok( My::Test::Requirement->intersect( $h100, $h100 ), 'My::Test::Requirement' );
 };
 
-subtest 'the Blackwell rows make a GPU compute, no other row does' => sub {
-  # karr #45 REPLACES the karr #30 claim "the table never makes a GPU compute"
-  # (maintainer decision: every GPU usable for AI counts). Detect now asks the
-  # table: the Blackwell and Blackwell Ultra rows are compute, the rest not.
-  for my $id (qw( 2900 2901 2c18 2c77 2bb9 2e12 2fff 3182 31c2 31c3 )) {
+subtest 'compute by generation: Maxwell and later 1, Kepler or older 0' => sub {
+  # karr #54 REPLACES the karr #45 claim "the Blackwell rows make a GPU
+  # compute, no other row does" (maintainer decision: every GPU usable for AI
+  # counts, MX/GT/GTX 9xx included, as long as a current driver branch
+  # supports it -- the generation decides, not the name). The flag is now
+  # three-valued: 1 (Maxwell .. Blackwell Ultra), 0 (Kepler or older, skipped
+  # with a warning), undef (no row: the name rules and the unknown default).
+  for my $id (qw( 1340 1380 13c0 174d 1d01 1db4 1df6 1df7 1e02 1f97 2330 28ff
+                  2900 2901 2c18 2c77 2bb9 2e12 2fff 3182 31c2 31c3 )) {
     is( $R->for_device_id($id)->compute, 1, $id.' => table compute 1' );
     is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 1,
       $id.' as VGA "Device" => compute' );
   }
-  for my $id ( qw( 0000 102d 1340 1db4 1df6 1e02 2330 28ff 3000 3181 3183 31c4 ffff ), undef ) {
+  for my $id (qw( 0000 0fc5 1004 102d 128b 133f )) {
+    is( $R->for_device_id($id)->compute, 0, $id.' => table compute 0 (Kepler or older)' );
+    no warnings 'redefine';
+    local *Rex::Logger::info = sub { };
+    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
+      $id.' as VGA "Device" => not compute' );
+  }
+  for my $id ( qw( 3000 3181 3183 31c1 31c4 ffff ), undef ) {
     my $label = $id // 'undef';
-    is( $R->for_device_id($id)->compute, 0, $label.' => table compute 0' );
+    is( $R->for_device_id($id)->compute, undef, $label.' => no row, no verdict (undef)' );
+    no warnings 'redefine';
+    local *Rex::Logger::info = sub { };
     is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
       $label.' as VGA "Device" => not compute (unknown default)' );
   }
   my $b200 = $R->for_device_id('2901');
-  is( $R->intersect( $b200, $b200 )->compute, 0,
+  is( $R->intersect( $b200, $b200 )->compute, undef,
     'an intersected requirement carries no compute flag' );
   # A subclass row changes the driver choice only: Detect reads the base table.
-  is( My::Test::Requirement->for_device_id('2330')->compute, 0,
-    'subclass row without compute => 0' );
+  is( My::Test::Requirement->for_device_id('2330')->compute, undef,
+    'subclass row without compute => no verdict' );
+  is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2330' ), 1,
+    '... Detect still reads the base table (2330 compute)' );
 };
 
 done_testing;

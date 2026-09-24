@@ -234,7 +234,10 @@ any one of the GPUs: the newest driver that supports it is the end-of-life
 470 branch. C<install_driver> B<dies> on every distro before anything on the
 host is changed. A host whose driver was installed by hand (C<nvidia-smi -L>
 lists the GPU and C<libcuda.so.1> is in the linker cache) passes the
-already-installed check above instead.
+already-installed check above instead. L<Rex::GPU/gpu_setup> passes only
+compute GPUs, and detection counts a Kepler as compute only at PCI class
+C<0302> (Tesla K80/K40); a Kepler display card (class C<0300>) is skipped
+there with a warning and never reaches C<install_driver>.
 
 =back
 
@@ -1434,7 +1437,8 @@ GB10), on any CPU architecture: it has no proprietary kernel module. Ubuntu
 selects the C<-server-open> variant. Debian 12/13 installs the open-module set
 from NVIDIA's CUDA repository instead of C<non-free>.
 
-=item * B<Maxwell, Pascal, Volta> (e.g. V100, P100): only the proprietary
+=item * B<Maxwell, Pascal, Volta> (e.g. V100, P100, GeForce GT 1030, GTX
+980): only the proprietary
 module of the 580 branch supports them. Ubuntu pins
 C<nvidia-driver-580-server>, RHEL pins branch 580 (module stream or
 versionlock) with C<kmod-nvidia-latest-dkms>, and openSUSE uses

@@ -6,7 +6,7 @@ GPU detection and driver management for [Rex](https://www.rexify.org/). Automate
 
 The full pipeline, driven by a single `gpu_setup()` call:
 
-1. **GPU detection** — scans PCI devices via `lspci -nn`, identifies NVIDIA and AMD hardware, filters out virtual GPUs (virtio, QEMU, VMware). Only CUDA-capable NVIDIA GPUs (PCI class `0302`) trigger installation.
+1. **GPU detection** — scans PCI devices via `lspci -nn`, identifies NVIDIA and AMD hardware, filters out virtual GPUs (virtio, QEMU, VMware). Only CUDA-capable NVIDIA GPUs trigger installation: every datacenter GPU (PCI class `0302`) and, by the generation read from the PCI device ID, every Maxwell or newer GPU — GeForce MX, GT 1030 and GTX 9xx included. Kepler and older GPUs (last driver branch 470, no longer packaged) are skipped with a warning.
 2. **NVIDIA driver installation** — distribution-appropriate packages via DKMS for kernel-version independence. Blacklists `nouveau`, regenerates initramfs.
 3. **NVIDIA Container Toolkit** — installs from the official NVIDIA repository for all supported distributions.
 4. **CDI spec generation** — writes `/etc/cdi/nvidia.yaml` so the Kubernetes device plugin enumerates GPU resources without privileged containers.

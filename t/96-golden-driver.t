@@ -55,7 +55,7 @@ sub driver_on {
 }
 
 subtest 'fixtures come from the real lspci parser' => sub {
-  for my $name (qw( ada blackwell volta kepler b200 b300 )) {
+  for my $name (qw( ada blackwell volta kepler b200 b300 pascal maxwell )) {
     my $gpu = gpu_fixture($name);
     is($gpu->{compute}, 1, "$name is compute");
     like($gpu->{device_id}, qr/^[0-9a-f]{4}$/, "$name has a device id");
@@ -71,6 +71,25 @@ for my $os (host_names()) {
     golden_is($rec, "driver/$os--$g");
   }
 }
+
+#### Entry-level Pascal / Maxwell (karr #54)
+#
+# A GeForce GT 1030 (Pascal, 10de:1d01) and GTX 980 (Maxwell, 10de:13c0) at
+# class 0300 are compute by generation now. The driver choice reads only the
+# device ID's requirement (proprietary, branch <= 580), so on every OS they
+# must get exactly what the V100 gets -- same transcript, or the same die.
+# Two goldens pin it on Ubuntu 24.04 and Rocky 9.
+
+for my $os (host_names()) {
+  my $volta = driver_on(host_profile($os), gpu_fixture('volta'));
+  for my $g (qw( pascal maxwell )) {
+    my $rec = driver_on(host_profile($os), gpu_fixture($g));
+    is($rec->{error}, $volta->{error}, "$os + $g: dies/lives like volta");
+    is_deeply($rec->{lines}, $volta->{lines}, "$os + $g: same commands as volta");
+  }
+}
+golden_is(driver_on(host_profile('ubuntu-24.04'), gpu_fixture('pascal')), 'driver/ubuntu-24.04--pascal');
+golden_is(driver_on(host_profile('rocky-9'), gpu_fixture('pascal')), 'driver/rocky-9--pascal');
 
 #### Kepler: dies before touching the host, on every OS
 

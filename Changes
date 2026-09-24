@@ -62,15 +62,21 @@ Revision history for Rex-GPU
     Builder is enabled with subscription-manager (a failure only warns);
     `pkg epel-release` had no candidate there. Rocky and Alma without
     lsb_release are unchanged. Not hardware-verified (karr #39)
-  - Detection counts every Blackwell GPU as compute by PCI device ID
-    (10de:2900-2FFF, B300 3182, GB300 31C2/31C3: GeForce RTX 50xx desktop
-    and laptop, RTX PRO Blackwell incl. laptop and Embedded, RTX 6000D),
-    whatever its PCI class, so a host whose stale pci.ids makes lspci print
-    only "Device [10de:2c18]" gets the full gpu_setup pipeline (also via
-    Rex::Rancher gpu => 1) and the same open driver as with a resolved
-    name. The range is the Blackwell rows of
-    Rex::GPU::NVIDIA::Requirement's generation table (new compute flag).
-    Not hardware-verified (karr #21, karr #45)
+  - Detection decides "compute" by GPU generation from the PCI device ID,
+    not by marketing name: every Maxwell or newer NVIDIA GPU is compute
+    (10de:1340 and up to Blackwell Ultra), GeForce MX, GT 1030, GTX 750 Ti
+    and GTX 9xx included, whatever its PCI class and even when a stale
+    pci.ids makes lspci print only "Device [10de:XXXX]". gpu_setup (also
+    via Rex::Rancher gpu => 1) now installs a driver for them: the
+    proprietary 580 branch for Maxwell/Pascal/Volta, as for the V100.
+    Kepler and older (below 10de:1340, last branch 470) are compute => 0
+    with a warning and skipped, so a Kepler display card (GT 710, GTX 780,
+    Quadro K4000, GTX TITAN) never stops the install for a newer GPU; a
+    class-0302 Kepler Tesla (K80) still dies.
+    The verdict is the compute flag of Rex::GPU::NVIDIA::Requirement's
+    generation table (1, 0, or undef where no row covers the ID); name
+    rules apply only to IDs outside the table, unknown stays 0.
+    Not hardware-verified (karr #21, karr #45, karr #54)
   - install_driver counts a driver as installed only if nvidia-smi -L lists
     a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
     a working nvidia-smi but no CUDA library now gets a warning and the

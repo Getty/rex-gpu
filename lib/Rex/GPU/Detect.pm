@@ -266,23 +266,43 @@ sub _is_nvidia_compute {
   # PCI class [0302] = 3D Controller — always compute/datacenter GPU
   return 1 if $pci_class eq '0302';
 
-  # Device-ID generations marked compute in Rex::GPU::NVIDIA::Requirement
-  # (karr #45): Blackwell 2900-2FFF and Blackwell Ultra 3182/31C2-31C3. Every
-  # GPU NVIDIA lists there is RTX/datacenter class (desktop, laptop, embedded,
-  # GB10), and the ID is in lspci output even when a stale pci.ids leaves the
-  # name as "Device" — so the pci.ids version no longer decides. No other
-  # generation is marked; the unknown-model default below stays 0.
-  return 1 if Rex::GPU::NVIDIA::Requirement->for_device_id($device_id)->compute;
+  # The generation decides, not the marketing name (karr #45, #54; maintainer
+  # decision: every GPU usable for AI counts, MX/GT/GTX 9xx included). The
+  # rows of Rex::GPU::NVIDIA::Requirement cover every ID 0000-2FFF plus
+  # Blackwell Ultra: Maxwell .. Blackwell Ultra => 1, Kepler or older => 0.
+  # lspci prints the ID even when a stale pci.ids leaves the name as "Device".
+  my $req = Rex::GPU::NVIDIA::Requirement->for_device_id($device_id);
+  if (defined $req->compute) {
+    return 1 if $req->compute;
+    # Skipped, not died: gpu_setup (and Rex::Rancher's gpu => 1) go on
+    # without a driver on a host whose old card is only a display.
+    Rex::Logger::info('    NVIDIA GPU '.$name.' (10de:'.$req->device_id.') is '
+      .$req->generation.' silicon'
+      .( defined $req->max_branch
+        ? ': it needs driver branch '.$req->max_branch.' or older, which current '
+          .'distributions no longer package'
+        : '' )
+      .' -- skipped, no driver installed', 'warn');
+    return 0;
+  }
 
-  # Known compute-capable families
-  return 1 if $name =~ /\b(RTX|TITAN|Quadro)\b/i;
-  return 1 if $name =~ /\bGTX\s*(1[0-9]\d{2}|16\d{2})\b/i;
-  return 1 if $name =~ /\b(Tesla|[AHLVP]\d{1,3}[GSi]?)\b/;
-
-  # Non-compute GPUs
-  return 0 if $name =~ /\bMX\s*\d/i;
-  return 0 if $name =~ /\b(GT\s*\d|GTS\s*\d|NVS\s*\d)/i;
-  return 0 if $name =~ /\bGTX\s*[2-9]\d{2}\b/i;
+  # Name rules: reached only for an ID no generation row covers (0x3000 and
+  # up, bar Blackwell Ultra: silicon newer than the table) or no ID at all.
+  # Each one names only products of Maxwell or later: checked against every
+  # name in NVIDIA's supportedchips lists (615.71.09), no Kepler-or-older
+  # product matches. pci.ids names a few Kepler IDs like later products
+  # (0FC5 "GK107 [GeForce GT 1030]", 11C7 "GK106 [GeForce GTX 750 Ti]", GK107
+  # "...-A1" samples) -- the Kepler row catches those by ID before this. No
+  # negative rules: anything else is the unknown default below, 0 either way.
+  return 1 if $name =~ /\bRTX\b/i;                          # Turing and later only
+  return 1 if $name =~ /\bGTX\s*1\d{3}\b/i;                 # GTX 10xx Pascal, 16xx Turing
+  return 1 if $name =~ /\bGTX\s*(?:9\d{2}|745|750)(?!\d)/i; # Maxwell (GTX 76x-78x are Kepler)
+  return 1 if $name =~ /\bGT\s*1\d{3}\b/i;                  # GT 1010/1030 Pascal
+  return 1 if $name =~ /\bGeForce\s+MX\s*\d{3}\b/i;         # MX110..MX570; not GeForce2/4 MX
+  return 1 if $name =~ /\bTITAN\s+(?:X|Xp|V|RTX)\b/i;       # not the Kepler GTX TITAN/Black/Z
+  return 1 if $name =~ /\bQuadro\s+(?:GP|GV|[MPT])\s*\d/i;  # Quadro M/P/T/GP/GV; K is mixed
+  return 1 if $name =~ /\bTesla\s+(?:[PV]\d|T4\b|M\d{1,2}\b)/; # not Fermi M20x0, Kepler K
+  return 1 if $name =~ /\b[AHLVP]\d{1,3}[GSi]?\b/;          # A100, H100, L40, V100, P40, ...
 
   # Unknown — safe default
   Rex::Logger::info("    Unknown NVIDIA GPU model: $name — not in compute list", "warn");
@@ -302,9 +322,9 @@ open-gpu-kernel-modules supported-GPU table (C<2900>-C<2FFF>: B200, GB200,
 GeForce RTX 50xx, RTX PRO Blackwell, GB10; plus B300 C<3182> and GB300
 C<31C2>/C<31C3>). Returns false for C<undef>, a malformed ID, and every ID
 outside those ranges — Turing/Ampere/Ada/Hopper parts and any future
-generation keep the default proprietary C<-server> selection. The same ranges
-also make a GPU compute-capable (see L</NVIDIA compute classification>); this
-function itself only answers the driver-variant question.
+generation keep the default proprietary C<-server> selection. This function
+only answers the driver-variant question; which GPUs are compute-capable is
+L</NVIDIA compute classification>.
 
 A wrapper: true exactly when
 L<Rex::GPU::NVIDIA::Requirement/for_device_id> gives C<kernel_module> C<open>.
@@ -348,7 +368,8 @@ Returns C<undef> for C<undef>, a malformed ID, and every ID from C<1DF7> up
 (Turing and every later or unknown generation), which keep the default driver
 selection. The ranges are taken from the legacy sections of NVIDIA's
 C<supportedchips> README (driver 615.71.09). This only chooses the driver;
-unlike the Blackwell ranges, these never make a GPU compute-capable.
+whether a GPU is compute-capable is L</NVIDIA compute classification>
+(Maxwell/Pascal/Volta: yes, Kepler or older: no).
 
 A wrapper over L<Rex::GPU::NVIDIA::Requirement/for_device_id>: a hashref of
 its C<generation> and C<max_branch> when the requirement has a
@@ -431,39 +452,63 @@ passed-through card; C<lspci -nn> cannot tell the two apart.
 =head2 NVIDIA compute classification
 
 NVIDIA GPUs are further classified as I<compute-capable>. Only compute-capable
-GPUs trigger driver installation in L<Rex::GPU>. The classification rules:
+GPUs trigger driver installation in L<Rex::GPU>. Every GPU that can be used
+for AI counts -- GeForce MX, GT and GTX 9xx with 2 GB of memory included --
+as long as a current driver branch supports it: the criterion is the GPU
+B<generation>, read from the PCI device ID, not the marketing name. The
+rules, first match wins:
 
 =over
 
 =item * PCI class C<0302> (3D controller) — always compute/datacenter. Datacenter
 GPUs such as the A100, H100, and RTX 4000 Ada typically enumerate as class
-C<0302>.
+C<0302>. This holds for a Kepler Tesla (K80, K40) too; the driver installer
+then refuses it (see L<Rex::GPU::NVIDIA/install_driver>).
 
-=item * Blackwell and Blackwell Ultra by PCI device ID — every C<[10de:XXXX]> in
-C<2900>-C<2FFF>, C<3182> or C<31C2>/C<31C3>, the rows marked
-L<compute|Rex::GPU::NVIDIA::Requirement/compute> in
-L<Rex::GPU::NVIDIA::Requirement/generations>, whatever the PCI class and
-whatever name C<lspci> prints. Blackwell has no entry-level chip: NVIDIA's
-supported-chips table (driver 615.71.09) lists only GeForce RTX 50xx desktop
-and laptop GPUs, RTX PRO Blackwell (workstation, server, laptop, embedded),
-RTX 6000D, DRIVE P2021, B200/GB200/B300/GB300 and the GB10 (C<10de:2e12>,
-NVIDIA DGX Spark, aarch64) there. Many of these enumerate as a VGA controller
-(class C<0300>), and on a host whose C<pci.ids> predates the silicon C<lspci>
-prints only C<Device>, so the name rules below cannot see them; the device ID
-is present regardless. An unlisted ID inside C<2900>-C<2FFF> counts too, as
-it does for the driver choice.
+=item * The PCI device ID's generation, from the
+L<generations|Rex::GPU::NVIDIA::Requirement/generations> table of
+L<Rex::GPU::NVIDIA::Requirement> (its
+L<compute|Rex::GPU::NVIDIA::Requirement/compute> flag), whatever the PCI class
+and whatever name C<lspci> prints. The table covers every ID from C<0000> to
+C<2FFF> and the Blackwell Ultra IDs:
 
-=item * Named product families: RTX (desktop and laptop alike), TITAN, Quadro,
-Tesla, GTX 10xx/16xx series
+=over
 
-=item * Non-compute: NVS, GT/GTS low-end, GTX 2xx–9xx legacy, MX-series mobile
+=item * Maxwell, Pascal, Volta (C<1340>-C<1DF6>; GeForce GTX 750 Ti/9xx/10xx,
+GT 1030, MX110-MX350, Tesla M/P/V100, ...): compute. They get the proprietary
+580-branch driver.
+
+=item * Turing, Ampere, Ada, Hopper (C<1DF7>-C<28FF>; MX450/MX550/MX570,
+GTX 16xx, RTX 20xx-40xx, T4, A100, L40, H100, ...): compute.
+
+=item * Blackwell and Blackwell Ultra (C<2900>-C<2FFF>, C<3182>,
+C<31C2>/C<31C3>; GeForce RTX 50xx desktop and laptop, RTX PRO Blackwell,
+B200/GB200/B300/GB300, the GB10 C<10de:2e12> of NVIDIA DGX Spark): compute.
+
+=item * Kepler or older (below C<1340>; GeForce GT 710/730, GTX 6xx/7xx,
+Quadro K4000, ...): B<not> compute. Their last driver branch is 470, which the
+current distributions no longer package, so the GPU is skipped with a warning
+("... is Kepler or older silicon: it needs driver branch 470 or older, which
+current distributions no longer package -- skipped, no driver installed")
+instead of making the driver installation die. A Kepler display card next to
+a newer GPU does not stop the newer one's installation.
+
+=back
+
+Many GPUs enumerate as a VGA controller (class C<0300>), and on a host whose
+C<pci.ids> predates the silicon C<lspci> prints only C<Device> as the name;
+the device ID is present regardless.
+
+=item * Name rules, only for an ID no table row covers (C<3000> and up, except
+the Blackwell Ultra IDs -- silicon newer than the table): RTX, GTX 10xx/16xx,
+GTX 9xx/745/750, GT 1xxx, GeForce MX1xx-5xx, TITAN X/Xp/V/RTX, Quadro
+M/P/T/GP/GV, Tesla M/P/V/T4 and datacenter short codes (A100, H100, L40, ...).
+Each names only Maxwell-or-later products.
 
 =back
 
 Unrecognised NVIDIA GPU models default to C<compute =E<gt> 0> and emit a
-warning. The device-ID rule only ever says yes, for the Blackwell and
-Blackwell Ultra ranges, and never changes that default for any other ID.
-AMD GPU C<compute> is always C<0>; AMD driver support is not yet
+warning. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
 implemented.
 
 Each detected NVIDIA GPU also carries its raw C<device_id> (the C<[10de:XXXX]>

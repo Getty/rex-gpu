@@ -81,12 +81,21 @@ Ubuntu gets the C<-open> driver package variant instead of the default
 C<-server> one, Debian 12 and 13 NVIDIA's CUDA-repository open-module driver
 instead of Debian's C<non-free> one (which cannot drive them); on any other
 Debian release it dies before the host is changed. A pre-Turing GPU
-(Maxwell/Pascal/Volta, e.g. the V100) gets the proprietary 580-branch driver
-on Ubuntu, RHEL and openSUSE. A Kepler-or-older GPU (e.g. Tesla K80) anywhere
-on the host makes C<gpu_setup> die before the host is changed, unless a
-working driver is already installed, and so do GPUs that cannot share one
-driver (a V100 next to a B200). A host whose GPUs are all Turing to Hopper
-gets the same driver as before.
+(Maxwell/Pascal/Volta, e.g. the V100, a GeForce GT 1030 or GTX 980) gets the
+proprietary 580-branch driver on Ubuntu, RHEL and openSUSE, Debian's
+C<non-free> driver on Debian 12 and 13. A host whose GPUs are all Turing to
+Hopper gets the same driver as before.
+
+Which GPUs count as CUDA-capable is decided by generation, not by marketing
+name (see L<Rex::GPU::Detect/NVIDIA compute classification>): every Maxwell
+or newer GPU does, GeForce MX, GT and GTX 9xx included. A Kepler-or-older
+GPU at PCI class C<0300> (GeForce GT 710, GTX 780, Quadro K4000, ...) is
+detected with C<compute =E<gt> 0> and skipped with a warning: no driver is
+installed for it, and it does not stop the installation for a newer GPU on
+the same host. A Kepler Tesla (K80, K40) enumerates as class C<0302>, which
+is always compute, and makes C<gpu_setup> die before the host is changed,
+unless a working driver is already installed; so do GPUs that cannot share
+one driver (a V100 next to a B200).
 
 On an HGX baseboard with NVSwitches (HGX-2, HGX A100, HGX H100/H200:
 C<nvswitch> in the L</gpu_detect> result is not empty) the NVSwitches are

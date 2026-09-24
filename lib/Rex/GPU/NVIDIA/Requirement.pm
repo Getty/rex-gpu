@@ -95,16 +95,31 @@ has members => ( is => 'ro', default => sub { [] } );
 
 =attr compute
 
-True (C<1>) when the L</generations> row for L</device_id> is marked
-C<compute>: every GPU NVIDIA has published with an ID in that row is
-CUDA-capable, so L<Rex::GPU::Detect> counts the device as compute whatever its
-PCI class and whether or not C<lspci> could resolve its name (karr #45). The
-built-in table marks the Blackwell and Blackwell Ultra rows. C<0> for every
-other ID, an unknown one, and a requirement built by L</intersect>.
+Whether the GPU generation is one to install a driver for, as the
+L</generations> row for L</device_id> declares it (karr #45, #54):
+
+=over
+
+=item * C<1> -- a generation a current driver branch supports: every GPU
+NVIDIA has published with an ID in that row can run CUDA, so
+L<Rex::GPU::Detect> counts the device as compute whatever its PCI class, its
+marketing name (GeForce MX, GT, ... included) and whether C<lspci> could
+resolve that name. The built-in table marks Maxwell through Blackwell Ultra.
+
+=item * C<0> -- the row says the generation is not to be installed for: the
+built-in table marks Kepler and older, whose last driver branch (470) the
+current distributions no longer package. L<Rex::GPU::Detect> reports such a
+GPU as not compute, with a warning naming the generation and branch.
+
+=item * C<undef> -- no row covers the ID (or it is missing or malformed), the
+row has no C<compute> key, or the requirement was built by L</intersect>.
+The table has no opinion; L<Rex::GPU::Detect> falls back to its name rules.
+
+=back
 
 =cut
 
-has compute => ( is => 'ro', default => 0 );
+has compute => ( is => 'ro' );
 
 sub BUILD {
   my ( $self ) = @_;
@@ -124,8 +139,10 @@ C<generation> label, a C<kernel_module> (default C<either>), optional
 C<min_branch>/C<max_branch> and an optional C<compute> flag (see L</compute>).
 The B<first> row whose range contains an ID
 wins, so a narrower row goes before a block it sits in. An ID no row covers
-gets C<either> with no bounds — which is also what the driver installer does
-for every Turing-to-Hopper part today, so those generations have no rows.
+gets C<either> with no bounds and no C<compute> verdict. The built-in rows
+cover every ID from C<0000> to C<2FFF> without a gap, plus the Blackwell
+Ultra IDs; the Turing-to-Hopper row carries no constraint (C<either>, no
+bounds), only its label and C<compute>.
 
 Override it in a subclass to add or replace rows; prepend to
 C<< $self->SUPER::generations >> to keep the built-in ones:
@@ -143,14 +160,16 @@ C<< $self->SUPER::generations >> to keep the built-in ones:
     );
   }
 
-The table chooses a driver, and a row marked C<compute> also makes every
-GPU in it compute-capable: L<Rex::GPU::Detect> asks this class (the built-in
-table, not a subclass) for L</compute> before its name rules (karr #45). Only
-the Blackwell and Blackwell Ultra rows are marked; an ID outside them that
-no other rule recognises still gets no driver at all. A subclass that adds or
-replaces rows changes the driver choice only, not detection.
+The table chooses a driver, and its C<compute> flags also decide detection:
+L<Rex::GPU::Detect> asks this class (the built-in table, not a subclass) for
+L</compute> before its name rules (karr #45, #54). The criterion is the
+generation, not the marketing name: Maxwell, Pascal, Volta, Turing, Ampere,
+Ada, Hopper, Blackwell and Blackwell Ultra rows are C<compute =E<gt> 1>, the
+Kepler-or-older row C<compute =E<gt> 0>. A subclass that adds or replaces rows
+changes the driver choice only, not detection.
 
-Sources, all checked 2026-09-23:
+Sources, all checked 2026-09-23 (Blackwell, pre-Turing) and 2026-09-24
+(Turing to Hopper, compute flags):
 
 =over
 
@@ -174,24 +193,53 @@ newer": a host that installs an older 580 point release is not caught here.
 =item * Maxwell/Pascal/Volta C<1340>-C<1DF6> (Tesla M60/M40, P100, P40, P4, V100,
 V100S, TITAN V, ...): the 580 legacy list of NVIDIA's C<supportedchips>
 README (615.71.09). Proprietary kernel module only; 580 is the last branch.
+Compute: the entry-level parts in it (GeForce GT 1030, MX110/MX130/MX150,
+GTX 750 Ti, GTX 9xx) included -- the 580 README lists every one of those IDs
+as current, Maxwell Gen1 (GM107/GM108) too.
+
+=item * Turing, Ampere, Ada, Hopper C<1DF7>-C<28FF>: NVIDIA's current list
+(615.71.09) runs from C<1E02> (TITAN RTX) to C<28F8> in this range; no
+legacy list has an ID above C<1DF6>. No constraint (C<either>, no bounds):
+the default driver selection. Compute, GeForce MX450/MX550/MX570 and GTX 16xx
+included.
 
 =item * Kepler or older, every ID below C<1340> (Kepler C<0FC6>-C<12BA>, Fermi and
 earlier): the 470 and older legacy lists. Proprietary only, nothing newer
-than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
+than 470. Not compute: L<Rex::GPU::Detect> skips them with a warning, and
+L<Rex::GPU::NVIDIA> refuses to install for one passed to it anyway (a
+class-C<0302> Tesla K80 is still compute by its PCI class).
 
 =back
 
 =cut
 
 # The rows, and where they come from (moved here from Rex::GPU::Detect, karr
-# #16 and #26). A row with compute => 1 makes every device in it compute in
-# Rex::GPU::Detect::_is_nvidia_compute (karr #45, maintainer decision: every
-# GPU usable for AI counts). Only the Blackwell and Blackwell Ultra rows carry
-# it: NVIDIA's table lists no entry-level (MX/GT-class) Blackwell chip, every
-# ID in them is GeForce RTX 50xx (desktop or laptop), RTX PRO Blackwell
-# (incl. Embedded), RTX 6000D, DRIVE P2021, B200/GB200/B300/GB300 or GB10.
-# Other rows never make a device compute; the unknown-model default in Detect
-# stays compute => 0.
+# #16 and #26). The compute flag decides Rex::GPU::Detect::_is_nvidia_compute
+# before any name rule (karr #45, #54). Maintainer decision (karr #54): every
+# GPU usable for AI is compute -- MX, GT and GTX 9xx with 2 GB included -- as
+# long as a current driver branch supports it; the criterion is the
+# generation, not the marketing name. So Maxwell through Blackwell Ultra carry
+# compute => 1 and the Kepler-or-older row compute => 0 (skipped with a
+# warning, not a die: gpu_setup / Rex::Rancher gpu => 1 keep going on a host
+# whose only NVIDIA part is an old display card). An ID no row covers (0x3000+
+# except Blackwell Ultra) has no verdict; Detect uses its name rules and its
+# unknown-model default compute => 0 there.
+#
+# Checked 2026-09-24 against NVIDIA's supportedchips READMEs (Linux-x86_64
+# 615.71.09, 580.95.05, 580.126.09, 550.163.01, 535.247.01) and pci.ids of
+# 2026-09-24:
+#   * 580.95.05 / 580.126.09 "current" list starts at 1340: every ID of the
+#     615 legacy_580 list (1340..1DF6) is current there -- incl. Maxwell Gen1
+#     GM107/GM108: GTX 750 Ti 1380, GTX 745 1382, 940MX 134D, MX130 174D,
+#     MX110 174E -- except 137D (GeForce 940A, subsystem entry only) and 1DF5
+#     (V100-SXM2-16GB), which only the 615 legacy_580 list names.
+#   * No legacy_470-or-older ID is >= 1340; no current/legacy_580 ID < 1340.
+#   * pci.ids: no 10de ID >= 1340 carries a Kepler-or-older codename (GK, GF,
+#     GT2xx, G8x/G9x, NVxx), and no Maxwell-or-newer codename sits below 1340
+#     except HD-audio functions (PCI class 0403, never read by detection).
+#     pci.ids does name two Kepler IDs like Maxwell/Pascal products -- 0FC5
+#     "GK107 [GeForce GT 1030]", 11C7 "GK106 [GeForce GTX 750 Ti]" -- which is
+#     why the ID row decides before any name rule.
 #
 # Blackwell (karr #16): NO proprietary kernel module — NVIDIA's open GPU
 # kernel modules are the only ones that bind — on every architecture, x86_64
@@ -234,9 +282,14 @@ than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
 # 06D1, M2090 1091) is rejected too. 1340..1DF6 is taken as a block like the
 # Blackwell one: an unlisted ID inside it is Maxwell..Volta silicon.
 #
-# Everything else — 1DF7 up to 28FF (Turing, Ampere, Ada, Hopper), the gaps
-# above 2FFF and any future ID — has no row: either kernel module, no bounds,
-# which is the driver selection those GPUs get today.
+# Turing, Ampere, Ada, Hopper (karr #54): 1DF7..28FF, one block like the
+# others. The 615.71.09 current list covers 1E02 (TITAN RTX) .. 28F8 in it,
+# with gaps; nothing in 1DF7..1E01 is listed anywhere. The row sets no
+# constraint (either module, no bounds -- the driver selection these GPUs got
+# before they had a row); it exists for the compute flag and the label.
+#
+# Everything else — the gaps above 2FFF and any future ID — has no row:
+# either kernel module, no bounds, no compute verdict.
 sub generations {
   return (
     { generation => 'Blackwell', first => 0x2e12, last => 0x2e12,       # GB10, see above
@@ -247,10 +300,12 @@ sub generations {
       kernel_module => 'open', min_branch => 580, compute => 1 },
     { generation => 'Blackwell Ultra', first => 0x31c2, last => 0x31c3, # GB300
       kernel_module => 'open', min_branch => 580, compute => 1 },
+    { generation => 'Turing/Ampere/Ada/Hopper', first => 0x1df7, last => 0x28ff,
+      compute => 1 },
     { generation => 'Maxwell/Pascal/Volta', first => 0x1340, last => 0x1df6,
-      kernel_module => 'proprietary', max_branch => 580 },
+      kernel_module => 'proprietary', max_branch => 580, compute => 1 },
     { generation => 'Kepler or older', first => 0x0000, last => 0x133f,
-      kernel_module => 'proprietary', max_branch => 470 }
+      kernel_module => 'proprietary', max_branch => 470, compute => 0 }
   );
 }
 
@@ -306,7 +361,7 @@ sub _lookup {
       kernel_module => $row->{kernel_module} // 'either',
       defined $row->{min_branch} ? ( min_branch => $row->{min_branch} ) : (),
       defined $row->{max_branch} ? ( max_branch => $row->{max_branch} ) : (),
-      $row->{compute} ? ( compute => 1 ) : ()
+      defined $row->{compute} ? ( compute => $row->{compute} ? 1 : 0 ) : ()
     );
   }
   return %args;

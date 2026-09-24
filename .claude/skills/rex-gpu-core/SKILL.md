@@ -42,12 +42,17 @@ with no driver yet). The compiled regexes at the top of the file are the contrac
   VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
   to an emulated console is still detected; only-virtual output returns empty arrays.
 
-`_is_nvidia_compute`: after class `0302`, every device ID in a Requirement row marked
-`compute` is compute — the Blackwell 2900–2FFF / Blackwell Ultra rows, laptop and embedded
-included, name resolved or not (k45: "every GPU usable for AI"; there is no separate ID
-allowlist). Then by name: RTX (laptop too)/TITAN/Quadro/Tesla and GTX 10xx/16xx are compute; MX, GT/GTS/NVS, GTX 2xx–9xx are not; **unknown defaults to
-`0`** (safe: no install) with a warning. Changing that default from 0 to 1 means an
-unrecognised laptop chip triggers a datacenter driver install — keep it 0.
+`_is_nvidia_compute` decides by **generation, not marketing name** (k45/k54, maintainer:
+"every GPU usable for AI", MX/GT/GTX 9xx included while a current branch supports it).
+After class `0302`, the device ID's Requirement row carries a tri-state `compute`: 1 for
+Maxwell 1340 up to Blackwell Ultra (the rows cover 0000–2FFF gap-free + 3182/31C2–31C3),
+0 for Kepler-or-older <1340 → not compute + warning "needs branch 470 … skipped, no
+driver installed" (a skip, not a die: a Kepler display next to an Ada leaves the Ada
+install alone); undef (no row, ≥3000) → name rules, each naming only Maxwell+ products
+(RTX, GTX 1xxx/9xx/745/750, GT 1xxx, GeForce MX, TITAN X/Xp/V/RTX, Quadro M/P/T/GP/GV,
+Tesla M/P/V/T4, A100-style codes); no negative rules. **Unknown defaults to `0`** (safe:
+no install) with a warning — keep it 0. A class-`0302` Kepler Tesla (K80) is still
+compute by class and dies in `plan`.
 
 `detect()` first ensures `lspci` (`command -v`, else pciutils — dnf + rpm -q for the
 lsb_release RHEL names Rex::Pkg can't handle; k46), and only if an NVIDIA GPU was found
@@ -58,11 +63,11 @@ scans `lspci -nn -d 10de:` for NVSwitch bridges (class `0680`, IDs 1ac2/1af1/22a
 (Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,
 min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF
 open ≥570 (GB10 2E12 ≥580: first listed in 580.119.02) / B300 / GB300 open ≥580;
-Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; <1340 Kepler or older ≤470 (rejected).
+Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; Turing..Hopper 1DF7–28FF `either`, no
+bounds (row only for label + compute); <1340 Kepler or older ≤470 (rejected).
 Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs and croaks on
-conflict (`conflicts` lists without dying). Only rows with `compute => 1` (the Blackwell
-ones) make a GPU compute; no other row ever does, and Detect reads the base table, not a
-subclass.
+conflict (`conflicts` lists without dying). The `compute` flag lives in these rows (one
+table, no second list); Detect reads the base table, not a subclass.
 `Detect::open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers.
 
 **Selection is data, not branches** (k33): each Setup class has ordered `sources`
