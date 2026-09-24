@@ -278,6 +278,10 @@ sub gpu_fixture {
 
 # record_host(host => host_profile(...), code => sub { ... })
 # => { lines => [...], logs => [[level, msg], ...], error => $@|undef, trapped => 0|1 }
+# `subs => { 'Pkg::name' => sub {...} }` adds mocks for the call; a mock beats
+# the trap on the same glob (karr #63: Rex::get_current_connection for
+# _reboot_and_wait). What they do is not in the transcript -- the test that
+# passes them records it itself.
 sub record_host {
   my ( %arg ) = @_;
   my $host = $arg{host} or croak __PACKAGE__.'::record_host needs host';
@@ -363,7 +367,8 @@ sub record_host {
     # called fully qualified by NVIDIA.pm; the real operating_system_version
     # resolves through this too, so it strips the dots exactly like Rex does
     'Rex::Commands::Gather::operating_system_release' => sub { $release },
-    'Rex::Logger::info' => sub { push @logs, [ $_[1] // 'info', $_[0] ] }
+    'Rex::Logger::info' => sub { push @logs, [ $_[1] // 'info', $_[0] ] },
+    %{ $arg{subs} // {} }
   );
   my @traps = map { my $s = $_; [ $s => $trap->($s) ] } qw(
     Rex::GPU::NVIDIA::is_installed
