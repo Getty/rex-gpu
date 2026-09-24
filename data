@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T03:06:22Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T03:06:22Z
+created: 2026-09-24T03:03:05Z
+id: 55
+priority: medium
+started: 2026-09-24T03:03:09Z
+status: done
+title: 0302-Kepler (Tesla K80/K40/K20) per Generation skippen statt per Klasse compute
+updated: 2026-09-24T03:06:22Z
+---
+
+Folge aus #54, Maintainer-Entscheidung B (2026-09-24): In _is_nvidia_compute die Generationszeile (compute 0 = Kepler) VOR der 0302-Klassenregel pruefen, damit eine K80 mit Kepler-Warnung uebersprungen wird und eine Ada daneben trotzdem installiert wird. Bisher: 0302 -> compute -> plan stirbt, blockiert den ganzen Host.
+
+Erledigt in 5300dfc (gepusht): Kepler-Zeile vor 0302-Klassenregel. K80/K40/K20 -> Skip mit Warnung, Ada daneben wird installiert; K80-only-Host: gpu_setup laeuft durch ohne Treiber. Unverifiziert: K40m/K20m-IDs 1023/1028 real als [0302]. Nicht auf Hardware.
