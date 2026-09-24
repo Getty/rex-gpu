@@ -22,9 +22,11 @@ use lib "$Bin/lib";
 #   * a config.toml that already carries an nvidia runtime => nothing written;
 #   * no config.toml yet => the v3 drop-in plus a warning;
 #   * `containerd` => `nvidia-ctk runtime configure` then a containerd restart;
-#   * no nvidia-container-runtime => only the can_run probe, for any runtime
-#     name, 'bogus' included;
-#   * 'bogus' with the runtime present => dies, nothing but the probe ran.
+#   * no nvidia-container-runtime => only the can_run probe, for rke2, k3s
+#     and containerd;
+#   * 'bogus' (and 'none') => dies naming the valid runtimes before any host
+#     command, not even the can_run probe, with and without the runtime
+#     (karr #66; it used to pass quietly without the runtime).
 #
 # NOT covered -- a green prove is NOT evidence that containerd picks the
 # runtime up: whether RKE2/K3s render the tmpl / import the drop-in, whether
@@ -161,19 +163,25 @@ subtest 'containerd: nvidia-ctk runtime configure, then restart' => sub {
   golden_is($rec, 'containerd/containerd');
 };
 
-subtest 'no nvidia-container-runtime => only the probe, for every runtime name' => sub {
-  for my $rt (qw( rke2 k3s containerd bogus )) {
+subtest 'no nvidia-container-runtime => only the probe, for every valid runtime name' => sub {
+  for my $rt (qw( rke2 k3s containerd )) {
     my $rec = configure(containerd_host(runtime => 'rke2', no_runtime => 1), $rt);
     is($rec->{error}, undef, "$rt: no die");
     is_deeply($rec->{lines}, [ 'can_run: nvidia-container-runtime' ], "$rt: only can_run");
   }
 };
 
-subtest "'bogus' runtime dies after the probe" => sub {
-  my $rec = configure(containerd_host(runtime => 'rke2'), 'bogus');
-  is($rec->{error}, 'Unknown containerd runtime: bogus', 'dies naming the runtime');
-  is_deeply($rec->{lines}, [ 'can_run: nvidia-container-runtime' ], 'nothing but the probe ran');
-  golden_is($rec, 'containerd/bogus');
+subtest "unknown runtime dies before any host command, with and without the runtime" => sub {
+  for my $no_runtime (0, 1) {
+    my $with = $no_runtime ? 'without' : 'with';
+    for my $rt (qw( bogus none )) {
+      my $rec = configure(containerd_host(runtime => 'rke2', no_runtime => $no_runtime), $rt);
+      is($rec->{error}, "Unknown containerd runtime: $rt (valid: rke2, k3s, containerd)",
+        "$rt, $with runtime: dies naming the runtime and the valid ones");
+      is_deeply($rec->{lines}, [], "$rt, $with runtime: no host command, not even the probe");
+    }
+  }
+  golden_is(configure(containerd_host(runtime => 'rke2'), 'bogus'), 'containerd/bogus');
 };
 
 done_testing;

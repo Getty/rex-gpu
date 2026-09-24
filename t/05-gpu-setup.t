@@ -17,6 +17,8 @@ use Test::More;
 #   * reboot: gpu_setup passes reboot => 1 for a true `reboot`, 0 otherwise
 #     (the default);
 #   * containerd_config defaults to rke2; 'none' skips configure_containerd;
+#   * an unknown containerd_config dies naming the valid values before
+#     detection, so before install_driver -- with or without a GPU (karr #66);
 #   * NVIDIA next to AMD => the pipeline plus the one AMD warning;
 #   * the detection result is returned as is.
 #
@@ -97,6 +99,28 @@ subtest "containerd_config => 'none' skips configure_containerd" => sub {
   is_deeply(steps($r), [ grep { $_ ne 'configure_containerd' } @STEPS ], 'every other step still runs');
   $r = setup_with(hosts(nvidia => [ $ADA ]), containerd_config => 'k3s');
   is_deeply($r->{calls}[3], [ 'configure_containerd', 'k3s' ], 'k3s is passed on');
+};
+
+subtest 'unknown containerd_config dies before detection' => sub {
+  for my $d (hosts(nvidia => [ $ADA ]), hosts()) {
+    my $r = eval { setup_with($d, containerd_config => 'bogus') };
+    is($@, "Unknown containerd runtime: bogus (valid: rke2, k3s, containerd, none)\n",
+      'dies naming the value and the valid ones');
+  }
+  my ( $detect_calls, @calls ) = ( 0 );
+  {
+    no warnings 'redefine';
+    local *Rex::GPU::gpu_detect = sub { $detect_calls++; return hosts(nvidia => [ $ADA ]) };
+    local *Rex::GPU::NVIDIA::install_driver = sub { push @calls, 'install_driver' };
+    local *Rex::get_current_connection = sub { return };
+    eval { Rex::GPU::gpu_setup(containerd_config => 'RKE2') };
+  }
+  is($detect_calls, 0, 'no detection');
+  is_deeply(\@calls, [], 'no install_driver');
+  for my $ok (qw( rke2 k3s containerd none )) {
+    my $r = eval { setup_with(hosts(nvidia => [ $ADA ]), containerd_config => $ok) };
+    is($@, '', "$ok is accepted");
+  }
 };
 
 subtest 'NVIDIA next to AMD: pipeline plus one AMD warning' => sub {

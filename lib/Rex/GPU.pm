@@ -174,6 +174,9 @@ still installed)
 
 =back
 
+Any other value makes C<gpu_setup> die before detection, naming the valid
+values -- even on a host without a GPU.
+
 =item C<reboot>
 
 If true, the host is rebooted after driver installation and the function
@@ -240,6 +243,11 @@ sub gpu_setup {
 
   _check_connection();
 
+  # A containerd_config typo dies here (karr #66), not after the driver
+  # install and a reboot.
+  my $runtime = $opts{containerd_config} // 'rke2';
+  Rex::GPU::NVIDIA::_check_containerd_runtime($runtime, 'none');
+
   # A custom setup (setup => / set gpu_nvidia_setup, karr #34) that cannot be
   # loaded dies here, before detection installs pciutils -- on every host, not
   # only on one with a GPU.
@@ -266,7 +274,6 @@ sub gpu_setup {
       Rex::GPU::NVIDIA::install_container_toolkit();
       Rex::GPU::NVIDIA::generate_cdi_specs();
 
-      my $runtime = $opts{containerd_config} // 'rke2';
       if ($runtime ne 'none') {
         Rex::GPU::NVIDIA::configure_containerd($runtime);
       }

@@ -1,6 +1,12 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - configure_containerd dies on an unknown runtime name before any
+    command runs, naming the valid ones (rke2, k3s, containerd). Before, a
+    host without nvidia-container-runtime took a typo like 'bogus'
+    quietly. gpu_setup checks containerd_config (those plus none) before
+    detection, so a typo dies before the driver install and reboot, also
+    on a host without a GPU. Not hardware-verified (karr #66)
   - install_driver(reboot => 1) (and so gpu_setup(reboot => 1)) counts the
     host as back after the reboot only when `echo ok` over the new
     connection prints ok. Before, any reconnect whose run() did not die

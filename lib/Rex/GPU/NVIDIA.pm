@@ -633,6 +633,11 @@ The C<nvidia-container-runtime> binary must already be installed
 (L</install_container_toolkit> provides it); if it is not present this
 function returns immediately without error.
 
+An unknown C<$runtime> makes it die before any command runs on the host,
+naming the valid values -- with or without C<nvidia-container-runtime>.
+C<none> is not one of them here; that is L<Rex::GPU/gpu_setup>'s switch
+for not calling this function at all.
+
 C<$runtime> selects how containerd is configured:
 
 =over
@@ -695,9 +700,24 @@ containerd installations.
 
 =cut
 
+# The runtime names configure_containerd knows; gpu_setup also takes 'none'
+# (karr #66).
+our @CONTAINERD_RUNTIMES = qw( rke2 k3s containerd );
+
+sub _check_containerd_runtime {
+  my ($runtime, @also) = @_;
+  my @valid = (@CONTAINERD_RUNTIMES, @also);
+  return if grep { $_ eq $runtime } @valid;
+  die "Unknown containerd runtime: $runtime (valid: " . join(', ', @valid) . ")\n";
+}
+
 sub configure_containerd {
   my ($runtime) = @_;
   $runtime //= 'rke2';
+
+  # The name first (karr #66): without the runtime binary a typo would
+  # otherwise return quietly below.
+  _check_containerd_runtime($runtime);
 
   return unless can_run("nvidia-container-runtime");
 
@@ -706,11 +726,8 @@ sub configure_containerd {
   if ($runtime eq 'rke2' || $runtime eq 'k3s') {
     _configure_containerd_rke2($runtime);
   }
-  elsif ($runtime eq 'containerd') {
-    _configure_containerd_standalone();
-  }
   else {
-    die "Unknown containerd runtime: $runtime\n";
+    _configure_containerd_standalone();
   }
 
   Rex::Logger::info("Containerd configured with NVIDIA runtime");
