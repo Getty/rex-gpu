@@ -129,6 +129,44 @@ is changed, and a Kepler is refused whatever it says. An unknown key or a
 bad value dies before the host is touched. See
 L<Rex::GPU::NVIDIA::Setup/extra_requirement>.
 
+=item C<nvswitches>
+
+Optional arrayref of the host's NVSwitch chips, what
+L<Rex::GPU::Detect/detect> returns under C<nvswitch>;
+L<Rex::GPU/gpu_setup> passes it when it found one. Non-empty means an HGX
+baseboard whose GPUs need NVIDIA Fabric Manager:
+
+=over
+
+=item * the driver source must provide one -- a source that does not
+(Debian C<non-free>, openSUSE's GFX repository) is rejected, and with none
+left C<install_driver> dies before anything on the host is changed;
+
+=item * on apt its package must have an installation candidate after the
+index refresh, checked before the driver is installed;
+
+=item * after the driver packages are verified it is installed at
+B<exactly> the installed driver's upstream version, checked with
+C<dpkg-query> / C<rpm -q> (dies otherwise; the driver stays installed), and
+C<nvidia-fabricmanager.service> is enabled;
+
+=item * with C<reboot> the enabled unit starts on boot; without it,
+C<install_driver> starts it after C<modprobe nvidia>. Either way it then
+checks C<systemctl is-active> and only warns if the unit is not running
+(e.g. nouveau still holds the GPUs until the reboot).
+
+=back
+
+The package: Ubuntu C<nvidia-fabricmanager-NNN> of the chosen C<-server>
+branch; Debian 12/13 and RHEL/Rocky/Alma C<nvidia-fabricmanager> from
+NVIDIA's CUDA repository. If a working driver is already installed, no
+Fabric Manager is installed (the driver's package source is unknown);
+C<install_driver> only warns when the unit is not active. Omitted or empty
+(the default, and every caller that finds its GPUs without C<lspci>): no
+Fabric Manager, nothing changes. HGX B200/B300 are not detected as NVSwitch
+hosts -- their NVSwitches are not PCI devices on the host -- and need
+NVIDIA's NVLink Subnet Manager besides, which Rex::GPU does not install.
+
 =back
 
 Omit C<gpus> and C<gpu> (or pass C<undef>) to keep the GPU-agnostic
@@ -198,6 +236,9 @@ sub install_driver {
   my $gpus = $opts{gpus} // [ defined $opts{gpu} ? $opts{gpu} : () ];
   die "install_driver: gpus must be an arrayref of GPU hashrefs\n"
     unless ref $gpus eq 'ARRAY';
+  die "install_driver: nvswitches must be an arrayref\n"
+    if defined $opts{nvswitches} && ref $opts{nvswitches} ne 'ARRAY';
+  my @nvswitches = defined $opts{nvswitches} ? ( nvswitches => $opts{nvswitches} ) : ();
 
   # Every supported OS runs through a Setup class (epic karr #25, T2/T3): the
   # already-installed short-circuit, the Kepler rejection, the multi-GPU
@@ -205,7 +246,7 @@ sub install_driver {
   # blacklist are its steps. Which class: setup =>, set gpu_nvidia_setup, or
   # the OS (karr #34) -- resolved before anything touches the host.
   my @extra = defined $opts{requirement} ? ( extra_requirement => $opts{requirement} ) : ();
-  my $setup = Rex::GPU::NVIDIA->setup_for(gpus => $gpus, setup => $opts{setup}, @extra);
+  my $setup = Rex::GPU::NVIDIA->setup_for(gpus => $gpus, setup => $opts{setup}, @extra, @nvswitches);
   unless ($setup) {
     # No class for this OS. Same order as before the move: a working driver
     # still short-circuits and a Kepler or a GPU conflict still gets its own
@@ -215,14 +256,25 @@ sub install_driver {
     $probe->plan;
     die "Unsupported OS for NVIDIA driver installation: ".$probe->os."\n";
   }
-  return unless $setup->install;
+  unless ($setup->install) {
+    # Already installed: the driver's package source is unknown, so no Fabric
+    # Manager is installed over it -- but an NVSwitch host without one cannot
+    # run CUDA, so say so (karr #23).
+    _check_fabric_manager($setup) if $setup->fabric_manager_needed;
+    return;
+  }
 
   if ($opts{reboot}) {
     _reboot_and_wait();
   }
   else {
     run "modprobe nvidia", auto_die => 0;
+    # Enabled by the setup, not started (karr #23): only now can the module
+    # be loaded. Fails harmlessly while nouveau still holds the GPUs.
+    run "systemctl start ".$setup->fabric_manager_service, auto_die => 0
+      if $setup->fabric_manager_needed;
   }
+  _check_fabric_manager($setup) if $setup->fabric_manager_needed;
 
   # Driver only (karr #42): the toolkit comes after this step in gpu_setup,
   # so verify_nvidia's nvidia-ctk check could only warn here.
@@ -290,6 +342,7 @@ sub _rhel_family_name {
     gpus              => \@gpus,
     setup             => 'My::GPU::Setup',   # optional
     extra_requirement => { ... },            # optional
+    nvswitches        => \@nvswitches,        # optional
   );
 
 B<Experimental.> The L<Rex::GPU::NVIDIA::Setup> object L</install_driver>
@@ -308,8 +361,8 @@ facts;
 
 =back
 
-A class is loaded (L</custom_setup>) and built with C<gpus> and
-C<extra_requirement>; an object gets them through
+A class is loaded (L</custom_setup>) and built with C<gpus>,
+C<extra_requirement> and C<nvswitches>; an object gets them through
 L<Rex::GPU::NVIDIA::Setup/adopt>. Returns C<undef> only when nothing chose
 a class and the OS has none. Reads nothing from the host.
 
@@ -333,6 +386,7 @@ sub setup_for {
   my $gpus  = $opt{gpus} // [];
   my @extra = defined $opt{extra_requirement}
     ? ( extra_requirement => $opt{extra_requirement} ) : ();
+  push @extra, ( nvswitches => $opt{nvswitches} ) if defined $opt{nvswitches};
   my $chosen = $class->custom_setup($opt{setup});
   Rex::Logger::info('NVIDIA driver setup: '.( ref $chosen ? ref($chosen).' object' : $chosen ))
     if $chosen;
@@ -692,6 +746,24 @@ sub _verify_module_and_smi {
   }
 
   return $ok;
+}
+
+# NVSwitch host (karr #23): is Fabric Manager running? Warns, never dies,
+# like verify_nvidia. Returns 1/0.
+sub _check_fabric_manager {
+  my ($setup) = @_;
+  my $unit = $setup->fabric_manager_service;
+  run "systemctl is-active --quiet $unit", auto_die => 0;
+  if ($? == 0) {
+    Rex::Logger::info("  [ok] $unit active (NVSwitch)");
+    return 1;
+  }
+  Rex::Logger::info("NVSwitch present but $unit is not active: CUDA fails with "
+    ."cudaErrorSystemNotReady until NVIDIA Fabric Manager of the driver's exact version runs. "
+    ."After the reboot that loads the NVIDIA driver: systemctl start $unit; if it is not "
+    ."installed (install_driver installs it only together with the driver), install it "
+    ."yourself", "warn");
+  return 0;
 }
 
 # ============================================================

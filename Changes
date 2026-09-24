@@ -9,6 +9,18 @@ Revision history for Rex-GPU
     dnf and checked with rpm -q. Detection now dies if that check fails or
     lspci is still missing, instead of reporting no GPU.
     Not hardware-verified (karr #46)
+  - gpu_setup installs NVIDIA Fabric Manager on HGX hosts with NVSwitch
+    (HGX-2, A100, H100/H200), without which CUDA does not initialise there.
+    gpu_detect returns a new nvswitch key (NVIDIA PCI class 0680 bridges
+    with a known NVSwitch ID or name; [] elsewhere) and install_driver takes
+    nvswitches => [...]. The Fabric Manager (Ubuntu nvidia-fabricmanager-NNN,
+    NVIDIA's CUDA repo nvidia-fabricmanager) is installed after the driver
+    at exactly its version, checked with dpkg/rpm, and its service enabled.
+    Debian's non-free has none, so such a Debian 12/13 host gets NVIDIA's
+    CUDA-repo driver; Debian 11 and openSUSE die before the host is changed.
+    Hosts without NVSwitch are unchanged. HGX B200/B300 are not detected
+    (their NVSwitches are not on the host PCI bus) and need NVLSM, which is
+    not installed. Not hardware-verified (karr #23)
   - install_driver and install_container_toolkit accept Rocky Linux,
     AlmaLinux and CentOS Stream under the names Rex reports when
     lsb_release is installed (Rocky, RockyLinux, AlmaLinux, CentOSStream),

@@ -36,6 +36,12 @@ So a Blackwell GPU (open module, 570 or newer: no Debian-packaged driver
 fits) gets the CUDA repository on Debian 12/13 and dies before the host is
 changed anywhere else; every other GPU gets C<non-free>.
 
+A host with NVSwitches (L<Rex::GPU::NVIDIA::Setup/nvswitches>) needs NVIDIA
+Fabric Manager, which Debian does not package: C<non-free> is rejected for
+it, and the CUDA repository installs C<nvidia-fabricmanager> at the version
+of the installed C<nvidia-kernel-open-dkms>. On Debian 11 such a host dies
+before it is changed.
+
 =method nonfree_branch
 
   my $branch = $self->nonfree_branch($major);   # 12 => 535
@@ -95,12 +101,17 @@ sub sources {
 sub _cuda_repo_source {
   my ( $self, $major ) = @_;
   my $packages = [ 'nvidia-driver-cuda', 'nvidia-kernel-open-dkms' ];
+  # Fabric Manager (karr #23): unversioned nvidia-fabricmanager from 580 on,
+  # with no dependency on the driver (Packages.gz of debian12/13, checked
+  # 2026-09-24), so its version is pinned to nvidia-kernel-open-dkms's.
   my %source = (
-    name            => 'nvidia-cuda-repo',
-    kernel_module   => 'open',
-    branch_at_least => 590,
-    packages        => $packages,
-    verify          => [ @$packages ]
+    name                 => 'nvidia-cuda-repo',
+    kernel_module        => 'open',
+    branch_at_least      => 590,
+    packages             => $packages,
+    verify               => [ @$packages ],
+    fabric_manager       => 'nvidia-fabricmanager',
+    fabric_manager_match => 'nvidia-kernel-open-dkms'
   );
   my $release = $self->release // '';
   my $arch    = $self->arch // '';

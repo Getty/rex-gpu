@@ -98,6 +98,30 @@ my %NVIDIA_COMPUTE_DEVICE_IDS = (
   '2d30' => { name => 'RTX PRO 2000 Blackwell' }
 );
 
+# NVSwitch (karr #23): an HGX baseboard's NVSwitches enumerate as NVIDIA
+# (10de) "Bridge" devices, PCI class [0680] (PCI_CLASS_BRIDGE_OTHER, the class
+# the NVSwitch kernel driver claims: open-gpu-kernel-modules
+# kernel-open/nvidia/linux_nvswitch.c). A device counts as an NVSwitch only if
+# its ID is listed here or pci.ids named it "... NVSwitch" -- NVIDIA also
+# made other 10de:0680 devices (nForce chipset bridges), and an unknown one
+# must not trigger a Fabric Manager install. IDs from the Fabric Manager user
+# guide's baseboard topology listings (docs.nvidia.com/datacenter/tesla/
+# fabric-manager-user-guide/, checked 2026-09-24) and pci.ids:
+#   1ac2  HGX-2 (V100)             NVSwitch gen1
+#   1af1  HGX A100                 NVSwitch gen2, "GA100 [A100 NVSwitch]"
+#   22a3  HGX H100/H200/H800/H20   NVSwitch gen3, "GH100 [H100 NVSwitch]"
+# NOT here, deliberately: HGX B200/B300/B100 (NVSwitch gen4). The guide says
+# their NVSwitches "are not recognized as PCIe devices on the host system";
+# the host sees ConnectX-7 bridge functions instead, so lspci cannot find them.
+# GB200/GB300 NVL72 compute trays run no Fabric Manager at all (it runs on
+# the NVLink switch trays).
+my $NVSWITCH_CLASS_RE = qr/\[0680\]/;
+my %NVSWITCH_DEVICE_IDS = (
+  '1ac2' => { generation => 1 },
+  '1af1' => { generation => 2 },
+  '22a3' => { generation => 3 }
+);
+
 # Rex::GPU::Detect::open_kernel_module_required and legacy_driver_requirement
 # below are wrappers over Rex::GPU::NVIDIA::Requirement, kept with their exact
 # return values for Rex::GPU::NVIDIA's install paths (epic karr #25).
@@ -142,7 +166,27 @@ hashref describing one detected GPU:
         compute   => 0,        # AMD compute support not yet implemented
       }
     ],
+    nvswitch => [
+      {
+        name      => "GH100 [H100 NVSwitch]",
+        vendor    => "nvidia",
+        pci_class => "0680",
+        device_id => "22a3",
+      }
+    ],
   }
+
+C<nvswitch> lists the NVSwitch chips of an HGX baseboard (NVIDIA C<10de>
+devices of PCI class C<0680>, "Bridge"), found by a second, read-only
+C<lspci -nn -d 10de:> that runs only when an NVIDIA GPU was found; it is
+C<[]> otherwise. A device counts only if its ID is a known NVSwitch
+(C<1ac2> HGX-2, C<1af1> HGX A100, C<22a3> HGX H100/H200) or C<lspci> names
+it C<... NVSwitch>; another NVIDIA bridge device is logged and skipped. An
+NVSwitch host needs NVIDIA Fabric Manager, which L<Rex::GPU/gpu_setup>
+installs with the driver. HGX B200/B300 are B<not> detected: their
+NVSwitches are not PCI devices on the host (NVIDIA's Fabric Manager guide),
+so C<nvswitch> stays C<[]> there. The key is additive; C<nvidia> and C<amd>
+are unchanged.
 
 If no supported GPU is found, or if the only display devices are virtual,
 both arrays are empty (C<[]>). A virtual display next to a real NVIDIA/AMD
@@ -157,7 +201,7 @@ sub detect {
   my $pci_output = run "lspci -nn 2>&1 | grep -E '\\[03(00|02)\\]'",
     auto_die => 0;
 
-  my $result = { nvidia => [], amd => [] };
+  my $result = { nvidia => [], amd => [], nvswitch => [] };
 
   return $result unless $pci_output;
 
@@ -184,6 +228,10 @@ sub detect {
 
   Rex::Logger::info("Virtual GPU detected (virtio/QEMU/VMware/VBox) — skipping")
     if $virtual && !@{$result->{nvidia}} && !@{$result->{amd}};
+
+  # NVSwitch (karr #23): only where there is an NVIDIA GPU for it to connect,
+  # so a host without one runs no extra command.
+  $result->{nvswitch} = _detect_nvswitch() if @{$result->{nvidia}};
 
   return $result;
 }
@@ -216,6 +264,38 @@ sub _ensure_lspci {
 sub _has_lspci {
   run 'command -v lspci >/dev/null 2>&1', auto_die => 0;
   return $? == 0 ? 1 : 0;
+}
+
+# Read-only: `lspci -nn -d 10de:` filtered to class [0680]; one hashref per
+# recognised NVSwitch.
+sub _detect_nvswitch {
+  my $out = run "lspci -nn -d 10de: 2>/dev/null | grep -F '[0680]'", auto_die => 0;
+  my @switches;
+  for my $line (split /\n/, $out // '') {
+    my $switch = _parse_nvswitch_line($line);
+    push @switches, $switch if $switch;
+  }
+  Rex::Logger::info('  [ok] NVSwitch: '.scalar(@switches).' ('.$switches[0]{name}.')')
+    if @switches;
+  return \@switches;
+}
+
+sub _parse_nvswitch_line {
+  my ($line) = @_;
+  return unless defined $line && $line =~ $NVSWITCH_CLASS_RE && $line =~ $NVIDIA_VENDOR_RE;
+  my ($device_id) = $line =~ /\[10de:([0-9a-f]{4})\]/i;
+  my ($name) = $line =~ /:\s+NVIDIA\s+Corporation\s+(.+?)\s*\[10de:/;
+  $name //= 'Unknown NVIDIA bridge';
+  unless ($NVSWITCH_DEVICE_IDS{lc $device_id} || $name =~ /\bNVSwitch\b/i) {
+    Rex::Logger::info("  [skip] NVIDIA bridge device not known as an NVSwitch: $name [10de:$device_id]");
+    return;
+  }
+  return {
+    name      => $name,
+    vendor    => 'nvidia',
+    pci_class => '0680',
+    device_id => lc $device_id
+  };
 }
 
 sub _parse_nvidia_line {

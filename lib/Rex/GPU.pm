@@ -49,6 +49,7 @@ Returns a hashref with detected GPUs grouped by vendor:
   #       compute   => 0,        # always 0 (AMD not yet supported)
   #     }
   #   ],
+  #   nvswitch => [],            # HGX NVSwitch chips, see Rex::GPU::Detect
   # }
 
 Virtual display devices (virtio, QEMU, VMware, VirtualBox) are skipped. If
@@ -84,6 +85,20 @@ on the host makes C<gpu_setup> die before the host is changed, unless a
 working driver is already installed, and so do GPUs that cannot share one
 driver (a V100 next to a B200). A host whose GPUs are all Turing to Hopper
 gets the same driver as before.
+
+On an HGX baseboard with NVSwitches (HGX-2, HGX A100, HGX H100/H200:
+C<nvswitch> in the L</gpu_detect> result is not empty) the NVSwitches are
+passed as C<nvswitches>, and NVIDIA Fabric Manager is installed with the
+driver at exactly its version and C<nvidia-fabricmanager.service> enabled --
+without it CUDA does not initialise on those hosts. A distro source that has
+no Fabric Manager is not used (Debian's C<non-free>; Debian 12/13 takes
+NVIDIA's CUDA repository instead, Debian 11 and openSUSE die before the host
+is changed). See the C<nvswitches> option of
+L<Rex::GPU::NVIDIA/install_driver>. Hosts without NVSwitch are unchanged.
+HGX B200/B300 are B<not> covered: their NVSwitches are not PCI devices on
+the host, so they are not detected, and they also need NVIDIA's NVLink
+Subnet Manager -- install Fabric Manager there yourself. GB200/GB300 NVL72
+compute trays need no Fabric Manager (it runs on the NVLink switch trays).
 
 After the last step L<Rex::GPU::NVIDIA/verify_nvidia> checks the result --
 kernel module, C<nvidia-smi -L>, container toolkit -- and logs a warning for
@@ -164,8 +179,8 @@ Neither option changes anything for a caller that does not pass it; in
 particular L<Rex::Rancher>'s C<gpu =E<gt> 1> passes neither, and picks up a
 custom setup through C<set gpu_nvidia_setup>.
 
-Returns the result of L<Rex::GPU::Detect/detect> — a hashref with C<nvidia>
-and C<amd> array keys.
+Returns the result of L<Rex::GPU::Detect/detect> — a hashref with C<nvidia>,
+C<amd> and C<nvswitch> array keys.
 
 Dies if the connection backend is neither LibSSH nor SFTP-capable.
 
@@ -204,10 +219,16 @@ sub gpu_setup {
     if (@compute) {
       Rex::Logger::info("CUDA-capable NVIDIA GPU: " . $_->{name}) for @compute;
       # Every compute GPU (karr #33): the driver has to fit all of them.
+      # NVSwitch (karr #23): passed only when there is one, so every other
+      # host gets exactly the call it got before.
+      my $nvswitch = $gpus->{nvswitch} // [];
+      Rex::Logger::info("NVSwitch host (".scalar(@$nvswitch)." NVSwitch): NVIDIA Fabric "
+        ."Manager is installed with the driver") if @$nvswitch;
       Rex::GPU::NVIDIA::install_driver(
         reboot => ($opts{reboot} ? 1 : 0),
         gpus   => \@compute,
         ( map { defined $opts{$_} ? ( $_ => $opts{$_} ) : () } qw( setup requirement ) ),
+        ( @$nvswitch ? ( nvswitches => $nvswitch ) : () ),
       );
       Rex::GPU::NVIDIA::install_container_toolkit();
       Rex::GPU::NVIDIA::generate_cdi_specs();

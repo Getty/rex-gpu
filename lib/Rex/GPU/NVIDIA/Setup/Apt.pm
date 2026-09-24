@@ -117,6 +117,100 @@ sub verify_packages {
   }
 }
 
+=method fabric_manager_unavailable
+
+After C<apt-get update>, before the driver install: a reason unless
+C<apt-cache policy> shows an installation candidate for the Fabric Manager
+package.
+
+=method installed_driver_version
+
+The upstream part (no epoch, no Debian revision) of C<dpkg-query -W
+-f='${Version}'> for the source's C<fabric_manager_match> package:
+C<580.178.04-0ubuntu0.24.04.1> is C<580.178.04>.
+
+=method install_versioned_package
+
+Looks the package's versions up with C<apt-cache madison>, takes the first
+(newest) whose upstream version is C<$version> -- the Debian revision may
+differ from the driver's, e.g. NVIDIA's Ubuntu repository has driver
+C<580.95.05-0ubuntu1> next to Fabric Manager C<580.95.05-1> -- and runs
+C<apt-get install -y PKG=VERSION> with C<auto_die =E<gt> 0>. Dies before
+installing anything when no version matches: a Fabric Manager of another
+version aborts on the driver check.
+
+=method verify_versioned_package
+
+C<dpkg -l ... ^ii>, then the installed upstream version (C<dpkg-query>) must
+be C<$version>.
+
+=cut
+
+sub fabric_manager_unavailable {
+  my ( $self, $pkg ) = @_;
+  my $policy = $self->run_cmd("LC_ALL=C apt-cache policy $pkg 2>/dev/null", auto_die => 0);
+  return if $self->_apt_candidate_present($policy);
+  return $pkg.' has no installation candidate after apt-get update';
+}
+
+sub installed_driver_version {
+  my ( $self, $source ) = @_;
+  my $pkg = $self->_with_branch($source->{fabric_manager_match}, $source);
+  die "The driver source names no package to read the driver version from "
+    ."(fabric_manager_match); the driver is installed, Fabric Manager is not\n"
+    unless defined $pkg;
+  return $self->_dpkg_upstream_version($self->_dpkg_version($pkg));
+}
+
+sub install_versioned_package {
+  my ( $self, $pkg, $version ) = @_;
+  my $madison = $self->run_cmd("apt-cache madison $pkg 2>/dev/null", auto_die => 0);
+  my $full = $self->_madison_version_for($madison, $version);
+  die "apt has no $pkg of driver version $version (apt-cache madison $pkg); Fabric "
+    ."Manager must match the driver exactly, so none was installed. The driver is "
+    ."installed, Fabric Manager is not\n" unless defined $full;
+  $self->run_cmd('DEBIAN_FRONTEND=noninteractive '.$self->apt_get.' install -y '.$pkg.'='.$full,
+    auto_die => 0);
+}
+
+sub verify_versioned_package {
+  my ( $self, $pkg, $version ) = @_;
+  $self->verify_packages({ verify => [ $pkg ] });
+  my $installed = $self->_dpkg_upstream_version($self->_dpkg_version($pkg));
+  die "$pkg is ".( $installed // 'unknown' )." after apt-get install, not the driver's "
+    ."$version\n" unless defined $installed && $installed eq $version;
+}
+
+sub _dpkg_version {
+  my ( $self, $pkg ) = @_;
+  my $v = $self->run_cmd("dpkg-query -W -f='\${Version}' $pkg 2>/dev/null", auto_die => 0);
+  return if $? != 0 || !defined $v;
+  chomp $v;
+  return $v;
+}
+
+# Pure: "1:580.95.05-0ubuntu1" -> "580.95.05". undef/empty -> undef.
+sub _dpkg_upstream_version {
+  my ( $self, $version ) = @_;
+  return unless defined $version && length $version;
+  ( my $up = $version ) =~ s/^\d+://;
+  $up =~ s/-[^-]*$//;
+  return $up;
+}
+
+# Pure: the first `apt-cache madison` version (madison lists newest first)
+# whose upstream part is $upstream; undef if none.
+sub _madison_version_for {
+  my ( $self, $madison, $upstream ) = @_;
+  for my $line (split /\n/, $madison // '') {
+    my ( undef, $full ) = map { s/^\s+|\s+$//gr } split /\|/, $line;
+    next unless defined $full && length $full;
+    my $up = $self->_dpkg_upstream_version($full);
+    return $full if defined $up && $up eq $upstream;
+  }
+  return;
+}
+
 =method initramfs_command
 
 C<update-initramfs -u 2E<gt>/dev/null>.

@@ -48,6 +48,10 @@ The verified target set is the RKE2 Linux family above. **openSUSE Leap / SLES i
 
 GPUs tested include the **NVIDIA RTX 4000 SFF Ada Generation** (PCI class `0302`, datacenter compute profile).
 
+### NVSwitch / HGX (Fabric Manager)
+
+On an HGX baseboard whose NVSwitches are PCI devices on the host (HGX-2, HGX A100, HGX H100/H200), `gpu_detect` lists them under `nvswitch`, and `gpu_setup` installs NVIDIA Fabric Manager together with the driver, at exactly the driver's version, and enables `nvidia-fabricmanager.service`. Without it CUDA does not initialise on those hosts. Debian 11 and openSUSE have no Fabric Manager source and die before the host is changed. **HGX B200/B300 are not covered:** their NVSwitches are not visible on the host PCI bus, and they also need NVIDIA's NVLink Subnet Manager (`nvlsm`), so install Fabric Manager there yourself. GB200/GB300 NVL72 compute trays run no Fabric Manager; it runs on the switch trays. None of this has been tested on HGX hardware.
+
 ### MIG (A100 / H100 / B200)
 
 The CDI spec captures the MIG layout as it was when the spec was generated. Neither the static `/etc/cdi/nvidia.yaml` nor the `nvidia-cdi-refresh` unit regenerates it when MIG is reconfigured. After changing MIG mode or instances, regenerate the spec: run `systemctl restart nvidia-cdi-refresh.service`, or on hosts without that unit, `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml`. The MIG strategy that Kubernetes exposes (`single` / `mixed`) is configured in the NVIDIA device plugin or GPU Operator, which writes its own CDI spec. MIG has not been tested on hardware with Rex::GPU.

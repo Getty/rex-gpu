@@ -66,6 +66,58 @@ sub verify_packages {
   }
 }
 
+=method installed_driver_version
+
+C<rpm -q --qf '%{VERSION}'> of the source's C<fabric_manager_match>
+package (C<nvidia-driver>): C<580.95.05>.
+
+=method install_versioned_package
+
+C<< <package_manager> install -y PKG-VERSION >> with C<auto_die =E<gt> 0>,
+the name-version form without an epoch: NVIDIA's driver packages carry epoch
+3, its C<nvidia-fabricmanager> epoch 0, so the driver's full EVR would not
+match. There is no availability check before the driver install on this
+layer; a missing version fails the install, and
+L</verify_versioned_package> dies.
+
+=method verify_versioned_package
+
+L</verify_query> of the package, then C<rpm -q --qf '%{VERSION}'> must be
+C<$version>.
+
+=cut
+
+sub installed_driver_version {
+  my ( $self, $source ) = @_;
+  my $pkg = $self->_with_branch($source->{fabric_manager_match}, $source);
+  die "The driver source names no package to read the driver version from "
+    ."(fabric_manager_match); the driver is installed, Fabric Manager is not\n"
+    unless defined $pkg;
+  return $self->_rpm_version($pkg);
+}
+
+sub install_versioned_package {
+  my ( $self, $pkg, $version ) = @_;
+  $self->run_cmd($self->package_manager.' install -y '.$pkg.'-'.$version, auto_die => 0);
+}
+
+sub verify_versioned_package {
+  my ( $self, $pkg, $version ) = @_;
+  $self->verify_packages({ verify => [ $pkg ] });
+  my $installed = $self->_rpm_version($pkg);
+  die "$pkg is ".( $installed // 'unknown' ).' after '.$self->package_manager
+    ." install, not the driver's $version\n"
+    unless defined $installed && $installed eq $version;
+}
+
+sub _rpm_version {
+  my ( $self, $pkg ) = @_;
+  my $v = $self->run_cmd("rpm -q --qf '%{VERSION}' $pkg 2>&1", auto_die => 0);
+  return if $? != 0 || !defined $v;
+  chomp $v;
+  return $v;
+}
+
 # Pure (karr #26): is this `rpm -q --qf '%{VERSION}'` output a version of
 # driver branch $branch ("580.178.04" is branch 580)? Anything else -- another
 # branch, "package ... is not installed", empty -- is false.

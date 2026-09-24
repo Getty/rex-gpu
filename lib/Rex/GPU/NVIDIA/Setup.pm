@@ -72,6 +72,8 @@ sub BUILD {
     if defined $args->{gpu} && defined $args->{gpus};
   croak __PACKAGE__.'->new: gpus must be an arrayref of GPU hashrefs'
     if defined $args->{gpus} && ref $args->{gpus} ne 'ARRAY';
+  croak __PACKAGE__.'->new: nvswitches must be an arrayref'
+    if defined $args->{nvswitches} && ref $args->{nvswitches} ne 'ARRAY';
   $self->_check_gpus($args->{gpus} // [ defined $args->{gpu} ? $args->{gpu} : () ]);
 }
 
@@ -88,6 +90,32 @@ sub _check_gpus {
       .'was changed on the host';
   }
   return;
+}
+
+=attr nvswitches
+
+Arrayref of the host's NVSwitch chips, as L<Rex::GPU::Detect/detect>
+returns them under C<nvswitch>; only whether there is one counts, no key is
+read. Empty (the default): no Fabric Manager, nothing changes. Non-empty: the
+driver source must name a Fabric Manager package (C<fabric_manager>, see
+L</sources>) -- a source without one is rejected with that reason by
+L</select_source> -- and L</install_fabric_manager> runs after the driver
+packages are verified. A caller that finds its GPUs without C<lspci> and
+passes none gets no Fabric Manager.
+
+=method fabric_manager_needed
+
+True when L</nvswitches> lists at least one NVSwitch.
+
+=cut
+
+has nvswitches => ( is => 'lazy', writer => '_set_nvswitches' );
+
+sub _build_nvswitches { [] }
+
+sub fabric_manager_needed {
+  my ( $self ) = @_;
+  return ( grep { ref $_ eq 'HASH' } @{ $self->nvswitches } ) ? 1 : 0;
 }
 
 # extra_requirement may be given as a plain hashref; it becomes an object of
@@ -194,7 +222,8 @@ What L<Rex::GPU::NVIDIA/install_driver> does to a setup B<object> passed as
 C<setup>: it hands over the GPUs it was called with and its C<requirement>
 option. C<gpus> is taken only if the object has none of its own (built
 without C<gpu>/C<gpus>, or with an empty list) -- an object built for
-specific GPUs keeps them. C<extra_requirement> (hashref or object, see
+specific GPUs keeps them. C<nvswitches> likewise, only if the object has
+none. C<extra_requirement> (hashref or object, see
 L</extra_requirement>) is set if given. Returns the object.
 
 Croaks, before anything on the host is changed, if the object has already
@@ -218,6 +247,12 @@ sub adopt {
   my $extra = defined $arg{extra_requirement}
     ? $self->_coerce_requirement($arg{extra_requirement}) : undef;
   $self->_check_gpus($gpus);
+  my $nvswitches = $arg{nvswitches} // [];
+  croak __PACKAGE__.'->adopt: nvswitches must be an arrayref'
+    unless ref $nvswitches eq 'ARRAY';
+  # NVSwitches add the Fabric Manager step and a source filter plan applies;
+  # they do not touch the requirement, so no fixed-requirement check for them.
+  $self->_set_nvswitches($nvswitches) if @$nvswitches && !@{ $self->nvswitches };
   my $take_gpus = @$gpus && !@{ $self->gpus };
   return $self unless $take_gpus || $extra;
   croak ref($self).' object passed as setup => already has a fixed requirement '
@@ -327,6 +362,7 @@ Runs the fixed sequence, each step a method a subclass can override:
   resolve_plan($plan) -> fixes the packages; dies before any install
   install_packages($plan)
   verify_packages($plan)
+  install_fabric_manager($plan)   -> only if fabric_manager_needed
   post_install($plan)
 
 Returns C<1> after an install, C<0> if a working driver was already there.
@@ -351,6 +387,7 @@ sub install {
   $self->resolve_plan($plan);
   $self->install_packages($plan);
   $self->verify_packages($plan);
+  $self->install_fabric_manager($plan) if $self->fabric_manager_needed;
   $self->post_install($plan);
   return 1;
 }
@@ -476,6 +513,13 @@ L</resolve_source>, after the repository is refreshed.
 =item * C<unavailable> -- a reason: this source does not exist on this host
 (no repository for the release or architecture). Skipped with that reason.
 
+=item * C<fabric_manager> -- the NVIDIA Fabric Manager package for this
+source's driver, C<%s> standing for the exact branch
+(C<nvidia-fabricmanager-%s>); and C<fabric_manager_match>, the package
+whose installed version is the driver's (L</installed_driver_version>). A
+source without C<fabric_manager> is rejected on a host with
+L</nvswitches>.
+
 =back
 
 Plus whatever keys the class's later steps read. Host-read-only, like
@@ -506,7 +550,9 @@ refreshed, and checks the result against L</requirement> again. If
 L</resolve_source> returned a new source, it goes into C<$plan>: C<source>,
 C<packages> (the plan's other packages, then the resolved source's) and
 C<verify>. Dies, before any driver package is installed, when the resolved
-source is C<unavailable> or no longer fits; the source L</plan> chose is not
+source is C<unavailable> or no longer fits, or -- on a host with
+L</nvswitches> -- its Fabric Manager package has no exact name or no
+installation candidate (L</fabric_manager_unavailable>); the source L</plan> chose is not
 swapped for another candidate then. A plan without a source is left alone.
 
 =method resolve_source
@@ -561,7 +607,8 @@ sub select_source {
   my $requirement = $self->requirement;
   my @rejected;
   for my $candidate (@candidates) {
-    my $why = $candidate->{unavailable} // $requirement->why_not($candidate);
+    my $why = $candidate->{unavailable} // $requirement->why_not($candidate)
+      // $self->_fabric_manager_why_not($candidate);
     unless (defined $why) {
       Rex::Logger::info('  Driver source: '.$candidate->{name});
       return $candidate;
@@ -591,6 +638,7 @@ sub resolve_plan {
     ."`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
     ."install_driver skips the driver step\n"
     if defined $why;
+  $self->_check_fabric_manager_source($resolved) if $self->fabric_manager_needed;
   return if $resolved == $source;
   my %old = map { $_ => 1 } @{ $source->{packages} // [] };
   $plan->{source}   = $resolved;
@@ -599,6 +647,160 @@ sub resolve_plan {
   $plan->{verify}   = [ @{ $resolved->{verify} // [] } ];
   Rex::Logger::info('  Driver packages: '.join(', ', @{ $resolved->{packages} // [] }));
   return;
+}
+
+# NVSwitch host (karr #23): a source that names no Fabric Manager package
+# cannot make the GPUs usable -- without Fabric Manager CUDA init fails with
+# cudaErrorSystemNotReady -- so it does not fit, like a wrong branch.
+sub _fabric_manager_why_not {
+  my ( $self, $source ) = @_;
+  return unless $self->fabric_manager_needed;
+  return if defined $source->{fabric_manager};
+  return 'no NVIDIA Fabric Manager package for the NVSwitch on this host';
+}
+
+# After resolve (the branch is exact now): the package name must be complete
+# and the repository must carry it -- dies before any driver package goes in.
+sub _check_fabric_manager_source {
+  my ( $self, $source ) = @_;
+  my $fm  = $self->fabric_manager_package($source);
+  my $why = defined $fm
+    ? $self->fabric_manager_unavailable($fm)
+    : 'its Fabric Manager package '.( $source->{fabric_manager} // '(none)' )
+      .' needs an exact driver branch, and none is known';
+  die 'The NVIDIA driver source '.$source->{name}.' has no Fabric Manager for the NVSwitch '
+    .'on this host: '.$why.'. No driver package was installed, only the package sources '
+    ."were prepared. Install the driver and a Fabric Manager of exactly its version yourself\n"
+    if defined $why;
+  Rex::Logger::info('  Fabric Manager package: '.$fm);
+  return;
+}
+
+=method fabric_manager_package
+
+  my $pkg = $self->fabric_manager_package($source);
+
+The source's C<fabric_manager> with C<%s> replaced by its exact C<branch>;
+C<undef> without C<fabric_manager>, or with C<%s> and no exact branch.
+
+=method fabric_manager_unavailable
+
+  my $why = $self->fabric_manager_unavailable($pkg);
+
+Run by L</resolve_plan> after the package index is refreshed and before any
+driver package is installed: a reason when the repository has no
+installation candidate for C<$pkg>, C<undef> when it has one or this layer
+cannot tell. C<undef> here and on the rpm layer; the apt layer asks
+C<apt-cache policy>.
+
+=method install_fabric_manager
+
+  $self->install_fabric_manager($plan);
+
+Runs after L</verify_packages> when L</fabric_manager_needed>: reads the
+installed driver's version (L</installed_driver_version>), installs the
+source's L</fabric_manager_package> at B<exactly> that upstream version
+(L</install_versioned_package>) and checks it
+(L</verify_versioned_package>), then C<systemctl enable> of
+L</fabric_manager_service>. It is not started here: before the reboot that
+unloads nouveau the NVIDIA module may not be bound, and Fabric Manager
+aborts when the loaded driver does not match;
+L<Rex::GPU::NVIDIA/install_driver> starts it after the C<modprobe>, or
+checks it after the reboot, which starts the enabled unit. Dies -- the
+driver is installed then, no Fabric Manager of another version is -- when
+the driver version cannot be read, the repository has no Fabric Manager of
+that version, it does not end up installed at that version, or the unit
+cannot be enabled.
+
+=method fabric_manager_service
+
+C<nvidia-fabricmanager.service>.
+
+=method installed_driver_version
+
+  my $version = $self->installed_driver_version($source);   # "580.95.05"
+
+The upstream version of the installed driver, read from the package the
+source's C<fabric_manager_match> names (C<%s> = branch). Dies in the base
+class; the packaging layers read C<dpkg-query> / C<rpm -q>.
+
+=method install_versioned_package
+
+  $self->install_versioned_package($pkg, $version);
+
+Installs C<$pkg> at upstream version C<$version> through L</run_cmd>, never
+L<Rex::Commands::Pkg/pkg>. Dies in the base class.
+
+=method verify_versioned_package
+
+  $self->verify_versioned_package($pkg, $version);
+
+Dies unless C<$pkg> is installed at upstream version C<$version>. Dies in
+the base class.
+
+=cut
+
+sub fabric_manager_package {
+  my ( $self, $source ) = @_;
+  return $self->_with_branch($source->{fabric_manager}, $source);
+}
+
+sub fabric_manager_unavailable { return }
+
+sub fabric_manager_service { 'nvidia-fabricmanager.service' }
+
+sub install_fabric_manager {
+  my ( $self, $plan ) = @_;
+  my $source = $plan->{source} // {};
+  my $fm = $self->fabric_manager_package($source);
+  die "No Fabric Manager package is known for the NVSwitch on this host; the driver is "
+    ."installed, Fabric Manager is not\n" unless defined $fm;
+  my $version = $self->installed_driver_version($source);
+  die 'Cannot read the installed NVIDIA driver version ('.( $version // 'nothing' ).'); '
+    .'Fabric Manager must match it exactly, so none was installed. The driver is '
+    ."installed, Fabric Manager is not\n"
+    unless $self->_is_driver_version($version);
+  Rex::Logger::info('  Installing NVIDIA Fabric Manager '.$fm.' '.$version.' (NVSwitch)');
+  $self->install_versioned_package($fm, $version);
+  $self->verify_versioned_package($fm, $version);
+  my $unit = $self->fabric_manager_service;
+  $self->run_cmd('systemctl enable '.$unit, auto_die => 0);
+  die 'systemctl enable '.$unit.' failed after installing '.$fm.' '.$version."\n"
+    if $? != 0;
+  return;
+}
+
+sub installed_driver_version {
+  my ( $self ) = @_;
+  die ref($self)." has no packaging layer to read the driver version from\n";
+}
+
+sub install_versioned_package {
+  my ( $self ) = @_;
+  die ref($self)." has no packaging layer to install Fabric Manager with\n";
+}
+
+sub verify_versioned_package {
+  my ( $self ) = @_;
+  die ref($self)." has no packaging layer to verify Fabric Manager with\n";
+}
+
+# Pure: an NVIDIA driver version, "580.95.05" / "570.211.01" -- two or three
+# dot-separated numbers, nothing else.
+sub _is_driver_version {
+  my ( $self, $version ) = @_;
+  return defined $version && $version =~ /\A\d+\.\d+(?:\.\d+)?\z/ ? 1 : 0;
+}
+
+# Pure: a source key's %s filled with the source's exact branch; undef when
+# there is no key, or a %s and no exact branch.
+sub _with_branch {
+  my ( $self, $name, $source ) = @_;
+  return unless defined $name;
+  return $name unless $name =~ /%s/;
+  return unless defined $source->{branch};
+  ( my $filled = $name ) =~ s/%s/$source->{branch}/g;
+  return $filled;
 }
 
 =method prepare_host

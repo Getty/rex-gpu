@@ -52,6 +52,11 @@ So a GPU without constraints (Turing to Hopper, no GPU) gets
 C<ubuntu-server>, Blackwell C<ubuntu-server-open>, Maxwell/Pascal/Volta
 C<ubuntu-server-580>.
 
+Each names C<nvidia-fabricmanager-NNN> as its Fabric Manager (for a host
+with NVSwitches, see L<Rex::GPU::NVIDIA::Setup/nvswitches>): NNN is the
+branch found after C<apt-get update>, and it is installed at the upstream
+version of the installed C<nvidia-driver-NNN-server(-open)>.
+
 Never C<nvidia-smi>: on 24.04 it is a virtual package with no installation
 candidate, and the driver metapackage pulls it in anyway.
 
@@ -62,20 +67,33 @@ candidate, and the driver metapackage pulls it in anyway.
 # next to 590 and 595). The apt-cache search runs in resolve_source, after
 # `apt-get update` -- before it, a fresh image's index is stale or empty
 # (karr #35).
+#
+# Fabric Manager (karr #23): Ubuntu's archive builds nvidia-fabricmanager-NNN
+# (source fabric-manager-NNN) for each -server branch, one package for the
+# proprietary and the -open driver; it Depends on the virtual
+# nvidia-kernel-common-NNN-server-<exact upstream version>, and on noble and
+# jammy it carries exactly the version string of nvidia-driver-NNN-server
+# (packages.ubuntu.com, 580.178.04-0ubuntu0.24.04.1 / 22.04.1, checked
+# 2026-09-24).
 sub sources {
   my ( $self ) = @_;
+  my %fm = ( fabric_manager => 'nvidia-fabricmanager-%s' );
   return (
     {
       name            => 'ubuntu-server',
       kernel_module   => 'proprietary',
       branch_at_least => 580,
-      search          => '^nvidia-driver-[0-9].*-server$'
+      search          => '^nvidia-driver-[0-9].*-server$',
+      %fm,
+      fabric_manager_match => 'nvidia-driver-%s-server'
     },
     {
       name            => 'ubuntu-server-open',
       kernel_module   => 'open',
       branch_at_least => 580,
-      search          => '^nvidia-driver-[0-9].*-server-open$'
+      search          => '^nvidia-driver-[0-9].*-server-open$',
+      %fm,
+      fabric_manager_match => 'nvidia-driver-%s-server-open'
     },
     {
       name            => 'ubuntu-server-580',
@@ -83,7 +101,9 @@ sub sources {
       branch          => 580,
       packages        => [ 'nvidia-driver-580-server' ],
       verify          => [ 'nvidia-driver-580-server' ],
-      check_candidate => 'nvidia-driver-580-server'
+      check_candidate => 'nvidia-driver-580-server',
+      %fm,
+      fabric_manager_match => 'nvidia-driver-580-server'
     }
   );
 }

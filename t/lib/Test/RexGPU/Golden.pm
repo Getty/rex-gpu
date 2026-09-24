@@ -251,7 +251,9 @@ my %GPU_LINE = (
   # multi-GPU fixtures (karr #33); names hand-written like the others
   b200      => '18:00.0 3D controller [0302]: NVIDIA Corporation GB100 [B200] [10de:2901] (rev a1)',
   b300      => '19:00.0 3D controller [0302]: NVIDIA Corporation GB110 [B300 SXM6 AC] [10de:3182] (rev a1)',
-  kepler    => '04:00.0 3D controller [0302]: NVIDIA Corporation GK210GL [Tesla K80] [10de:102d] (rev a1)'
+  kepler    => '04:00.0 3D controller [0302]: NVIDIA Corporation GK210GL [Tesla K80] [10de:102d] (rev a1)',
+  # HGX H100 GPU (karr #23), name as pci.ids 2025 resolves 10de:2330
+  h100      => '18:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)'
 );
 
 sub gpu_fixture {
@@ -457,6 +459,9 @@ my @READ_ONLY = (
   qr{${RUN}rpm -q },
   qr{${RUN}lsmod },
   qr{${RUN}/sbin/ldconfig -p },
+  qr{${RUN}dpkg-query -W },
+  qr{${RUN}apt-cache madison },
+  qr{${RUN}systemctl is-active },
   qr{^can_run: }
 );
 

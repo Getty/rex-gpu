@@ -33,6 +33,11 @@ branch 580 (G07 has no proprietary module), on Leap 15 and 16.
 
 =back
 
+None names a Fabric Manager: NVIDIA's GFX repository has none (it is only
+in the CUDA repository), so a host with NVSwitches
+(L<Rex::GPU::NVIDIA::Setup/nvswitches>) dies in
+L<Rex::GPU::NVIDIA::Setup/plan>, before it is changed.
+
 A meta package co-installs the kernel module and the userspace at one
 version, so C<nvidia-smi> never sees a C<Driver/library version mismatch>.
 Pre-signed kmp packages need no kernel headers.

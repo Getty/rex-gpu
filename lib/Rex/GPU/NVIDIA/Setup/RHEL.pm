@@ -120,7 +120,9 @@ C<nvidia-driver> must be a 580 (L</verify_packages>).
 =back
 
 C<nvidia-driver> is verified on both, plus the proprietary kmod on the
-second. So a GPU without constraints and Blackwell get C<cuda-open-dkms>,
+second. On a host with NVSwitches both install C<nvidia-fabricmanager> of
+the installed C<nvidia-driver>'s exact version
+(C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without constraints and Blackwell get C<cuda-open-dkms>,
 Maxwell/Pascal/Volta C<cuda-580-dkms>.
 
 =method plan
@@ -158,15 +160,23 @@ sub sources {
   my $open = $major >= 10
     ? { packages => [ 'kmod-nvidia-open-dkms', 'nvidia-driver', 'nvidia-driver-cuda' ] }
     : { packages => [ 'nvidia-open' ], module_stream => 'open-dkms', stream_optional => 1 };
+  # Fabric Manager (karr #23): nvidia-fabricmanager, unversioned from 580 on,
+  # epoch 0 (the driver packages carry epoch 3), no Requires on the driver;
+  # an artifact of every nvidia-driver stream's /fm profile on rhel8/9
+  # (repodata modules.yaml and primary.sqlite, checked 2026-09-24). Pinned
+  # to the installed nvidia-driver's version.
+  my %fm = ( fabric_manager => 'nvidia-fabricmanager', fabric_manager_match => 'nvidia-driver' );
   return (
     {
       name            => 'cuda-open-dkms',
       kernel_module   => 'open',
       branch_at_least => 580,
       verify          => [ 'nvidia-driver' ],
+      %fm,
       %$open
     },
     {
+      %fm,
       name          => 'cuda-580-dkms',
       kernel_module => 'proprietary',
       branch        => 580,
