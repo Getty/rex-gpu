@@ -93,8 +93,10 @@ still probes `nvidia-smi` and rejects Kepler, then dies. Each
 family has a trap that is already solved in the code; do not "simplify" these away:
 
 - **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
-  archive entry in both `sources.list` and deb822 `*.sources` (k36/k40; unknown mirrors are
-  left alone and warn); install `nvidia-driver` + `nvidia-smi` + the *running* kernel's
+  archive entry in both `sources.list` and deb822 `*.sources` (k36/k40/k41: a `signed-by`
+  naming only `debian-archive-*` keyrings decides alone, host irrelevant; without it the URI
+  must pass the overridable `is_debian_archive_uri` — keyring check `is_debian_archive_keyring`
+  is overridable too; unknown mirrors are left alone and warn with the override hint); install `nvidia-driver` + `nvidia-smi` + the *running* kernel's
   headers only; non-free branch from a fixed table (11→470, 12→535, 13→550, else unknown).
   Blackwell on Debian 12/13 instead uses NVIDIA's CUDA repo (`cuda-keyring`,
   `nvidia-driver-cuda` + `nvidia-kernel-open-dkms`, no non-free; k18; `unavailable` elsewhere). Never the `linux-headers-$arch`
