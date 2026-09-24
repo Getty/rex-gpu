@@ -47,9 +47,17 @@ Revision history for Rex-GPU
     at exactly its version, checked with dpkg/rpm, and its service enabled.
     Debian's non-free has none, so such a Debian 12/13 host gets NVIDIA's
     CUDA-repo driver; Debian 11 and openSUSE die before the host is changed.
-    Hosts without NVSwitch are unchanged. HGX B200/B300 are not detected
-    (their NVSwitches are not on the host PCI bus) and need NVLSM, which is
-    not installed. Not hardware-verified (karr #23)
+    Hosts without NVSwitch are unchanged. Not hardware-verified (karr #23)
+  - install_driver (and so gpu_setup) on an HGX B200/B300 (GPU device ID
+    2901, 2909 or 3182; their NVSwitches are not on the host PCI bus, so no
+    Fabric Manager is installed) installs the driver as before, then warns
+    once, also for an already-installed driver, that CUDA needs NVIDIA
+    Fabric Manager, the NVLink Subnet Manager (nvlsm), OFED/MOFED and
+    kernel >= 5.17, none of which Rex::GPU installs, and whether
+    nvidia-fabricmanager.service is active. GB200/GB300 (2941, 31C2, 31C3)
+    get an info line that multi-node NVLink needs nvidia-imex. The IDs are
+    Rex::GPU::NVIDIA::Setup's overridable nvlink_platform_ids.
+    Not hardware-verified (karr #49)
   - install_driver and install_container_toolkit accept Rocky Linux,
     AlmaLinux and CentOS Stream under the names Rex reports when
     lsb_release is installed (Rocky, RockyLinux, AlmaLinux, CentOSStream),

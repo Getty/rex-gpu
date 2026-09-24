@@ -59,7 +59,7 @@ no install) with a warning — keep it 0. `plan` still rejects a Kepler passed t
 `detect()` first ensures `lspci` (`command -v`, else pciutils — dnf + rpm -q for the
 lsb_release RHEL names Rex::Pkg can't handle; k46), and only if an NVIDIA GPU was found
 scans `lspci -nn -d 10de:` for NVSwitch bridges (class `0680`, IDs 1ac2/1af1/22a3) into
-`nvswitch => [...]` (k23). HGX B200/B300 NVSwitches are NOT on the host PCI bus.
+`nvswitch => [...]` (k23). HGX B200/B300 NVSwitches are NOT on the host PCI bus: `Setup::nvlink_platform_ids` (overridable, 2901/2909/3182 → `hgx-nvlink5`, 2941/31c2/31c3 → `nvl72`) makes `install_driver` warn once after the driver (FM + nvlsm + OFED + kernel ≥5.17 not automated; one read-only `systemctl is-active`) or note IMEX (k49) — no install, verify unaffected.
 
 **Which driver a GPU needs is a separate question** (epic #25): `Rex::GPU::NVIDIA::Requirement`
 (Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,

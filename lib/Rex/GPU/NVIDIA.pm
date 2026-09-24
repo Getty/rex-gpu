@@ -186,9 +186,22 @@ needed, and installs nothing. No package source is ever added for this.
 
 Then, as after an install, it warns if the unit is not active. Omitted or empty
 (the default, and every caller that finds its GPUs without C<lspci>): no
-Fabric Manager, nothing changes. HGX B200/B300 are not detected as NVSwitch
-hosts -- their NVSwitches are not PCI devices on the host -- and need
-NVIDIA's NVLink Subnet Manager besides, which Rex::GPU does not install.
+Fabric Manager, nothing changes.
+
+HGX B200/B300 are not NVSwitch hosts here -- their NVSwitches are not PCI
+devices on the host, so there are no C<nvswitches> and none of the above
+runs. They are recognised by the GPUs' device IDs instead
+(L<Rex::GPU::NVIDIA::Setup/nvlink_platforms>, from C<gpus>, so also for a
+caller without L<Rex::GPU::Detect>): the driver is installed as for any
+other Blackwell, then -- also when it was already installed -- one warning,
+however many GPUs, says that CUDA needs NVIDIA Fabric Manager, the NVLink
+Subnet Manager (C<nvlsm>), OFED/MOFED (C<libibumad3>, C<infiniband-diags>)
+and kernel 5.17 or newer, none of which Rex::GPU installs or checks, and
+that CUDA jobs fail with C<cudaErrorSystemNotReady> without them. The
+warning names whether C<nvidia-fabricmanager.service> is active (C<systemctl
+is-active>, the only command it runs). L</verify_nvidia> is not affected.
+GB200/GB300 NVL72 compute trays get an info line instead: multi-node NVLink
+needs C<nvidia-imex> and its configuration, which Rex::GPU does not set up.
 
 =back
 
@@ -294,6 +307,7 @@ sub install_driver {
         if $setup->retrofit_fabric_manager;
       _check_fabric_manager($setup);
     }
+    _note_nvlink_platforms($setup);
     return;
   }
 
@@ -312,6 +326,7 @@ sub install_driver {
   # Driver only (karr #42): the toolkit comes after this step in gpu_setup,
   # so verify_nvidia's nvidia-ctk check could only warn here.
   verify_nvidia_driver();
+  _note_nvlink_platforms($setup);
 
   Rex::Logger::info("NVIDIA driver installation complete");
 }
@@ -803,6 +818,31 @@ sub _check_fabric_manager {
     ."installed (install_driver installs it with the driver, or for an existing driver only "
     ."from the host's own package sources), install it yourself", "warn");
   return 0;
+}
+
+# NVLink platforms Rex::GPU does not set up (karr #49), by GPU device ID
+# (Setup nvlink_platforms): a note only, nothing installed, verify unaffected.
+# The one host command is the read-only is-active, on HGX B200/B300 only.
+sub _note_nvlink_platforms {
+  my ($setup) = @_;
+  for my $platform ($setup->nvlink_platforms) {
+    if ($platform eq 'hgx-nvlink5') {
+      my $unit = $setup->fabric_manager_service;
+      run "systemctl is-active --quiet $unit", auto_die => 0;
+      my $fm = $? == 0
+        ? "$unit is active; nvlsm, OFED/MOFED and the kernel were not checked"
+        : "$unit is not active";
+      Rex::Logger::info("HGX B200/B300 (NVLink 5): NVSwitches are not PCIe devices here; CUDA "
+        ."needs NVIDIA Fabric Manager + NVLink Subnet Manager (nvlsm) + OFED/MOFED "
+        ."(libibumad3, infiniband-diags) and kernel >= 5.17 -- not automated by Rex::GPU; "
+        ."without them CUDA jobs fail with cudaErrorSystemNotReady ($fm)", "warn");
+    }
+    elsif ($platform eq 'nvl72') {
+      Rex::Logger::info("GB200/GB300 NVL72 compute tray: multi-node NVLink needs nvidia-imex "
+        ."and its configuration -- not part of Rex::GPU");
+    }
+  }
+  return;
 }
 
 # ============================================================

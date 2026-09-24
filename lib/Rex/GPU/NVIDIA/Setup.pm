@@ -120,6 +120,65 @@ sub fabric_manager_needed {
   return ( grep { ref $_ eq 'HASH' } @{ $self->nvswitches } ) ? 1 : 0;
 }
 
+=method nvlink_platform_ids
+
+  my %platform = $self->nvlink_platform_ids;   # device_id => platform
+
+The GPUs that mark an NVLink platform whose fabric Rex::GPU does not set up,
+as a list of lowercase PCI device IDs and the platform each one marks (karr
+#49; IDs from the supported-GPU table of NVIDIA's open-gpu-kernel-modules
+README, driver 615):
+
+=over
+
+=item * C<hgx-nvlink5> -- HGX B200 (C<2901>, C<2909>) and B300 (C<3182>).
+Their NVSwitches are not PCI devices on the host, so there are no
+L</nvswitches> and no Fabric Manager is installed; CUDA needs NVIDIA Fabric
+Manager, the NVLink Subnet Manager (C<nvlsm>), OFED/MOFED and kernel 5.17 or
+newer.
+
+=item * C<nvl72> -- GB200 (C<2941>) and GB300 (C<31c2>, C<31c3>) NVL72
+compute trays: multi-node NVLink needs C<nvidia-imex>; Fabric Manager runs
+on the NVLink switch trays, not here.
+
+=back
+
+Override it to add or drop an ID. Read only by L</nvlink_platforms>; the
+driver choice does not depend on it.
+
+=method nvlink_platforms
+
+  my @platforms = $self->nvlink_platforms;   # ('hgx-nvlink5')
+
+The platforms of L</nvlink_platform_ids> that L</gpus> mark, each once,
+sorted; empty on every other host. Reads nothing from the host.
+L<Rex::GPU::NVIDIA/install_driver> logs a note per platform after the
+driver step, also when the driver was already installed; nothing is
+installed for them.
+
+=cut
+
+sub nvlink_platform_ids {
+  return (
+    '2901' => 'hgx-nvlink5',   # B200
+    '2909' => 'hgx-nvlink5',   # B200
+    '3182' => 'hgx-nvlink5',   # B300 SXM6 AC
+    '2941' => 'nvl72',         # GB200
+    '31c2' => 'nvl72',         # GB300
+    '31c3' => 'nvl72'          # GB300
+  );
+}
+
+sub nvlink_platforms {
+  my ( $self ) = @_;
+  my %platform = $self->nvlink_platform_ids;
+  my %seen = map { $_ => 1 }
+    grep { defined }
+    map { $platform{ lc( $_->{device_id} // '' ) } }
+    grep { ref $_ eq 'HASH' } @{ $self->gpus };
+  return sort keys %seen;
+}
+
 # extra_requirement may be given as a plain hashref; it becomes an object of
 # the class's requirement_class here, so a typo croaks at construction -- on
 # every host, not only on one that gets as far as plan.
