@@ -235,9 +235,11 @@ any one of the GPUs: the newest driver that supports it is the end-of-life
 host is changed. A host whose driver was installed by hand (C<nvidia-smi -L>
 lists the GPU and C<libcuda.so.1> is in the linker cache) passes the
 already-installed check above instead. L<Rex::GPU/gpu_setup> passes only
-compute GPUs, and detection counts a Kepler as compute only at PCI class
-C<0302> (Tesla K80/K40); a Kepler display card (class C<0300>) is skipped
-there with a warning and never reaches C<install_driver>.
+compute GPUs, and detection never counts a Kepler as compute, at any PCI
+class (karr #55): a Kepler display card and a class-C<0302> Tesla
+K80/K40/K20 are skipped there with a warning and never reach
+C<install_driver>. The refusal here is for a caller that passes one
+directly.
 
 =back
 

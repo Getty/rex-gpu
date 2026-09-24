@@ -89,13 +89,12 @@ Hopper gets the same driver as before.
 Which GPUs count as CUDA-capable is decided by generation, not by marketing
 name (see L<Rex::GPU::Detect/NVIDIA compute classification>): every Maxwell
 or newer GPU does, GeForce MX, GT and GTX 9xx included. A Kepler-or-older
-GPU at PCI class C<0300> (GeForce GT 710, GTX 780, Quadro K4000, ...) is
-detected with C<compute =E<gt> 0> and skipped with a warning: no driver is
-installed for it, and it does not stop the installation for a newer GPU on
-the same host. A Kepler Tesla (K80, K40) enumerates as class C<0302>, which
-is always compute, and makes C<gpu_setup> die before the host is changed,
-unless a working driver is already installed; so do GPUs that cannot share
-one driver (a V100 next to a B200).
+GPU at any PCI class (GeForce GT 710, GTX 780, Quadro K4000, and the class
+C<0302> Tesla K80/K40/K20) is detected with C<compute =E<gt> 0> and skipped
+with a warning: no driver is installed for it, and it does not stop the
+installation for a newer GPU on the same host. GPUs that cannot share one
+driver (a V100 next to a B200) make C<gpu_setup> die before the host is
+changed, unless a working driver is already installed.
 
 On an HGX baseboard with NVSwitches (HGX-2, HGX A100, HGX H100/H200:
 C<nvswitch> in the L</gpu_detect> result is not empty) the NVSwitches are

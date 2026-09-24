@@ -109,7 +109,8 @@ resolve that name. The built-in table marks Maxwell through Blackwell Ultra.
 =item * C<0> -- the row says the generation is not to be installed for: the
 built-in table marks Kepler and older, whose last driver branch (470) the
 current distributions no longer package. L<Rex::GPU::Detect> reports such a
-GPU as not compute, with a warning naming the generation and branch.
+GPU as not compute whatever its PCI class (a class-C<0302> Tesla K80 too,
+karr #55), with a warning naming the generation and branch.
 
 =item * C<undef> -- no row covers the ID (or it is missing or malformed), the
 row has no C<compute> key, or the requirement was built by L</intersect>.
@@ -205,9 +206,10 @@ included.
 
 =item * Kepler or older, every ID below C<1340> (Kepler C<0FC6>-C<12BA>, Fermi and
 earlier): the 470 and older legacy lists. Proprietary only, nothing newer
-than 470. Not compute: L<Rex::GPU::Detect> skips them with a warning, and
-L<Rex::GPU::NVIDIA> refuses to install for one passed to it anyway (a
-class-C<0302> Tesla K80 is still compute by its PCI class).
+than 470. Not compute, at any PCI class (the class-C<0302> Tesla
+K80/K40/K20 included, karr #55): L<Rex::GPU::Detect> skips them with a
+warning, and L<Rex::GPU::NVIDIA> refuses to install for one passed to it
+anyway.
 
 =back
 
@@ -220,8 +222,8 @@ class-C<0302> Tesla K80 is still compute by its PCI class).
 # long as a current driver branch supports it; the criterion is the
 # generation, not the marketing name. So Maxwell through Blackwell Ultra carry
 # compute => 1 and the Kepler-or-older row compute => 0 (skipped with a
-# warning, not a die: gpu_setup / Rex::Rancher gpu => 1 keep going on a host
-# whose only NVIDIA part is an old display card). An ID no row covers (0x3000+
+# warning, not a die, before the PCI class rule (karr #55): gpu_setup /
+# Rex::Rancher gpu => 1 keep going without the old card, a K80 included). An ID no row covers (0x3000+
 # except Blackwell Ultra) has no verdict; Detect uses its name rules and its
 # unknown-model default compute => 0 there.
 #

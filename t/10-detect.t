@@ -46,9 +46,12 @@ sub detect_with {
 #### _is_nvidia_compute — the highest-risk branch (wrong answer => wrong driver)
 
 subtest '_is_nvidia_compute classification' => sub {
-  # PCI class 0302 (3D controller) is always compute, whatever the name is.
+  # PCI class 0302 (3D controller) is compute whatever the name is, unless the
+  # device ID is Kepler or older (karr #55, see below).
   is(Rex::GPU::Detect::_is_nvidia_compute('0302', 'anything at all'), 1,
-    'class 0302 => compute regardless of name');
+    'class 0302, no ID => compute regardless of name');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0302', 'Device', '3aa0'), 1,
+    'class 0302, ID without a generation row => compute by class');
 
   # Named compute families.
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GA102 [GeForce RTX 3090]'), 1, 'RTX => compute');
@@ -403,6 +406,65 @@ subtest 'k54: mixed host -- a Kepler display does not stop a newer GPU' => sub {
   @calls = ();
   my ($kepler_only) = logged(sub { detect_with($gt710) });
   ok($run_setup->($kepler_only), 'Kepler-only host: gpu_setup lives');
+  is(scalar @calls, 0, '... and installs no driver');
+};
+
+subtest 'k55: class-0302 Kepler Tesla => not compute, with the Kepler warning' => sub {
+  # Datacenter Keplers enumerate as 3D controller [0302]; the Kepler row is
+  # checked before the class rule, so they are skipped like a GT 710.
+  my @cases = (
+    [ '102d', 'GK210GL [Tesla K80]' ],
+    [ '1023', 'GK110BGL [Tesla K40m]' ],
+    [ '1028', 'GK110GL [Tesla K20m]' ]
+  );
+  for my $c (@cases) {
+    my ($id, $name) = @$c;
+    for my $shown ($name, 'Device') {
+      my ($gpu, $log) = logged(sub {
+        Rex::GPU::Detect::_parse_nvidia_line(
+          '04:00.0 3D controller [0302]: NVIDIA Corporation '.$shown.' [10de:'.$id.'] (rev a1)'
+        );
+      });
+      is($gpu->{pci_class}, '0302', $id.' "'.$shown.'" => class 0302');
+      is($gpu->{compute},   0,      $id.' "'.$shown.'" => not compute');
+      my @warn = grep { ($_->[1] // '') eq 'warn' } @$log;
+      is(scalar @warn, 1, $id.' "'.$shown.'" => exactly one warning');
+      like($warn[0][0] // '', qr/NVIDIA GPU \Q$shown\E \(10de:$id\) $KEPLER_WARN/,
+        $id.' "'.$shown.'" => the Kepler skip message, naming GPU and ID');
+    }
+  }
+};
+
+subtest 'k55: mixed host -- a K80 does not stop a newer GPU' => sub {
+  my $k80 = '04:00.0 3D controller [0302]: NVIDIA Corporation GK210GL [Tesla K80] [10de:102d] (rev a1)';
+  my $ada = '01:00.0 3D controller [0302]: NVIDIA Corporation AD104GL [RTX 4000 SFF Ada Generation] [10de:27b0] (rev a1)';
+  my ($r, $log) = logged(sub { detect_with($k80."\n".$ada) });
+  is(scalar @{$r->{nvidia}}, 2, 'both GPUs detected');
+  is_deeply([ map { $_->{compute} } @{$r->{nvidia}} ], [ 0, 1 ], 'K80 not compute, RTX 4000 Ada compute');
+  is(scalar(grep { $_->[0] =~ $KEPLER_WARN } @$log), 1, 'the Kepler skip is logged once');
+
+  my @calls;
+  my $run_setup = sub {
+    my ($detected) = @_;
+    no warnings 'redefine';
+    local *Rex::GPU::_check_connection                 = sub { };
+    local *Rex::GPU::gpu_detect                        = sub { $detected };
+    local *Rex::GPU::NVIDIA::install_driver            = sub { push @calls, { @_ } };
+    local *Rex::GPU::NVIDIA::install_container_toolkit = sub { };
+    local *Rex::GPU::NVIDIA::generate_cdi_specs        = sub { };
+    local *Rex::GPU::NVIDIA::configure_containerd      = sub { };
+    local *Rex::GPU::NVIDIA::verify_nvidia             = sub { };
+    local *Rex::Logger::info                           = sub { };
+    return eval { Rex::GPU::gpu_setup(); 1 };
+  };
+  ok($run_setup->($r), 'gpu_setup lives');
+  is(scalar @calls, 1, 'install_driver called once');
+  is_deeply([ map { $_->{device_id} } @{ $calls[0]{gpus} } ], [ '27b0' ],
+    'install_driver gets only the Ada card -- the K80 never reaches plan');
+
+  @calls = ();
+  my ($k80_only) = logged(sub { detect_with($k80) });
+  ok($run_setup->($k80_only), 'K80-only host: gpu_setup lives');
   is(scalar @calls, 0, '... and installs no driver');
 };
 

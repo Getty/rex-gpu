@@ -70,13 +70,14 @@ Revision history for Rex-GPU
     via Rex::Rancher gpu => 1) now installs a driver for them: the
     proprietary 580 branch for Maxwell/Pascal/Volta, as for the V100.
     Kepler and older (below 10de:1340, last branch 470) are compute => 0
-    with a warning and skipped, so a Kepler display card (GT 710, GTX 780,
-    Quadro K4000, GTX TITAN) never stops the install for a newer GPU; a
-    class-0302 Kepler Tesla (K80) still dies.
+    with a warning and skipped at any PCI class, so neither a Kepler
+    display card (GT 710, GTX 780, Quadro K4000, GTX TITAN) nor a
+    class-0302 Kepler Tesla (K80, K40, K20) stops the install for a newer
+    GPU; a host with only such a card installs nothing and goes on.
     The verdict is the compute flag of Rex::GPU::NVIDIA::Requirement's
     generation table (1, 0, or undef where no row covers the ID); name
     rules apply only to IDs outside the table, unknown stays 0.
-    Not hardware-verified (karr #21, karr #45, karr #54)
+    Not hardware-verified (karr #21, karr #45, karr #54, karr #55)
   - install_driver counts a driver as installed only if nvidia-smi -L lists
     a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
     a working nvidia-smi but no CUDA library now gets a warning and the

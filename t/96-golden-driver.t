@@ -17,7 +17,8 @@ use lib "$Bin/lib";
 # diff is a behaviour change -- read it before regenerating (see
 # t/lib/Test/RexGPU/Golden.pm for the switch).
 #
-# Kepler (K80) is asserted inline on every OS: it must die with the "Nothing
+# Kepler (K80) is asserted inline on every OS, handed to install_driver
+# directly (detection skips it since karr #55): it must die with the "Nothing
 # was changed" message after the nvidia-smi probe and before any other host
 # interaction.
 #
@@ -55,11 +56,16 @@ sub driver_on {
 }
 
 subtest 'fixtures come from the real lspci parser' => sub {
-  for my $name (qw( ada blackwell volta kepler b200 b300 pascal maxwell )) {
+  for my $name (qw( ada blackwell volta b200 b300 pascal maxwell )) {
     my $gpu = gpu_fixture($name);
     is($gpu->{compute}, 1, "$name is compute");
     like($gpu->{device_id}, qr/^[0-9a-f]{4}$/, "$name has a device id");
   }
+  # karr #55: the class-0302 K80 is skipped by its Kepler row, so gpu_setup
+  # never passes it; the Kepler cases below hand it to install_driver directly.
+  my $kepler = gpu_fixture('kepler');
+  is($kepler->{compute}, 0, 'kepler (K80, class 0302) is not compute');
+  is($kepler->{device_id}, '102d', 'kepler has its device id');
   is(gpu_fixture('none'), undef, 'none => undef (install_driver without gpu =>)');
 };
 

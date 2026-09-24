@@ -251,6 +251,8 @@ my %GPU_LINE = (
   # multi-GPU fixtures (karr #33); names hand-written like the others
   b200      => '18:00.0 3D controller [0302]: NVIDIA Corporation GB100 [B200] [10de:2901] (rev a1)',
   b300      => '19:00.0 3D controller [0302]: NVIDIA Corporation GB110 [B300 SXM6 AC] [10de:3182] (rev a1)',
+  # compute 0 since karr #55 (skipped by detection); install_driver is
+  # still handed it directly to prove it refuses a Kepler on its own
   kepler    => '04:00.0 3D controller [0302]: NVIDIA Corporation GK210GL [Tesla K80] [10de:102d] (rev a1)',
   # entry-level Pascal / Maxwell desktop cards, compute by generation (karr
   # #54); names as pci.ids 2026-09-24 resolves them

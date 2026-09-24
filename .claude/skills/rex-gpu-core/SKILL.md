@@ -36,7 +36,8 @@ default is `rke2`; values `rke2` | `k3s` | `containerd` | `none`.
 `Rex::GPU::Detect` parses `lspci -nn`, never a driver tool (detection must work on a host
 with no driver yet). The compiled regexes at the top of the file are the contract:
 
-- Display class `[0300]` (VGA) or `[0302]` (3D/datacenter). `0302` ⇒ compute, always.
+- Display class `[0300]` (VGA) or `[0302]` (3D/datacenter). `0302` ⇒ compute, unless
+  the device ID is Kepler-or-older (k55: that check runs first).
 - Vendor IDs: `10de` NVIDIA, `1002` AMD.
 - **Virtual displays are skipped per line** (k17): `1af4` virtio, `1b36` QEMU, `15ad`
   VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
@@ -44,15 +45,16 @@ with no driver yet). The compiled regexes at the top of the file are the contrac
 
 `_is_nvidia_compute` decides by **generation, not marketing name** (k45/k54, maintainer:
 "every GPU usable for AI", MX/GT/GTX 9xx included while a current branch supports it).
-After class `0302`, the device ID's Requirement row carries a tri-state `compute`: 1 for
+The device ID's Requirement row carries a tri-state `compute`: 1 for
 Maxwell 1340 up to Blackwell Ultra (the rows cover 0000–2FFF gap-free + 3182/31C2–31C3),
 0 for Kepler-or-older <1340 → not compute + warning "needs branch 470 … skipped, no
-driver installed" (a skip, not a die: a Kepler display next to an Ada leaves the Ada
-install alone); undef (no row, ≥3000) → name rules, each naming only Maxwell+ products
+driver installed", checked **before** the `0302` class rule (k55), so a K80/K40/K20 is
+skipped too (a skip, not a die: a Kepler next to an Ada leaves the Ada install alone);
+then `0302` ⇒ compute; undef (no row, ≥3000) → name rules, each naming only Maxwell+ products
 (RTX, GTX 1xxx/9xx/745/750, GT 1xxx, GeForce MX, TITAN X/Xp/V/RTX, Quadro M/P/T/GP/GV,
 Tesla M/P/V/T4, A100-style codes); no negative rules. **Unknown defaults to `0`** (safe:
-no install) with a warning — keep it 0. A class-`0302` Kepler Tesla (K80) is still
-compute by class and dies in `plan`.
+no install) with a warning — keep it 0. `plan` still rejects a Kepler passed to
+`install_driver` directly.
 
 `detect()` first ensures `lspci` (`command -v`, else pciutils — dnf + rpm -q for the
 lsb_release RHEL names Rex::Pkg can't handle; k46), and only if an NVIDIA GPU was found

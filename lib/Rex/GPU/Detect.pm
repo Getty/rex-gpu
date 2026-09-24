@@ -263,19 +263,19 @@ sub _parse_nvidia_line {
 sub _is_nvidia_compute {
   my ($pci_class, $name, $device_id) = @_;
 
-  # PCI class [0302] = 3D Controller — always compute/datacenter GPU
-  return 1 if $pci_class eq '0302';
-
   # The generation decides, not the marketing name (karr #45, #54; maintainer
   # decision: every GPU usable for AI counts, MX/GT/GTX 9xx included). The
   # rows of Rex::GPU::NVIDIA::Requirement cover every ID 0000-2FFF plus
   # Blackwell Ultra: Maxwell .. Blackwell Ultra => 1, Kepler or older => 0.
   # lspci prints the ID even when a stale pci.ids leaves the name as "Device".
   my $req = Rex::GPU::NVIDIA::Requirement->for_device_id($device_id);
-  if (defined $req->compute) {
-    return 1 if $req->compute;
+
+  # A Kepler-or-older row wins over the PCI class (karr #55): a class-0302
+  # Tesla K80/K40/K20 is skipped like a Kepler display card, instead of
+  # reaching plan as compute and stopping the install for every other GPU.
+  if (defined $req->compute && !$req->compute) {
     # Skipped, not died: gpu_setup (and Rex::Rancher's gpu => 1) go on
-    # without a driver on a host whose old card is only a display.
+    # without a driver for the old card, and install for the newer ones.
     Rex::Logger::info('    NVIDIA GPU '.$name.' (10de:'.$req->device_id.') is '
       .$req->generation.' silicon'
       .( defined $req->max_branch
@@ -285,6 +285,11 @@ sub _is_nvidia_compute {
       .' -- skipped, no driver installed', 'warn');
     return 0;
   }
+
+  # PCI class [0302] = 3D Controller — compute/datacenter GPU; with no row
+  # (or no ID) the class alone decides.
+  return 1 if $pci_class eq '0302';
+  return 1 if $req->compute;
 
   # Name rules: reached only for an ID no generation row covers (0x3000 and
   # up, bar Blackwell Ultra: silicon newer than the table) or no ID at all.
@@ -460,10 +465,16 @@ rules, first match wins:
 
 =over
 
-=item * PCI class C<0302> (3D controller) — always compute/datacenter. Datacenter
+=item * A Kepler-or-older device ID (below C<1340>, see below) — B<not>
+compute, whatever the PCI class. This is checked first (karr #55), so a Kepler
+Tesla (K80, K40, K20), which enumerates as class C<0302>, is skipped with the
+Kepler warning like a Kepler display card, and a newer GPU on the same host
+is still installed.
+
+=item * PCI class C<0302> (3D controller) — compute/datacenter. Datacenter
 GPUs such as the A100, H100, and RTX 4000 Ada typically enumerate as class
-C<0302>. This holds for a Kepler Tesla (K80, K40) too; the driver installer
-then refuses it (see L<Rex::GPU::NVIDIA/install_driver>).
+C<0302>. A class-C<0302> device whose ID no table row covers, or that has no
+ID, is compute by its class alone.
 
 =item * The PCI device ID's generation, from the
 L<generations|Rex::GPU::NVIDIA::Requirement/generations> table of
@@ -486,12 +497,13 @@ C<31C2>/C<31C3>; GeForce RTX 50xx desktop and laptop, RTX PRO Blackwell,
 B200/GB200/B300/GB300, the GB10 C<10de:2e12> of NVIDIA DGX Spark): compute.
 
 =item * Kepler or older (below C<1340>; GeForce GT 710/730, GTX 6xx/7xx,
-Quadro K4000, ...): B<not> compute. Their last driver branch is 470, which the
+Quadro K4000, Tesla K20/K40/K80, ...): B<not> compute (checked before the
+class rule, see above). Their last driver branch is 470, which the
 current distributions no longer package, so the GPU is skipped with a warning
 ("... is Kepler or older silicon: it needs driver branch 470 or older, which
 current distributions no longer package -- skipped, no driver installed")
-instead of making the driver installation die. A Kepler display card next to
-a newer GPU does not stop the newer one's installation.
+instead of making the driver installation die. A Kepler card next to a
+newer GPU does not stop the newer one's installation.
 
 =back
 
