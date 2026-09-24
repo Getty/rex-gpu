@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T04:22:25Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:22:25Z
+created: 2026-09-24T04:11:16Z
+id: 59
+priority: low
+started: 2026-09-24T04:14:48Z
+status: done
+title: t/95-pre-turing-driver.t:148 uninitialized value warning
+updated: 2026-09-24T04:22:25Z
+---
+
+prove -lr t/ and dzil test both pass (1427/1439 tests green), but emit 4x "Use of uninitialized value in concatenation (.) or string at t/95-pre-turing-driver.t line 148." during the RHEL subtest. Line 148 builds a message with $_->[1] ? $_->[1]{device_id} : "no GPU" for the `for [9, $t4], [10, $rtx4000], [10, $b200], [9, undef]` cases; the undef case is guarded there, so the warning likely comes from inside plan_for() itself concatenating device_id for the [9, undef] no-GPU case. Cosmetic only (test still passes), but worth a quiet fix so the suite is silent. Found during pre-release audit of 0.002.
+
+Erledigt in 3953362.
