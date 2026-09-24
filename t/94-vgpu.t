@@ -163,6 +163,47 @@ subtest 'physical card, and a slot lspci -vmmnn did not list' => sub {
   is($r->{nvidia}[0]{vgpu}, 0, 'slot with another device ID => vgpu 0');
 };
 
+# karr #64: a slot that is not a PCI address -- on the -nn line or in a -vmm
+# record -- matches nothing. The GPU is still reported, as vgpu 0, even if a
+# vGPU subsystem ID sits next to the garbage.
+subtest 'unparseable slots are ignored' => sub {
+  my $detect = sub {
+    my ( $display, $vmm ) = @_;
+    my $result;
+    my $rec = record_host(
+      host => host_profile('debian-12', responses => [
+        [ 'command -v lspci >/dev/null 2>&1' => '', 0 ],
+        [ $LSPCI_READ => $display, 0 ],
+        [ $VMM_READ   => $vmm, 0 ]
+      ]),
+      code => sub { $result = Rex::GPU::Detect::detect() });
+    is($rec->{error}, undef, '... detect lives');
+    return ( $result, $rec );
+  };
+
+  # the GPU's own -nn slot does not parse; -vmm has a valid vGPU record
+  ( my $bad_nn = $A10_NN ) =~ s/\A0002:00:00\.0/zz:00.0/;
+  isnt($bad_nn, $A10_NN, "fixture with -nn slot zz:00.0 built");
+  my ( $r, $rec ) = $detect->($bad_nn, $A10_VMM);
+  is(scalar @{ $r->{nvidia} }, 1, 'GPU with an unparseable -nn slot: still reported');
+  is($r->{nvidia}[0]{vgpu}, 0, '... vgpu 0');
+  is($r->{nvidia}[0]{subsystem_id}, undef, '... subsystem_id undef');
+  ok(!exists $r->{nvidia}[0]{vgpu_type}, '... no vgpu_type');
+  is($r->{nvidia}[0]{compute}, 1, '... compute unchanged');
+  is($rec->{lines}[-1], "run: $VMM_READ", '... after the one -vmm read');
+
+  # -vmm records whose Slot: is not a PCI address, carrying the A10-2Q IDs
+  for my $slot ('garbage', '0002:00:00.0.1', '0002:00:00.8', '') {
+    ( my $vmm = $A10_VMM ) =~ s/\ASlot:\t\S+/Slot:\t$slot/;
+    isnt($vmm, $A10_VMM, "fixture with Slot: '$slot' built");
+    ( $r ) = $detect->($A10_NN, $vmm);
+    is($r->{nvidia}[0]{vgpu}, 0, "-vmm Slot: '$slot' => vgpu 0");
+    is($r->{nvidia}[0]{subsystem_id}, undef, '... subsystem_id undef');
+  }
+  is_deeply(Rex::GPU::Detect::_parse_lspci_vmm("Slot:\tgarbage\nDevice:\tGA102GL [A10] [2236]\n"
+    ."SVendor:\tNVIDIA Corporation [10de]\nSDevice:\tDevice [14b9]"), {}, '_parse_lspci_vmm drops the record');
+};
+
 subtest 'no NVIDIA GPU => no vGPU read' => sub {
   my ( $r, $rec ) = detect_on('amd-only', $AMD_NN, $A10_VMM);
   ok(!grep({ /lspci -vmmnn|lspci -nn -d 10de:/ } @{ $rec->{lines} }), 'no 10de lspci at all');

@@ -472,6 +472,81 @@ for my $out ('', "580.95.05\n570.172.08") {
   ok(warned($rec, qr/is not active/), 'installed driver, no FM: is-active warning');
 }
 
+#### Fabric Manager failure paths (karr #64)
+#
+# CLAIM: each one names what failed and installs no package it was not
+# already installing -- never a driver package, never a second Fabric
+# Manager, never another version.
+
+# Retrofit: installed and verified, but the unit cannot be enabled -> dies
+# (the host was changed), the unit is not started, the driver untouched.
+{
+  my $rec = installed_hgx_on('rocky-9', '580.95.05',
+    [ 'systemctl enable nvidia-fabricmanager.service' => 'Failed to enable unit: Unit file nvidia-fabricmanager.service does not exist.', 1 ],
+    @{ $RETROFIT{'rocky-9'}{available} });
+  is($rec->{error}, 'systemctl enable nvidia-fabricmanager.service failed after installing '
+    .'nvidia-fabricmanager 580.95.05; the driver is unchanged', 'retrofit, enable fails: dies');
+  is_deeply([ installs($rec) ], [ 'run: dnf install -y nvidia-fabricmanager-580.95.05' ],
+    '... the one Fabric Manager install, nothing else');
+  ok(!(grep { /systemctl start/ } @{ $rec->{lines} }), '... unit not started');
+}
+
+# nvidia-smi --query-gpu exits non-zero: its output is not trusted, even a
+# version-shaped one -- warn, nothing touched.
+{
+  my $rec = hgx_on(host_profile('rocky-9', responses => [
+    working_driver(), [ $DRIVER_VERSION_Q => '580.95.05', 9 ], @{ $RETROFIT{'rocky-9'}{available} } ]));
+  is($rec->{error}, undef, 'rocky-9, --query-gpu exit 9: no die');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing changed');
+  ok(!(grep { /dnf -q list/ } @{ $rec->{lines} }), '... no package source asked');
+  ok(warned($rec, qr/loaded driver version cannot be read/), '... warns');
+}
+
+# A Fabric Manager dpkg lists without a version: "unknown", left alone.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05',
+    [ $DPKG_FM_Q => 'nvidia-fabricmanager-580 iU', 0 ]);
+  is($rec->{error}, undef, 'ubuntu, FM without a version: no die');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing changed');
+  ok(warned($rec, qr/Fabric Manager nvidia-fabricmanager-580 unknown is installed, but the loaded NVIDIA driver is 580\.95\.05/),
+    '... warns, version unknown');
+}
+
+# apt: the simulated install fails -> that is the reason, no install.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05',
+    [ qr{^LC_ALL=C apt-get .* -s install nvidia-fabricmanager-580=} =>
+        "E: Unable to correct problems, you have held broken packages.", 100 ],
+    @{ $RETROFIT{'ubuntu-24.04'}{available} });
+  is($rec->{error}, undef, 'ubuntu, apt-get -s fails: no die');
+  is_deeply([ installs($rec) ], [], '... nothing installed');
+  ok(warned($rec, qr/\(apt-get -s install nvidia-fabricmanager-580=580\.95\.05-0ubuntu0\.24\.04\.1 fails\)/),
+    '... warns naming the failed simulation');
+}
+
+# A source without fabric_manager_match (a subclass's): dies before any
+# host interaction, on both packaging layers.
+for my $class (qw( Rex::GPU::NVIDIA::Setup::Ubuntu Rex::GPU::NVIDIA::Setup::RHEL )) {
+  my $rec = record_host(host => host_profile($class =~ /Ubuntu/ ? 'ubuntu-24.04' : 'rocky-9'),
+    code => sub { $class->new->install_fabric_manager({ source => { fabric_manager => 'nvidia-fabricmanager' } }) });
+  is($rec->{error}, 'The driver source names no package to read the driver version from '
+    .'(fabric_manager_match); the driver is installed, Fabric Manager is not',
+    "$class, no fabric_manager_match: dies");
+  is_deeply($rec->{lines}, [], '... before any host interaction');
+}
+
+# apt: Fabric Manager installed, but dpkg reports another upstream version
+# -> dies naming both, before post_install, no second install.
+{
+  my $rec = hgx_on(host_profile('ubuntu-24.04', responses => [
+    [ q{dpkg-query -W -f='${Version}' nvidia-fabricmanager-590 2>/dev/null} => '590.48.02-0ubuntu0.24.04.1', 0 ],
+    @UBUNTU_FM ]));
+  is($rec->{error}, "nvidia-fabricmanager-590 is 590.48.02 after apt-get install, not the driver's 590.48.01",
+    'ubuntu: Fabric Manager of another version after install dies');
+  is(scalar(grep { /install -y nvidia-fabricmanager/ } @{ $rec->{lines} }), 1, '... one Fabric Manager install');
+  ok(!(grep { /blacklist-nouveau|systemctl enable/ } @{ $rec->{lines} }), '... not enabled, before post_install');
+}
+
 is_deeply([ Rex::GPU::NVIDIA::Setup::RHEL->_dnf_list_versions(
   "Available Packages\nnvidia-fabricmanager.x86_64  3:580.95.05-1.el9  cuda\n"
   ."nvidia-fabricmanager-devel.x86_64  580.95.05-1  cuda\n", 'nvidia-fabricmanager') ],
