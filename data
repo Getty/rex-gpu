@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T01:52:26Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:52:26Z
+created: 2026-09-24T00:25:22Z
+id: 50
+priority: low
+started: 2026-09-24T01:43:44Z
+status: done
+title: Fabric Manager nachruesten auf Hosts mit bereits installiertem Treiber
+updated: 2026-09-24T01:52:26Z
+---
+
+Aus #23: Ist der Treiber schon installiert (already_installed), ist die Paketquelle unbekannt -> kein Fabric Manager, nur Warnung wenn der Dienst nicht aktiv ist. Betrifft HGX-Hosts, die vor k23 provisioniert wurden. Loesung: Quelle des installierten Treibers ermitteln (dpkg-query/rpm -qi Vendor/Repo) und passenden FM installieren.
+
+Erledigt in b478ce9: retrofit_fabric_manager. Version aus nvidia-smi (Paketname des Bestandstreibers unbekannt); nur aus den bereits konfigurierten Quellen, exakte Version, apt mit Simulation (keine Removals); sonst Warnung. Fehler nach Installationsbeginn stirbt (wie k23). Offen/unverifiziert: dpkg-query-/dnf-list-Format auf echten Hosts; Rocky mit FM <580 evtl. anderer Paketname; Debian-non-free-Treiber bekommt nie FM. Nicht auf HGX-Hardware.
