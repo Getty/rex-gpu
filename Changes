@@ -133,9 +133,15 @@ Revision history for Rex-GPU
     the bookworm installer's "main non-free-firmware" or with only deb822
     sources used to get no non-free, so nvidia-driver had no candidate and
     the install died. sources.list is now rewritten via `file` instead of
-    sed; third-party lines and unknown Debian mirrors (which the sed also
-    edited) are left untouched. Warns if no Debian archive entry is
-    recognised. Not hardware-verified (karr #36, #40)
+    sed; third-party lines are left untouched. A mirror of your own
+    (apt-cacher-ng, a company or national mirror, which the sed also
+    edited) counts when its entry has signed-by= / Signed-By: naming only
+    /usr/share/keyrings/debian-archive-* keyrings, or when a
+    Rex::GPU::NVIDIA::Setup::Debian subclass overrides the new
+    is_debian_archive_uri (or is_debian_archive_keyring); otherwise it is
+    left alone and the warning (no Debian archive entry recognised) names
+    that override and eg/custom-setup. Not hardware-verified
+    (karr #36, #40, #41)
   - New Rex::GPU::NVIDIA::Requirement (experimental API): which kernel
     module (open/proprietary/either) and driver branch range a GPU needs,
     looked up by PCI device ID in a table a subclass can extend, with

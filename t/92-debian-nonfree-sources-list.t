@@ -18,8 +18,16 @@ use Test::More;
 #     third-party entries -- is kept byte for byte, and an edited line keeps
 #     its [options] and trailing # comment;
 #   * a line is only edited when it is a Debian archive: components include
-#     main, the URI is Debian's (same rules as deb822), signed-by= (if any)
-#     names only debian-archive keyrings;
+#     main, and either signed-by= names only debian-archive keyrings (any
+#     URI: a company mirror or apt-cacher-ng signed with Debian's key, karr
+#     #41), or there is no signed-by= and the URI is Debian's (same rules as
+#     deb822);
+#   * is_debian_archive_uri / is_debian_archive_keyring are the override
+#     points: the eg/custom-setup class My::GPU::DebianMirror makes its
+#     mirror a Debian archive, and an override never turns an entry with a
+#     foreign signed-by= into one;
+#   * the warning for "nothing recognised" names is_debian_archive_uri and
+#     eg/custom-setup;
 #   * a line the old sed handled ("deb URL suite main") ends up with the same
 #     text the sed produced.
 #
@@ -30,7 +38,11 @@ use Test::More;
 #     pinned in t/golden/driver/debian-12--*.txt, not executed).
 # -----------------------------------------------------------------------------
 
+use FindBin qw( $Bin );
+use lib "$Bin/../eg/custom-setup/lib";   # My::GPU::DebianMirror
+
 use Rex::GPU::NVIDIA;
+use My::GPU::DebianMirror;
 
 sub rewrite { [ Rex::GPU::NVIDIA::_sources_list_enable_nonfree($_[0]) ] }
 
@@ -169,6 +181,141 @@ subtest 'empty and comment-only input' => sub {
   is_deeply(rewrite(undef), [ undef, 0 ], 'undef');
   is_deeply(rewrite("# See sources.list(5) and debian.sources\n"), [ undef, 0 ],
     'comment-only file (deb822 host)');
+};
+
+#### karr #41: mirrors of your own ###########################################
+
+my $DEBKEY = 'signed-by=/usr/share/keyrings/debian-archive-keyring.gpg';
+
+sub rewrite_as {
+  my ( $class, $content ) = @_;
+  return [ $class->_sources_list_enable_nonfree($content) ];
+}
+
+subtest 'signed-by with only Debian archive keyrings: any URI is Debian' => sub {
+  my %case = (
+    'company mirror' =>
+      "deb [$DEBKEY] http://mirror.corp.example/debian bookworm main",
+    'apt-cacher-ng' =>
+      "deb [$DEBKEY] http://apt-cache.corp.example:3142/debian bookworm main non-free-firmware",
+    'unknown national mirror, removed-keys keyring too' =>
+      'deb [signed-by=/usr/share/keyrings/debian-archive-keyring.gpg,/usr/share/keyrings/debian-archive-removed-keys.gpg] http://ftp.fau.de/debian bookworm main'
+  );
+  for my $name (sort keys %case) {
+    my $in = $case{$name};
+    my ($new, $matched) = @{ rewrite("$in\n") };
+    is($matched, 1, "$name: recognised");
+    like($new, qr/^\Q$in\E(?: contrib)? non-free(?: non-free-firmware)?\n\z/, "$name: non-free added");
+    is_deeply(rewrite($new), [ undef, 1 ], "$name: idempotent");
+  }
+};
+
+subtest 'without signed-by an unknown mirror stays unrecognised' => sub {
+  for my $line (
+    'deb http://apt-cache.corp.example:3142/debian bookworm main',
+    'deb http://mirror.corp.example/debian bookworm main',
+    'deb http://acng.lan:3142/deb.debian.org/debian bookworm main'
+  ) {
+    is_deeply(rewrite("$line\n"), [ undef, 0 ], $line);
+  }
+  is(rewrite("deb http://ftp.de.debian.org/debian bookworm main\n")->[0],
+    "deb http://ftp.de.debian.org/debian bookworm main $ALL\n",
+    'ftp.de.debian.org is *.debian.org: edited without override');
+};
+
+subtest 'foreign signed-by stays third party, even on a Debian URI' => sub {
+  for my $line (
+    'deb [signed-by=/etc/apt/keyrings/corp.gpg] http://mirror.corp.example/debian bookworm main',
+    "deb [$DEBKEY,/etc/apt/keyrings/corp.gpg] http://mirror.corp.example/debian bookworm main",
+    'deb [signed-by=/usr/share/keyrings/debian-ports-archive-keyring.gpg] http://mirror.corp.example/debian-ports sid main',
+    'deb [signed-by=/tmp/debian-archive-keyring.gpg] http://mirror.corp.example/debian bookworm main',
+    'deb [signed-by=] http://deb.debian.org/debian bookworm main'
+  ) {
+    is_deeply(rewrite("$line\n"), [ undef, 0 ], $line);
+  }
+};
+
+subtest 'override is_debian_archive_uri (eg/custom-setup My::GPU::DebianMirror)' => sub {
+  my $C = 'My::GPU::DebianMirror';
+  ok($C->is_debian_archive_uri('http://apt-cache.corp.example:3142/debian'), 'the mirror');
+  ok($C->is_debian_archive_uri('http://deb.debian.org/debian'), 'built-in list kept via SUPER');
+  ok(!$C->is_debian_archive_uri('http://apt-cache.corp.example:3142/ubuntu'), 'not the mirror host\'s other paths');
+
+  my $src = "deb http://apt-cache.corp.example:3142/debian bookworm main\n"
+    . "deb http://apt-cache.corp.example:3142/debian-security bookworm-security main\n"
+    . "deb https://packages.microsoft.com/debian/12/prod bookworm main\n"
+    . "deb [signed-by=/etc/apt/keyrings/corp.gpg] http://apt-cache.corp.example:3142/debian bookworm main\n";
+  is_deeply(rewrite_as($C, $src), [
+    "deb http://apt-cache.corp.example:3142/debian bookworm main $ALL\n"
+    . "deb http://apt-cache.corp.example:3142/debian-security bookworm-security main $ALL\n"
+    . "deb https://packages.microsoft.com/debian/12/prod bookworm main\n"
+    . "deb [signed-by=/etc/apt/keyrings/corp.gpg] http://apt-cache.corp.example:3142/debian bookworm main\n",
+    2
+  ], 'mirror lines edited; third party and the foreign-key line on the mirror URI untouched');
+  is_deeply(rewrite("deb http://apt-cache.corp.example:3142/debian bookworm main\n"), [ undef, 0 ],
+    'the base class is unchanged');
+};
+
+{
+  package Test::KeyMirror;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Debian';
+  sub is_debian_archive_keyring {
+    my ( $self, $path ) = @_;
+    return 1 if $path eq '/etc/apt/keyrings/corp-mirror.gpg';
+    return $self->SUPER::is_debian_archive_keyring($path);
+  }
+}
+
+subtest 'override is_debian_archive_keyring: a re-signed mirror' => sub {
+  my $line = 'deb [signed-by=/etc/apt/keyrings/corp-mirror.gpg] http://aptly.corp.example/debian bookworm main';
+  is_deeply(rewrite_as('Test::KeyMirror', "$line\n"), [ "$line $ALL\n", 1 ], 'recognised by its keyring');
+  is_deeply(rewrite("$line\n"), [ undef, 0 ], 'not by the base class');
+};
+
+{
+  package Test::FakeHost;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Debian';
+  has files => ( is => 'ro' );
+  has written => ( is => 'ro', default => sub { [] } );
+  sub run_cmd {
+    my ( $self, $cmd ) = @_;
+    if ($cmd =~ m{^cat (\S+)}) {
+      my $c = $self->files->{$1};
+      $? = defined $c ? 0 : 256;
+      return $c // '';
+    }
+    $? = 0;
+    return join "\n", map { m{^/etc/apt/sources\.list\.d/(.+)$} ? $1 : () } sort keys %{ $self->files };
+  }
+  sub file_cmd { my ( $self, $path ) = @_; push @{ $self->written }, $path }
+}
+
+subtest 'enable_nonfree: the warning names the override point' => sub {
+  my @log;
+  no warnings 'redefine';
+  local *Rex::Logger::info = sub { push @log, [ @_ ] };
+
+  my $host = Test::FakeHost->new(files => {
+    '/etc/apt/sources.list' => 'deb http://apt-cache.corp.example:3142/debian bookworm main'
+  });
+  $host->enable_nonfree;
+  is_deeply($host->written, [], 'unknown mirror: nothing written');
+  my ($warn) = grep { ($_->[1] // '') eq 'warn' } @log;
+  ok($warn, 'warned');
+  like($warn->[0], qr/is_debian_archive_uri/, 'names is_debian_archive_uri');
+  like($warn->[0], qr/Rex::GPU::NVIDIA::Setup::Debian/, 'names the class to subclass');
+  like($warn->[0], qr{eg/custom-setup}, 'points at eg/custom-setup');
+  like($warn->[0], qr{signed-by=/usr/share/keyrings/debian-archive-keyring\.gpg}, 'names the signed-by way');
+
+  @log = ();
+  my $mirror = Test::FakeHost->new(files => {
+    '/etc/apt/sources.list' => "deb [$DEBKEY] http://apt-cache.corp.example:3142/debian bookworm main"
+  });
+  $mirror->enable_nonfree;
+  is_deeply($mirror->written, [ '/etc/apt/sources.list' ], 'Debian-signed mirror: sources.list written');
+  ok(!(grep { ($_->[1] // '') eq 'warn' } @log), 'no warning');
 };
 
 done_testing;

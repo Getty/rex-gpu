@@ -1366,13 +1366,16 @@ does not count as C<non-free>), and the C<Components:> field of stanzas in the
 deb822 format (C</etc/apt/sources.list.d/*.sources>, e.g. C<debian.sources> on
 Debian 13 and Debian cloud images). An entry is a Debian archive when it is
 of type C<deb> (not C<deb-src>, not commented out or C<Enabled: no>), its
-components include C<main>, every URI is a C<*.debian.org> host, Hetzner's
+components include C<main>, and either C<Signed-By> / C<[signed-by=...]>
+names only C<debian-archive-*> keyrings under C</usr/share/keyrings> (whatever
+the URI, so a mirror of your own signed with Debian's key counts), or there
+is no C<signed-by> and every URI is a C<*.debian.org> host, Hetzner's
 C<mirror.hetzner.com/debian/> mirror or the cloud images'
-C<mirror+file:/etc/apt/mirrors/debian*.list>, and C<Signed-By> /
-C<[signed-by=...]> (if set) names only C<debian-archive-*> keyrings. Third-party
-sources and unknown mirrors are left untouched, and a file with nothing to
-add is not rewritten; if no Debian archive entry is recognised in either
-format, a warning is logged.
+C<mirror+file:/etc/apt/mirrors/debian*.list>. Third-party sources and unknown
+mirrors are left untouched, and a file with nothing to add is not rewritten;
+if no Debian archive entry is recognised in either format, a warning is
+logged. To recognise a mirror of your own, override
+L<Rex::GPU::NVIDIA::Setup::Debian/is_debian_archive_uri> in a subclass.
 
 The install is done by L<Rex::GPU::NVIDIA::Setup::Debian>,
 L<Rex::GPU::NVIDIA::Setup::Ubuntu>, L<Rex::GPU::NVIDIA::Setup::RHEL> and

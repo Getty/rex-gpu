@@ -16,9 +16,13 @@ use Test::More;
 #   * every other line -- comments, other fields, third-party stanzas -- is
 #     kept byte for byte;
 #   * a stanza is only edited when it is a Debian archive: Types has deb,
-#     Components has main, every URI is Debian's (*.debian.org, Hetzner's
-#     /debian/ mirror, the cloud-image mirror+file list), Signed-By (if any)
-#     is a debian-archive keyring, Enabled is not no.
+#     Components has main, Enabled is not no, and either Signed-By names only
+#     debian-archive keyrings (any URI -- a company mirror or apt-cacher-ng,
+#     karr #41) or there is no Signed-By and every URI is Debian's
+#     (*.debian.org, Hetzner's /debian/ mirror, the cloud-image mirror+file
+#     list);
+#   * a subclass overriding is_debian_archive_uri makes its mirror a Debian
+#     archive, and still leaves a stanza with a foreign Signed-By alone.
 #
 # NOT covered (needs a real Debian 13 host):
 #   * that apt accepts the written file and `apt-cache policy nvidia-driver`
@@ -158,6 +162,67 @@ subtest 'third-party and non-matching stanzas are left alone' => sub {
 subtest 'empty input' => sub {
   is_deeply(rewrite(''), [ undef, 0 ], 'empty string');
   is_deeply(rewrite(undef), [ undef, 0 ], 'undef');
+};
+
+#### karr #41: mirrors of your own ###########################################
+
+subtest 'Signed-By with only Debian archive keyrings: any URI is Debian' => sub {
+  for my $uri (qw(
+    http://apt-cache.corp.example:3142/debian
+    http://mirror.corp.example/debian
+    http://ftp.fau.de/debian
+  )) {
+    my $src = "Types: deb\nURIs: $uri\nSuites: trixie\nComponents: main\n$KEY\n";
+    is_deeply(rewrite($src), [
+      "Types: deb\nURIs: $uri\nSuites: trixie\nComponents: main contrib non-free non-free-firmware\n$KEY\n", 1
+    ], "$uri with the Debian keyring");
+  }
+};
+
+my %OWN = (
+  'apt-cacher-ng, no Signed-By' =>
+    "Types: deb\nURIs: http://apt-cache.corp.example:3142/debian\nSuites: trixie\nComponents: main\n",
+  'company mirror, no Signed-By' =>
+    "Types: deb\nURIs: http://mirror.corp.example/debian\nSuites: trixie\nComponents: main\n",
+  'company mirror, own keyring' =>
+    "Types: deb\nURIs: http://apt-cache.corp.example:3142/debian\nSuites: trixie\nComponents: main\n"
+    . "Signed-By: /etc/apt/keyrings/corp.gpg\n",
+  'company mirror, Debian and own keyring' =>
+    "Types: deb\nURIs: http://apt-cache.corp.example:3142/debian\nSuites: trixie\nComponents: main\n"
+    . "Signed-By: /usr/share/keyrings/debian-archive-keyring.pgp /etc/apt/keyrings/corp.gpg\n",
+  'company mirror, inline key' =>
+    "Types: deb\nURIs: http://apt-cache.corp.example:3142/debian\nSuites: trixie\nComponents: main\n"
+    . "Signed-By:\n -----BEGIN PGP PUBLIC KEY BLOCK-----\n .\n -----END PGP PUBLIC KEY BLOCK-----\n"
+);
+
+subtest 'unknown mirror without Debian Signed-By is left alone' => sub {
+  for my $name (sort keys %OWN) {
+    is_deeply(rewrite($OWN{$name}), [ undef, 0 ], $name);
+  }
+};
+
+{
+  package Test::Deb822Mirror;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Debian';
+  sub is_debian_archive_uri {
+    my ( $self, $uri ) = @_;
+    return 1 if $uri =~ m{^http://apt-cache\.corp\.example:3142/debian/?$};
+    return $self->SUPER::is_debian_archive_uri($uri);
+  }
+}
+
+subtest 'override is_debian_archive_uri' => sub {
+  my $as = sub { [ Test::Deb822Mirror->_deb822_enable_nonfree($_[0]) ] };
+  (my $want = $OWN{'apt-cacher-ng, no Signed-By'})
+    =~ s/^Components: main$/Components: main contrib non-free non-free-firmware/m;
+  is_deeply($as->($OWN{'apt-cacher-ng, no Signed-By'}), [ $want, 1 ], 'apt-cacher-ng recognised and edited');
+  for my $name ('company mirror, own keyring', 'company mirror, Debian and own keyring', 'company mirror, inline key') {
+    is_deeply($as->($OWN{$name}), [ undef, 0 ], "$name: a foreign Signed-By still wins");
+  }
+  is_deeply($as->("Types: deb\nURIs: https://apt.releases.hashicorp.com\nSuites: trixie\nComponents: main\n"),
+    [ undef, 0 ], 'third party elsewhere still untouched');
+  is_deeply($as->($trixie_chomped)->[1], 2, 'built-in list kept via SUPER');
 };
 
 done_testing;

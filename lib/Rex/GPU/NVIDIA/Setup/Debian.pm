@@ -209,15 +209,82 @@ then in the deb822 C</etc/apt/sources.list.d/*.sources> (both may be present).
 Third-party entries and unknown mirrors are left alone; a file with nothing
 to add is not rewritten. Warns if no Debian archive entry is recognised.
 
+An entry is a Debian archive entry if it is an enabled C<deb> entry (not
+C<deb-src>) whose components include C<main>, and
+
+=over
+
+=item * it has a C<signed-by> option (C<Signed-By:> in deb822) that names
+only keyrings L</is_debian_archive_keyring> accepts -- whatever its URI: a
+repository signed with Debian's archive key is Debian's archive or a mirror
+of it (karr #41). Any other C<signed-by> (a foreign keyring, an inline key)
+makes it a third-party entry, even on a Debian URI;
+
+=item * or it has no C<signed-by>, and L</is_debian_archive_uri> accepts
+every one of its URIs.
+
+=back
+
+=method is_debian_archive_uri
+
+  return 1 if $self->is_debian_archive_uri($uri);
+
+True if C<$uri> is one of Debian's archives: a host C<debian.org> or
+C<*.debian.org> (C<deb>, C<security>, C<ftp.de>, ...; any C<http>,
+C<https>, C<ftp>, optionally with an apt transport prefix such as C<tor+>),
+Hetzner's Debian mirror (C<mirror.hetzner.com> or C<mirror.hetzner.de>
+under C</debian/>), or the C<mirror+file:/etc/apt/mirrors/debian.list> /
+C<debian-security.list> indirection of Debian's cloud images. Any other URI
+is not.
+
+L</enable_nonfree> asks it only for entries without C<signed-by>. A mirror
+of your own -- a company mirror, C<apt-cacher-ng>, a national C<ftp.*> host
+outside C<debian.org> -- whose entries carry no
+C<signed-by=/usr/share/keyrings/debian-archive-keyring.gpg> is not
+recognised, so C<non-free> is not enabled and C<nvidia-driver> has no
+installation candidate. Recognise it in a subclass (see
+L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>, and
+C<eg/custom-setup/lib/My/GPU/DebianMirror.pm> in the distribution):
+
+  package My::GPU::DebianMirror;
+  use Moo;
+  extends 'Rex::GPU::NVIDIA::Setup::Debian';
+
+  sub is_debian_archive_uri {
+    my ( $self, $uri ) = @_;
+    return 1 if $uri =~ m{^http://apt-cache\.corp\.example:3142/debian/?$};
+    return $self->SUPER::is_debian_archive_uri($uri);
+  }
+
+  # set gpu_nvidia_setup => 'My::GPU::DebianMirror';
+
+Match only URIs that serve Debian's own archive: every entry with C<main>
+that it accepts gets C<contrib non-free non-free-firmware> added.
+
+=method is_debian_archive_keyring
+
+  return 1 if $self->is_debian_archive_keyring($path);
+
+True if the keyring file C<$path> holds Debian's archive keys: by default a
+C<debian-archive-*.gpg>, C<.pgp> or C<.asc> file directly under
+C</usr/share/keyrings> (what the C<debian-archive-keyring> package ships).
+Override it for a mirror that is re-signed with a key of your own, whose
+entries name that keyring in C<signed-by> -- for such an entry
+L</is_debian_archive_uri> is not asked.
+
 =cut
 
 sub enable_nonfree {
   my ( $self ) = @_;
   my $classic = $self->_enable_nonfree_sources_list;
   my $deb822  = $self->_enable_nonfree_deb822;
+  # Names the way out (karr #41): an unknown mirror is not edited on purpose
   Rex::Logger::info("  No Debian archive entry recognised in /etc/apt/sources.list or "
     . "/etc/apt/sources.list.d/*.sources — non-free was not enabled, Debian's "
-    . "nvidia-driver may have no installation candidate", 'warn')
+    . "nvidia-driver may have no installation candidate. For a mirror of your own, "
+    . "add signed-by=/usr/share/keyrings/debian-archive-keyring.gpg to its entries, "
+    . "or override is_debian_archive_uri in a subclass of ".__PACKAGE__
+    . " and choose it with set gpu_nvidia_setup (see eg/custom-setup in Rex-GPU)", 'warn')
     unless $classic || $deb822;
 }
 
@@ -252,8 +319,8 @@ sub _enable_nonfree_sources_list {
 #   * it is an active "deb" line (not "deb-src", not commented out), in the
 #     form  deb [ options ] URI suite component...  (options optional);
 #   * its components include "main";
-#   * its URI is Debian's (_debian_archive_uri: the same rules as deb822);
-#   * a signed-by= option, if present, names only debian-archive-* keyrings.
+#   * _debian_archive_entry accepts its URI and signed-by= (the same rules
+#     as deb822).
 # The Debian 12 installer writes "deb ... bookworm main non-free-firmware":
 # non-free-firmware is not non-free.
 sub _sources_list_enable_nonfree {
@@ -275,9 +342,9 @@ sub _sources_list_enable_nonfree {
     my ($opts, $uri, $comps, $rest) = ($1 // '', $2, $4, $5);
     my @comps = split ' ', $comps;
     next unless grep { $_ eq 'main' } @comps;
-    next unless $self->_debian_archive_uri($uri);
     my @signed_by = map { /^signed-by=(.*)$/i ? ($1) : () } split ' ', $opts;
-    next if @signed_by && !$self->_debian_archive_keyring(map { split /,/ } @signed_by);
+    next unless $self->_debian_archive_entry([ $uri ],
+      @signed_by ? [ map { split /,/ } @signed_by ] : undef);
     $matched++;
 
     my %have    = map { $_ => 1 } @comps;
@@ -326,9 +393,7 @@ sub _enable_nonfree_deb822 {
 # A stanza is a Debian archive -- and edited -- only if ALL of:
 #   * Types: lists "deb", and Enabled: is not "no";
 #   * Components: lists "main";
-#   * every URIs: entry is Debian's (_debian_archive_uri);
-#   * Signed-By:, if present, names a debian-archive-* keyring file under
-#     /usr/share/keyrings.
+#   * _debian_archive_entry accepts its URIs: and Signed-By:.
 # Suites are deliberately not matched against codenames. An unknown mirror is
 # NOT edited: the caller then warns, and the driver install dies at its dpkg
 # check, rather than this editing a repository it cannot identify.
@@ -379,22 +444,35 @@ sub _deb822_is_debian_archive {
   return 0 if $s->{enabled} && lc $s->{enabled}{value} eq 'no';
   return 0 unless grep { $_ eq 'main' } $tokens->('components');
 
-  my @uris = $tokens->('uris');
-  return 0 unless @uris;
-  for my $uri (@uris) {
-    return 0 unless $self->_debian_archive_uri($uri);
-  }
+  return $self->_debian_archive_entry([ $tokens->('uris') ],
+    $s->{'signed-by'} ? [ split /[\s,]+/, $s->{'signed-by'}{value} ] : undef);
+}
 
-  return 0 if $s->{'signed-by'}
-    && !$self->_debian_archive_keyring(split /[\s,]+/, $s->{'signed-by'}{value});
+# Shared by both formats (karr #36, #40, #41): does an entry with these URIs
+# and signed-by keys (arrayref; undef = no signed-by at all) point at
+# Debian's archive? With signed-by, the keys alone decide: at least one, all
+# accepted by is_debian_archive_keyring -- a repo apt verifies with Debian's
+# archive key is Debian's archive or a mirror of it, whatever its host, and
+# an inline key or any other keyring means a third-party repo even on a
+# Debian URI. Without it every URI must pass is_debian_archive_uri.
+sub _debian_archive_entry {
+  my ( $self, $uris, $keys ) = @_;
+  return 0 unless @$uris;
+  if ($keys) {
+    my @keys = grep { length } @$keys;
+    return 0 unless @keys;
+    for my $key (@keys) {
+      return 0 unless $self->is_debian_archive_keyring($key);
+    }
+    return 1;
+  }
+  for my $uri (@$uris) {
+    return 0 unless $self->is_debian_archive_uri($uri);
+  }
   return 1;
 }
 
-# Shared by both formats (karr #36, #40): is $uri one of Debian's archives --
-# a host *.debian.org, Hetzner's Debian mirror (mirror.hetzner.com|de under
-# /debian/), or the mirror+file:/etc/apt/mirrors/debian[-security].list
-# indirection of Debian's cloud images? An unknown mirror is not.
-sub _debian_archive_uri {
+sub is_debian_archive_uri {
   my ( $self, $uri ) = @_;
   return 1 if $uri =~ m{^mirror\+file:(?://)?/etc/apt/mirrors/debian(?:-security)?\.list$};
   return 0 unless $uri =~ m{^(?:[a-z0-9]+\+)?(?:https?|ftp)://([^/:\s]+)(?::\d+)?(/\S*)?$}i;
@@ -404,18 +482,9 @@ sub _debian_archive_uri {
   return 0;
 }
 
-# Shared by both formats: true if a Signed-By / signed-by= value names at
-# least one key and every key is a debian-archive-* keyring file under
-# /usr/share/keyrings (an inline key or any other keyring means a third-party
-# repo).
-sub _debian_archive_keyring {
-  my ( $self, @keys ) = @_;
-  @keys = grep { length } @keys;
-  return 0 unless @keys;
-  for my $key (@keys) {
-    return 0 unless $key =~ m{^/usr/share/keyrings/debian-archive-[A-Za-z0-9_.-]+\.(?:gpg|pgp|asc)$};
-  }
-  return 1;
+sub is_debian_archive_keyring {
+  my ( $self, $path ) = @_;
+  return $path =~ m{^/usr/share/keyrings/debian-archive-[A-Za-z0-9_.-]+\.(?:gpg|pgp|asc)$} ? 1 : 0;
 }
 
 1;

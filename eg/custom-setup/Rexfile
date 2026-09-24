@@ -4,10 +4,12 @@
 # Layout:
 #   eg/custom-setup/Rexfile
 #   eg/custom-setup/lib/My/GPU/Setup.pm   <- the class; Rex puts lib/ on @INC
+#   eg/custom-setup/lib/My/GPU/DebianMirror.pm  <- Debian: a mirror of your own
 #
 # Usage (Ubuntu hosts -- My::GPU::Setup extends the Ubuntu setup):
 #   rex -f eg/custom-setup/Rexfile -H <host> setup
 #   rex -f eg/custom-setup/Rexfile -H <host> setup_mirror --apt_line='deb [...] http://... noble main restricted'
+#   rex -f eg/custom-setup/Rexfile -H <debian-host> setup_debian_mirror
 #
 # Two ways to choose the class, the first wins:
 #   1. gpu_setup(setup => 'My::GPU::Setup') or setup => My::GPU::Setup->new(...)
@@ -52,6 +54,17 @@ task 'setup_mirror', sub {
     setup             => My::GPU::Setup->new(apt_line => $params->{apt_line}),
     # intersected with what the GPUs need: can only tighten
     requirement       => { min_branch => 580 },
+  );
+};
+
+desc 'GPU setup on a Debian host whose sources point at a mirror of your own';
+task 'setup_debian_mirror', sub {
+  my ($params) = @_;
+  gpu_setup(
+    containerd_config => ($params->{runtime} // 'rke2'),
+    reboot            => ($params->{reboot}  // 0),
+    # a class name wins over set gpu_nvidia_setup
+    setup             => 'My::GPU::DebianMirror',
   );
 };
 
