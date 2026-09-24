@@ -25,7 +25,9 @@ use vars qw(@EXPORT);
 =method gpu_detect
 
 Detect GPU hardware on the remote host by scanning PCI devices. Installs
-C<pciutils> if not already present, then parses C<lspci -nn> output.
+C<pciutils> only if C<lspci> is not on the host's C<PATH> (dies if it still
+is not afterwards), then parses C<lspci -nn> output. See
+L<Rex::GPU::Detect/detect>.
 
 Returns a hashref with detected GPUs grouped by vendor:
 

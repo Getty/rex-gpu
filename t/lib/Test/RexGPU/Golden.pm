@@ -24,9 +24,10 @@ use warnings;
 #
 # Scope of a swap: Rex::Exporter exports by aliasing the whole glob, so
 # Rex::GPU::NVIDIA::run IS Rex::Commands::Run::run (and Rex::GPU::Detect::run).
-# While a recording runs, every run/pkg/file/can_run call in the process is
-# recorded, whoever makes it. Rex functions the harness does not mock --
-# i_run, is_installed, cat, get_operating_system, Rex::get_current_connection
+# While a recording runs, every run/pkg/file/can_run/is_installed call in the
+# process is recorded, whoever makes it (is_installed since karr #46, for
+# Detect's pciutils bootstrap). Rex functions the harness does not mock --
+# i_run, cat, get_operating_system, Rex::get_current_connection
 # -- are replaced by traps that die, so a code path the harness does not know
 # about fails the test instead of reaching a host. A refactor that starts
 # using one of them must extend this harness first.
@@ -223,6 +224,8 @@ sub working_driver {
 
 # host_profile($name, %override) -- a fresh copy; `responses` given here are
 # consulted BEFORE the profile's own, `release`/`os` replace the profile's.
+# A response's output may be a CODE ref returning (output, exit) per call.
+# `installed => { pciutils => 1 }` answers Rex::GPU::Detect's is_installed.
 sub host_profile {
   my ( $name, %override ) = @_;
   my $base = $HOST{$name} or croak __PACKAGE__.': unknown host profile '.$name;
@@ -231,6 +234,7 @@ sub host_profile {
     os        => $override{os}      // $base->{os},
     release   => $override{release} // $base->{release},
     can_run   => { %{ $override{can_run} // {} } },
+    installed => { %{ $override{installed} // {} } },
     responses => [ @{ $override{responses} // [] }, @{ $base->{responses} }, @COMMON ]
   };
 }
@@ -311,6 +315,14 @@ sub record_host {
     return 1;
   };
 
+  # karr #46: Rex::GPU::Detect's pciutils bootstrap asks is_installed before
+  # pkg; the answer comes from the profile's `installed` (default: no).
+  my $is_installed = sub {
+    my ( $name ) = @_;
+    push @lines, 'is_installed: '.$name;
+    return $host->{installed}{$name} ? 1 : 0;
+  };
+
   my $can_run = sub {
     my ( @cmds ) = @_;
     push @lines, 'can_run: '.join(' ', @cmds);
@@ -331,6 +343,7 @@ sub record_host {
     'Rex::GPU::NVIDIA::pkg'                      => $pkg,
     'Rex::GPU::NVIDIA::file'                     => $file,
     'Rex::GPU::NVIDIA::can_run'                  => $can_run,
+    'Rex::GPU::Detect::is_installed'             => $is_installed,
     'Rex::GPU::NVIDIA::operating_system'         => sub { $os },
     'Rex::GPU::NVIDIA::operating_system_release' => sub { $release },
     # the real classifiers, fed the scripted OS name
@@ -408,7 +421,11 @@ sub _respond {
   for my $r (@$responses) {
     my ( $match, $out, $exit ) = @$r;
     my $hit = ref $match eq 'Regexp' ? $cmd =~ $match : $cmd eq $match;
-    return ( $out, $exit // 0 ) if $hit;
+    next unless $hit;
+    # a CODE response answers per call (a host that changes, e.g. lspci
+    # missing before the pciutils install and present after it)
+    ( $out, $exit ) = $out->($cmd) if ref $out eq 'CODE';
+    return ( $out, $exit // 0 );
   }
   return ( '', 0 );   # unscripted: empty output, success
 }

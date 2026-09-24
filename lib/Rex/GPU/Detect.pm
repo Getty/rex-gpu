@@ -5,9 +5,12 @@ our $VERSION = '0.002';
 use v5.14.4;
 use warnings;
 
+use Carp qw( croak );
+use Rex::Commands::Gather ();
 use Rex::Commands::Pkg;
 use Rex::Commands::Run;
 use Rex::Logger;
+use Rex::GPU::NVIDIA ();
 use Rex::GPU::NVIDIA::Requirement;
 
 require Rex::Exporter;
@@ -105,9 +108,18 @@ my %NVIDIA_COMPUTE_DEVICE_IDS = (
 
 =method detect
 
-Detect GPU hardware on the remote host. Ensures C<pciutils> is installed,
-then parses C<lspci -nn> output filtered to PCI display-class devices
-(class codes C<03xx>).
+Detect GPU hardware on the remote host: parses C<lspci -nn> output filtered
+to PCI display-class devices (class codes C<03xx>).
+
+If C<lspci> is on the remote C<PATH> (C<command -v lspci>), nothing is
+installed. Otherwise C<pciutils> is installed first: through
+L<Rex::Commands::Pkg/pkg> (unless C<is_installed> says it already is), or,
+on Rocky Linux, AlmaLinux and CentOS Stream under the names Rex reports when
+C<lsb_release> is installed (C<Rocky>, C<RockyLinux>, C<AlmaLinux>,
+C<CentOSStream>; C<Rex::Pkg> cannot handle those), with C<dnf install -y
+pciutils> checked by C<rpm -q pciutils>. Dies if that check fails or
+C<lspci> is still not found afterwards -- before C<lspci> runs, so a host
+without it never reports "no GPU".
 
 Returns a hashref with C<nvidia> and C<amd> array refs. Each element is a
 hashref describing one detected GPU:
@@ -140,8 +152,7 @@ card is still reported.
 =cut
 
 sub detect {
-  # Ensure lspci is available
-  pkg ["pciutils"], ensure => "present" unless is_installed("pciutils");
+  _ensure_lspci();
 
   my $pci_output = run "lspci -nn 2>&1 | grep -E '\\[03(00|02)\\]'",
     auto_die => 0;
@@ -175,6 +186,36 @@ sub detect {
     if $virtual && !@{$result->{nvidia}} && !@{$result->{amd}};
 
   return $result;
+}
+
+# karr #46: lspci present => install nothing (read-only; OCP needs no
+# pciutils then). `command -v` through run, not can_run: can_run stats the
+# path through the file interface, which needs SFTP on SSH/OpenSSH, and it
+# answers under the same PATH the `lspci -nn` below runs with. Rex::Pkg dies
+# "OS/Provider not supported" on the RHEL-family names lsb_release gives
+# (karr #39), so those get dnf + rpm -q, as Setup::RHEL's install_helpers
+# does; the name list is Rex::GPU::NVIDIA's, not a copy.
+sub _ensure_lspci {
+  return if _has_lspci();
+
+  if (Rex::GPU::NVIDIA::_rhel_family_name(Rex::Commands::Gather::operating_system())) {
+    Rex::Logger::info('lspci not found -- installing pciutils with dnf');
+    run 'dnf install -y pciutils', auto_die => 0;
+    run 'rpm -q pciutils 2>&1', auto_die => 0;
+    croak 'pciutils not installed after dnf install -- check dnf output; '
+      .'GPU detection needs lspci' if $? != 0;
+  }
+  else {
+    pkg ["pciutils"], ensure => "present" unless is_installed("pciutils");
+  }
+
+  croak 'lspci not found on the host after installing pciutils -- '
+    .'GPU detection needs lspci on the PATH' unless _has_lspci();
+}
+
+sub _has_lspci {
+  run 'command -v lspci >/dev/null 2>&1', auto_die => 0;
+  return $? == 0 ? 1 : 0;
 }
 
 sub _parse_nvidia_line {

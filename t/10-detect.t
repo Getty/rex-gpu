@@ -29,12 +29,14 @@ use Test::More;
 
 use Rex::GPU::Detect;
 
-# Mock seam: is_installed => 1 skips the pkg() install; run => fixture feeds
+# Mock seam: _has_lspci => 1 skips the pciutils bootstrap (karr #46; its
+# host interactions are pinned in t/11-detect-pciutils.t); run => fixture feeds
 # detect() the text that `lspci -nn | grep -E '[03(00|02)]'` would emit.
 # local + dynamic scope means the overrides are live only while detect() runs.
 sub detect_with {
   my ($output) = @_;
   no warnings 'redefine';
+  local *Rex::GPU::Detect::_has_lspci   = sub { 1 };
   local *Rex::GPU::Detect::is_installed = sub { 1 };
   local *Rex::GPU::Detect::run          = sub { $output };
   return Rex::GPU::Detect::detect();

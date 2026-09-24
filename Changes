@@ -1,14 +1,21 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - gpu_detect (and so gpu_setup and Rex::Rancher gpu => 1) installs
+    nothing when lspci is already on the host's PATH (command -v lspci).
+    Without it, pciutils goes through Rex::Pkg as before, except on Rocky,
+    AlmaLinux and CentOS Stream under their lsb_release names, where
+    Rex::Pkg died "OS/Provider not supported": there it is installed with
+    dnf and checked with rpm -q. Detection now dies if that check fails or
+    lspci is still missing, instead of reporting no GPU.
+    Not hardware-verified (karr #46)
   - install_driver and install_container_toolkit accept Rocky Linux,
     AlmaLinux and CentOS Stream under the names Rex reports when
     lsb_release is installed (Rocky, RockyLinux, AlmaLinux, CentOSStream),
     which Rex's is_redhat does not know; they died "Unsupported OS" there.
     On such a host epel-release (and the RHEL 10 versionlock plugin) is
     installed with dnf and checked with rpm -q, since Rex::Pkg cannot run
-    there. gpu_detect still installs pciutils through Rex::Pkg and can die
-    on such a host. On RHEL itself (/etc/os-release ID=rhel, read by the
+    there. On RHEL itself (/etc/os-release ID=rhel, read by the
     RHEL setup) EPEL comes from its release RPM (epel-release-latest-N) and
     must be installed or the call dies before the driver, and CodeReady
     Builder is enabled with subscription-manager (a failure only warns);
