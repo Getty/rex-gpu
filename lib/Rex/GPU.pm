@@ -87,7 +87,7 @@ Spark) has no proprietary kernel module at all, on x86_64 and aarch64 alike:
 Ubuntu gets the C<-open> driver package variant instead of the default
 C<-server> one, Debian 12 and 13 NVIDIA's CUDA-repository open-module driver
 instead of Debian's C<non-free> one (which cannot drive them); on any other
-Debian release it dies before the host is changed. A pre-Turing GPU
+Debian release it dies before any driver package is installed. A pre-Turing GPU
 (Maxwell/Pascal/Volta, e.g. the V100, a GeForce GT 1030 or GTX 980) gets the
 proprietary 580-branch driver on Ubuntu, RHEL and openSUSE, Debian's
 C<non-free> driver on Debian 12 and 13. A host whose GPUs are all Turing to
@@ -100,8 +100,8 @@ GPU at any PCI class (GeForce GT 710, GTX 780, Quadro K4000, and the class
 C<0302> Tesla K80/K40/K20) is detected with C<compute =E<gt> 0> and skipped
 with a warning: no driver is installed for it, and it does not stop the
 installation for a newer GPU on the same host. GPUs that cannot share one
-driver (a V100 next to a B200) make C<gpu_setup> die before the host is
-changed, unless a working driver is already installed.
+driver (a V100 next to a B200) make C<gpu_setup> die before any driver
+package is installed, unless a working driver is already installed.
 
 On an NVIDIA vGPU guest (C<vgpu =E<gt> 1> in the L</gpu_detect> result:
 Azure NVadsA10 v5, AWS G6f, ...) the GPU needs NVIDIA's licensed vGPU guest
@@ -109,7 +109,7 @@ driver, which Rex::GPU does not install. If that driver already works
 (C<nvidia-smi -L> lists the GPU and C<libcuda.so.1> is in the linker cache)
 C<gpu_setup> goes on as on any host with a working driver: container
 toolkit, CDI specs, containerd. If not, it dies in
-L<Rex::GPU::NVIDIA/install_driver> before anything on the host is changed,
+L<Rex::GPU::NVIDIA/install_driver> before any driver package is installed,
 naming the vGPU type -- also when a GPU that is not a vGPU sits next to it.
 
 On an HGX baseboard with NVSwitches (HGX-2, HGX A100, HGX H100/H200:
@@ -118,9 +118,9 @@ passed as C<nvswitches>, and NVIDIA Fabric Manager is installed with the
 driver at exactly its version and C<nvidia-fabricmanager.service> enabled --
 without it CUDA does not initialise on those hosts. A distro source that has
 no Fabric Manager is not used (Debian's C<non-free>; Debian 12/13 takes
-NVIDIA's CUDA repository instead, Debian 11 and openSUSE die before the host
-is changed). If the driver is already installed, Fabric Manager is added
-only when the host's own package sources offer it at exactly the loaded
+NVIDIA's CUDA repository instead, Debian 11 and openSUSE die before any
+driver package is installed). If the driver is already installed, Fabric
+Manager is added only when the host's own package sources offer it at exactly the loaded
 driver's version; otherwise it warns and changes nothing. See the
 C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>. Hosts without
 NVSwitch are unchanged.
@@ -132,10 +132,15 @@ from NVIDIA's CUDA repository -- on Ubuntu added for this, pinned to
 C<nvlsm> alone), loads C<ib_umad>, warns on a kernel older than 5.17
 (except on the RHEL family), and after the start checks that every GPU
 reports C<Fabric State: Completed> -- a loud warning if not, never a die.
-Where no C<nvlsm> source is known it dies before the host is changed. GB200/GB300 NVL72 compute
+Where no C<nvlsm> source is known it dies before any driver package is installed. GB200/GB300 NVL72 compute
 trays need no Fabric Manager (it runs on the NVLink switch trays); an info
 line notes that multi-node NVLink needs C<nvidia-imex>, which is not set
 up either. See the C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>.
+
+Each die named above comes from L<Rex::GPU::NVIDIA::Setup/plan>, known
+without a refreshed package index: by then no package source has been
+added and nothing has been installed, except C<pciutils> when
+L</gpu_detect> found no C<lspci> on the host.
 
 After the last step L<Rex::GPU::NVIDIA/verify_nvidia> checks the result --
 kernel module, C<nvidia-smi -L>, container toolkit -- and logs a warning for
@@ -339,8 +344,8 @@ skipped with a warning at any PCI class. See L</gpu_setup>.
 =item 2. B<NVIDIA driver installation> — Distribution-appropriate packages
 via DKMS for kernel-version independence, chosen so one driver fits every
 detected GPU. Nouveau is blacklisted and the initramfs is regenerated. An
-NVIDIA vGPU guest without a working driver dies before the host is changed
-(see L</gpu_setup>).
+NVIDIA vGPU guest without a working driver dies before any driver package
+is installed (see L</gpu_setup>).
 
 =item 3. B<NVIDIA Container Toolkit> — Installs C<nvidia-container-toolkit>
 from the official NVIDIA repository for all supported distributions, unless
