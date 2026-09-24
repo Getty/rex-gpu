@@ -57,7 +57,7 @@ subtest 'open_kernel_module_required' => sub {
   is(Rex::GPU::Detect::open_kernel_module_required('2E12'), 1,
     'lookup is case-insensitive');
   is(Rex::GPU::Detect::open_kernel_module_required('27b0'), 0,
-    'RTX 4000 Ada device id (name-matched, not in the allowlist) => 0');
+    'RTX 4000 Ada device id (outside the Blackwell range) => 0');
   is(Rex::GPU::Detect::open_kernel_module_required('ffff'), 0,
     'unlisted device id => 0');
   is(Rex::GPU::Detect::open_kernel_module_required(undef), 0,

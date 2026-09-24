@@ -81,16 +81,17 @@ subtest '_is_nvidia_compute classification' => sub {
 
   # Known-compute PCI device ID (3rd arg). GB10 (10de:2e12, DGX Spark, aarch64)
   # enumerates as VGA [0300] with the marketing name UNRESOLVED by a stale
-  # pci.ids — lspci prints only "Device". The device-ID allowlist recognises it
-  # as compute where the name-token rules cannot. Verified live on cortex.
+  # pci.ids — lspci prints only "Device". Its device ID is in the Blackwell
+  # range of the Requirement table, which makes it compute (karr #45) where
+  # the name-token rules cannot. Verified live on cortex.
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2e12'), 1,
     'GB10 device id 2e12 at class 0300 with name "Device" => compute');
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2E12'), 1,
     'device-id match is case-insensitive');
-  # The allowlist is a positive-only override: it must NOT flip the unknown
-  # default when the id is not on the list (still 0).
+  # The device-ID rule only says yes inside the Blackwell ranges: an ID outside
+  # them must NOT flip the unknown default (still 0).
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', 'ffff'), 0,
-    'unlisted device id => unknown default 0 preserved');
+    'non-Blackwell device id => unknown default 0 preserved');
   # 2-arg calls (no device id) keep the exact prior behaviour.
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device'), 0,
     'no device id => unknown default 0 (back-compatible signature)');
@@ -134,7 +135,7 @@ subtest '_parse_nvidia_line — GB10 aarch64 (name unresolved by pci.ids)' => su
   is($gpu->{vendor},    'nvidia', 'vendor nvidia');
   is($gpu->{pci_class}, '0300',   'pci_class 0300 (GB10 enumerates as VGA, not 3D)');
   is($gpu->{name},      'Device', 'name = "Device" (pci.ids cannot resolve 10de:2e12)');
-  is($gpu->{compute},   1,        'compute 1 via device-id allowlist — pipeline runs on a Spark');
+  is($gpu->{compute},   1,        'compute 1 via the Blackwell device-id range — pipeline runs on a Spark');
 };
 
 #### _parse_amd_line
@@ -179,7 +180,16 @@ subtest 'detect — GB10 aarch64 (real cortex string) => compute' => sub {
   is($r->{nvidia}[0]{compute}, 1,      'compute 1 — gpu_setup runs the full pipeline on a Spark');
 };
 
-#### karr #21: Blackwell desktop / RTX PRO by device ID, laptops not
+#### karr #21 / #45: every Blackwell GPU is compute by device ID
+#
+# karr #21 put desktop RTX 50xx and RTX PRO Blackwell workstation/server IDs
+# on an explicit allowlist and deliberately LEFT OUT laptop and "Embedded"
+# chips: this file asserted that an unresolved "Device [10de:2c18]" (RTX 5090
+# Laptop) was compute 0. karr #45 REPLACES that claim by maintainer decision
+# ("every GPU usable for AI counts, RTX for sure"): every ID in the Blackwell /
+# Blackwell Ultra rows of Rex::GPU::NVIDIA::Requirement is compute, whatever
+# the class and whether pci.ids resolved the name. The result no longer
+# depends on how old the host's pci.ids is.
 
 # Captures every Rex::Logger::info call made while $code runs.
 sub logged {
@@ -191,7 +201,7 @@ sub logged {
   return ($ret, \@log);
 }
 
-subtest 'unresolved name at class 0300 — allowlisted Blackwell IDs => compute' => sub {
+subtest 'unresolved name at class 0300 — every Blackwell ID => compute' => sub {
   # IDs from NVIDIA's supportedchips table, driver 615.71.09. The line is what
   # lspci prints when pci.ids does not know the ID: just "Device".
   my %ids = (
@@ -203,7 +213,21 @@ subtest 'unresolved name at class 0300 — allowlisted Blackwell IDs => compute'
     '2bb1' => 'RTX PRO 6000 Blackwell Workstation Edition',
     '2bb5' => 'RTX PRO 6000 Blackwell Server Edition',
     '2c3a' => 'RTX PRO 4500 Blackwell Server Edition',
-    '2d30' => 'RTX PRO 2000 Blackwell'
+    '2d30' => 'RTX PRO 2000 Blackwell',
+    # laptop chips (compute 0 under karr #21, compute 1 since karr #45)
+    '2c18' => 'GeForce RTX 5090 Laptop GPU',
+    '2f58' => 'GeForce RTX 5070 Ti Laptop GPU',
+    '2d98' => 'GeForce RTX 5050 Laptop GPU',
+    '2c38' => 'RTX PRO 5000 Blackwell Generation Laptop GPU',
+    # RTX PRO Blackwell Embedded modules, RTX 6000D
+    '2c77' => 'RTX PRO 5000 Blackwell Embedded GPU',
+    '2c79' => 'RTX PRO 4000 Blackwell Embedded GPU',
+    '2d79' => 'RTX PRO 2000 Blackwell Embedded GPU',
+    '2df9' => 'RTX PRO 500 Blackwell Embedded GPU',
+    '2bb9' => 'RTX 6000D',
+    # Blackwell Ultra, should one ever enumerate as VGA
+    '3182' => 'B300 SXM6 AC',
+    '31c2' => 'GB300'
   );
   for my $id (sort keys %ids) {
     my ($gpu, $log) = logged(sub {
@@ -213,54 +237,56 @@ subtest 'unresolved name at class 0300 — allowlisted Blackwell IDs => compute'
     });
     is($gpu->{name},      'Device', $id.' name unresolved');
     is($gpu->{device_id}, $id,      $id.' device_id');
-    is($gpu->{compute},   1,        $id.' ('.$ids{$id}.') => compute via device-id allowlist');
+    is($gpu->{compute},   1,        $id.' ('.$ids{$id}.') => compute via the Blackwell device-id range');
     ok(!(grep { ($_->[1] // '') eq 'warn' } @$log), $id.' no unknown-model warning');
   }
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2B85'), 1,
     'upper-case device id matches too');
 
-  my $r = detect_with(
-    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2b85] (rev a1)'
-  );
-  is($r->{nvidia}[0]{compute}, 1, 'detect: RTX 5090 with unresolved name => compute, pipeline runs');
+  # Range edges: the Blackwell block is 2900-2FFF; 28ff (just below, Ada
+  # territory) and 3000 (just above) are not in it, nor the neighbours of the
+  # Blackwell Ultra IDs.
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2900'), 1, '2900 (block start) => compute');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', '2fff'), 1, '2fff (block end) => compute');
+  for my $id (qw( 28ff 3000 3181 3183 31c1 31c4 )) {
+    is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'Device', $id), 0,
+      $id.' (outside the Blackwell rows) with no name => unknown default 0');
+  }
+
+  for my $id (qw( 2b85 2c18 )) {
+    my $r = detect_with(
+      '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:'.$id.'] (rev a1)'
+    );
+    is($r->{nvidia}[0]{compute}, 1, 'detect: '.$id.' with unresolved name => compute, pipeline runs');
+  }
 };
 
-subtest 'unresolved name at class 0300 — laptop / embedded Blackwell => not compute' => sub {
-  # Same tables, deliberately left out: laptop chips and RTX PRO Embedded
-  # modules stay on the unknown-model default (0) and warn.
-  my %ids = (
-    '2c18' => 'GeForce RTX 5090 Laptop GPU',
-    '2d98' => 'GeForce RTX 5050 Laptop GPU',
-    '2c38' => 'RTX PRO 5000 Blackwell Generation Laptop GPU',
-    '2c77' => 'RTX PRO 5000 Blackwell Embedded GPU'
-  );
-  for my $id (sort keys %ids) {
+subtest 'unknown non-Blackwell ID with no name => still not compute' => sub {
+  # IDs outside the Blackwell rows as VGA "Device": no name, no class 0302,
+  # so the safe unknown default holds and warns.
+  for my $id (qw( 2330 27b0 1db4 ffff )) {
     my ($gpu, $log) = logged(sub {
       Rex::GPU::Detect::_parse_nvidia_line(
         '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:'.$id.'] (rev a1)'
       );
     });
-    is($gpu->{compute}, 0, $id.' ('.$ids{$id}.') => not compute');
+    is($gpu->{compute}, 0, $id.' "Device" at class 0300 => not compute');
     ok((grep { ($_->[1] // '') eq 'warn' && $_->[0] =~ /Unknown NVIDIA GPU model: Device/ } @$log),
       $id.' warns "Unknown NVIDIA GPU model"');
   }
-  my $r = detect_with(
-    '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation Device [10de:2c18] (rev a1)'
-  );
-  is($r->{nvidia}[0]{compute}, 0, 'detect: unresolved RTX 5090 Laptop => compute 0, pipeline skipped');
 };
 
-subtest 'resolved names unchanged by the allowlist' => sub {
-  # CHARACTERIZATION (karr #21 report, not a decision): a laptop Blackwell
-  # chip whose name pci.ids DOES resolve is compute today through the RTX
-  # name token, like every RTX laptop part before it. The allowlist leaves
-  # laptop IDs out but does not change the name rule.
+subtest 'resolved names: RTX laptop parts are compute by name' => sub {
+  # The name rule \bRTX\b stays: a laptop RTX of any generation whose name
+  # pci.ids resolves is compute — wanted (karr #45), not just tolerated.
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GB202M [GeForce RTX 5090 Laptop GPU]', '2c18'), 1,
-    'resolved "RTX 5090 Laptop GPU" => compute via RTX name token (today)');
+    'resolved "RTX 5090 Laptop GPU" => compute (range and name agree)');
+  is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'AD103M / AD104M [GeForce RTX 4090 Laptop GPU]', '2717'), 1,
+    'Ada "RTX 4090 Laptop GPU" (outside the Blackwell range) => compute via the RTX name rule');
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GB202 [GeForce RTX 5090]', '2b85'), 1,
     'resolved RTX 5090 => compute');
   is(Rex::GPU::Detect::_is_nvidia_compute('0300', 'GT 710', '128b'), 0,
-    'resolved non-compute name with an unlisted id => still 0');
+    'resolved non-compute name with a non-Blackwell id => still 0');
 };
 
 subtest 'detect — AMD only' => sub {

@@ -93,6 +93,19 @@ constrained it. Empty for a per-GPU requirement.
 has name    => ( is => 'ro' );
 has members => ( is => 'ro', default => sub { [] } );
 
+=attr compute
+
+True (C<1>) when the L</generations> row for L</device_id> is marked
+C<compute>: every GPU NVIDIA has published with an ID in that row is
+CUDA-capable, so L<Rex::GPU::Detect> counts the device as compute whatever its
+PCI class and whether or not C<lspci> could resolve its name (karr #45). The
+built-in table marks the Blackwell and Blackwell Ultra rows. C<0> for every
+other ID, an unknown one, and a requirement built by L</intersect>.
+
+=cut
+
+has compute => ( is => 'ro', default => 0 );
+
 sub BUILD {
   my ( $self ) = @_;
   croak __PACKAGE__.': min_branch '.$self->min_branch.' is above max_branch '
@@ -107,8 +120,9 @@ sub BUILD {
 
 The generation table: an ordered list of hashrefs, each covering the
 inclusive PCI device-ID range C<first>..C<last> (numbers) with a
-C<generation> label, a C<kernel_module> (default C<either>) and optional
-C<min_branch>/C<max_branch>. The B<first> row whose range contains an ID
+C<generation> label, a C<kernel_module> (default C<either>), optional
+C<min_branch>/C<max_branch> and an optional C<compute> flag (see L</compute>).
+The B<first> row whose range contains an ID
 wins, so a narrower row goes before a block it sits in. An ID no row covers
 gets C<either> with no bounds — which is also what the driver installer does
 for every Turing-to-Hopper part today, so those generations have no rows.
@@ -129,9 +143,12 @@ C<< $self->SUPER::generations >> to keep the built-in ones:
     );
   }
 
-The table only chooses a driver. It never makes a GPU compute-capable: that
-is decided by L<Rex::GPU::Detect> alone, and an unrecognised GPU still gets no
-driver at all.
+The table chooses a driver, and a row marked C<compute> also makes every
+GPU in it compute-capable: L<Rex::GPU::Detect> asks this class (the built-in
+table, not a subclass) for L</compute> before its name rules (karr #45). Only
+the Blackwell and Blackwell Ultra rows are marked; an ID outside them that
+no other rule recognises still gets no driver at all. A subclass that adds or
+replaces rows changes the driver choice only, not detection.
 
 Sources, all checked 2026-09-23:
 
@@ -167,9 +184,14 @@ than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
 =cut
 
 # The rows, and where they come from (moved here from Rex::GPU::Detect, karr
-# #16 and #26). No row ever makes a device compute: a GPU still has to pass
-# Rex::GPU::Detect::_is_nvidia_compute by class 0302, the device-ID allowlist
-# or its name, and the unknown-model default there stays compute => 0.
+# #16 and #26). A row with compute => 1 makes every device in it compute in
+# Rex::GPU::Detect::_is_nvidia_compute (karr #45, maintainer decision: every
+# GPU usable for AI counts). Only the Blackwell and Blackwell Ultra rows carry
+# it: NVIDIA's table lists no entry-level (MX/GT-class) Blackwell chip, every
+# ID in them is GeForce RTX 50xx (desktop or laptop), RTX PRO Blackwell
+# (incl. Embedded), RTX 6000D, DRIVE P2021, B200/GB200/B300/GB300 or GB10.
+# Other rows never make a device compute; the unknown-model default in Detect
+# stays compute => 0.
 #
 # Blackwell (karr #16): NO proprietary kernel module — NVIDIA's open GPU
 # kernel modules are the only ones that bind — on every architecture, x86_64
@@ -218,13 +240,13 @@ than 470. L<Rex::GPU::NVIDIA> refuses to install for these.
 sub generations {
   return (
     { generation => 'Blackwell', first => 0x2e12, last => 0x2e12,       # GB10, see above
-      kernel_module => 'open', min_branch => 580 },
+      kernel_module => 'open', min_branch => 580, compute => 1 },
     { generation => 'Blackwell', first => 0x2900, last => 0x2fff,       # GB100/GB102, GB20x, GB10
-      kernel_module => 'open', min_branch => 570 },
+      kernel_module => 'open', min_branch => 570, compute => 1 },
     { generation => 'Blackwell Ultra', first => 0x3182, last => 0x3182, # B300 SXM6 AC
-      kernel_module => 'open', min_branch => 580 },
+      kernel_module => 'open', min_branch => 580, compute => 1 },
     { generation => 'Blackwell Ultra', first => 0x31c2, last => 0x31c3, # GB300
-      kernel_module => 'open', min_branch => 580 },
+      kernel_module => 'open', min_branch => 580, compute => 1 },
     { generation => 'Maxwell/Pascal/Volta', first => 0x1340, last => 0x1df6,
       kernel_module => 'proprietary', max_branch => 580 },
     { generation => 'Kepler or older', first => 0x0000, last => 0x133f,
@@ -283,7 +305,8 @@ sub _lookup {
       generation    => $row->{generation},
       kernel_module => $row->{kernel_module} // 'either',
       defined $row->{min_branch} ? ( min_branch => $row->{min_branch} ) : (),
-      defined $row->{max_branch} ? ( max_branch => $row->{max_branch} ) : ()
+      defined $row->{max_branch} ? ( max_branch => $row->{max_branch} ) : (),
+      $row->{compute} ? ( compute => 1 ) : ()
     );
   }
   return %args;

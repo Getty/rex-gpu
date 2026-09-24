@@ -42,8 +42,10 @@ with no driver yet). The compiled regexes at the top of the file are the contrac
   VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
   to an emulated console is still detected; only-virtual output returns empty arrays.
 
-`_is_nvidia_compute` classifies by name when class is `0300`: RTX/TITAN/Quadro/Tesla and
-GTX 10xx/16xx are compute; MX, GT/GTS/NVS, GTX 2xx–9xx are not; **unknown defaults to
+`_is_nvidia_compute`: after class `0302`, every device ID in a Requirement row marked
+`compute` is compute — the Blackwell 2900–2FFF / Blackwell Ultra rows, laptop and embedded
+included, name resolved or not (k45: "every GPU usable for AI"; there is no separate ID
+allowlist). Then by name: RTX (laptop too)/TITAN/Quadro/Tesla and GTX 10xx/16xx are compute; MX, GT/GTS/NVS, GTX 2xx–9xx are not; **unknown defaults to
 `0`** (safe: no install) with a warning. Changing that default from 0 to 1 means an
 unrecognised laptop chip triggers a datacenter driver install — keep it 0.
 
@@ -58,7 +60,9 @@ min_branch, max_branch}` via its overridable `generations` table — Blackwell 2
 open ≥570 (GB10 2E12 ≥580: first listed in 580.119.02) / B300 / GB300 open ≥580;
 Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; <1340 Kepler or older ≤470 (rejected).
 Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs and croaks on
-conflict (`conflicts` lists without dying). The table **never** makes a GPU compute.
+conflict (`conflicts` lists without dying). Only rows with `compute => 1` (the Blackwell
+ones) make a GPU compute; no other row ever does, and Detect reads the base table, not a
+subclass.
 `Detect::open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers.
 
 **Selection is data, not branches** (k33): each Setup class has ordered `sources`

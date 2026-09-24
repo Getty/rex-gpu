@@ -62,13 +62,15 @@ Revision history for Rex-GPU
     Builder is enabled with subscription-manager (a failure only warns);
     `pkg epel-release` had no candidate there. Rocky and Alma without
     lsb_release are unchanged. Not hardware-verified (karr #39)
-  - Detection counts desktop GeForce RTX 50xx and RTX PRO Blackwell
-    workstation/server cards as compute by PCI device ID, so a host whose
-    stale pci.ids makes lspci print only "Device [10de:2b85]" now gets the
-    full gpu_setup pipeline (also via Rex::Rancher gpu => 1) instead of a
-    skip. Explicit IDs from NVIDIA's supported-chips table (driver
-    615.71.09), no range; Blackwell laptop and "Embedded" chips with an
-    unresolved name stay compute => 0. Not hardware-verified (karr #21)
+  - Detection counts every Blackwell GPU as compute by PCI device ID
+    (10de:2900-2FFF, B300 3182, GB300 31C2/31C3: GeForce RTX 50xx desktop
+    and laptop, RTX PRO Blackwell incl. laptop and Embedded, RTX 6000D),
+    whatever its PCI class, so a host whose stale pci.ids makes lspci print
+    only "Device [10de:2c18]" gets the full gpu_setup pipeline (also via
+    Rex::Rancher gpu => 1) and the same open driver as with a resolved
+    name. The range is the Blackwell rows of
+    Rex::GPU::NVIDIA::Requirement's generation table (new compute flag).
+    Not hardware-verified (karr #21, karr #45)
   - install_driver counts a driver as installed only if nvidia-smi -L lists
     a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
     a working nvidia-smi but no CUDA library now gets a warning and the
@@ -257,13 +259,13 @@ Revision history for Rex-GPU
     is fresh, and the CDI consumer loads nvidia.com/gpu exactly once (karr #11)
   - aarch64 / NVIDIA DGX Spark (GB10) support, part 1 (detection + RHEL repo)
     and part 2 (Ubuntu open-kernel-module driver selection). Detection
-    classifies the GB10 (PCI 10de:2e12) as compute via a known-compute
-    device-ID allowlist: it enumerates as a VGA controller [0300] and, on a
-    host whose pci.ids predates the silicon, lspci prints only "Device" with
-    no marketing name, so the name-token rules classified it compute => 0 and
-    gpu_setup skipped the whole pipeline on a Spark (verified live on cortex).
-    The allowlist is positive-only and does not change the unknown-model
-    default (still 0). The RHEL/Rocky/Alma CUDA repository URL is
+    classifies the GB10 (PCI 10de:2e12) as compute by its device ID (the
+    Blackwell range, see the karr #45 entry): it enumerates as a VGA
+    controller [0300] and, on a host whose pci.ids predates the silicon,
+    lspci prints only "Device" with no marketing name, so the name-token
+    rules classified it compute => 0 and gpu_setup skipped the whole
+    pipeline on a Spark (verified live on cortex). The unknown-model
+    default is unchanged (still 0). The RHEL/Rocky/Alma CUDA repository URL is
     architecture-aware: aarch64 uses the "sbsa" tree (repos/rhelN/sbsa/),
     x86_64 is unchanged — the old hardcoded x86_64 pointed aarch64 at a
     nonexistent repo. gpu_setup now threads the detected GPU (name + PCI

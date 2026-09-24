@@ -13,7 +13,8 @@ use Test::More;
 #   * intersect: either/min/max combine, conflicts croak naming both sides;
 #     conflicts() returns the same reasons without dying
 #   * a subclass overriding `generations` adds a row without touching the base
-#   * the table never makes a GPU compute (Detect::_is_nvidia_compute unchanged)
+#   * the Blackwell / Blackwell Ultra rows make a GPU compute in
+#     Detect::_is_nvidia_compute, no other row does (karr #45)
 #
 # GB10 (2e12) is its own row with min_branch 580, not the Blackwell block's
 # 570 (karr #33): NVIDIA's open-gpu-kernel-modules README and the aarch64
@@ -253,18 +254,27 @@ subtest 'subclass overrides generations' => sub {
   isa_ok( My::Test::Requirement->intersect( $h100, $h100 ), 'My::Test::Requirement' );
 };
 
-subtest 'the table never makes a GPU compute' => sub {
-  # Blackwell and pre-Turing IDs with a name no rule knows: still not compute.
-  # 2c18 (RTX 5090 Laptop) stands in for the Blackwell range; 2b85 (desktop
-  # RTX 5090) used to, until karr #21 put it on the Detect allowlist.
-  for my $id (qw( 2901 2c18 3182 1db4 102d )) {
-    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
-      $id.' as VGA "Device" => not compute' );
+subtest 'the Blackwell rows make a GPU compute, no other row does' => sub {
+  # karr #45 REPLACES the karr #30 claim "the table never makes a GPU compute"
+  # (maintainer decision: every GPU usable for AI counts). Detect now asks the
+  # table: the Blackwell and Blackwell Ultra rows are compute, the rest not.
+  for my $id (qw( 2900 2901 2c18 2c77 2bb9 2e12 2fff 3182 31c2 31c3 )) {
+    is( $R->for_device_id($id)->compute, 1, $id.' => table compute 1' );
+    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 1,
+      $id.' as VGA "Device" => compute' );
   }
-  is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2e12' ), 1,
-    'GB10 still compute via the Detect allowlist' );
-  is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2b85' ), 1,
-    'RTX 5090 compute via the Detect allowlist (karr #21), not the table' );
+  for my $id ( qw( 0000 102d 1340 1db4 1df6 1e02 2330 28ff 3000 3181 3183 31c4 ffff ), undef ) {
+    my $label = $id // 'undef';
+    is( $R->for_device_id($id)->compute, 0, $label.' => table compute 0' );
+    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
+      $label.' as VGA "Device" => not compute (unknown default)' );
+  }
+  my $b200 = $R->for_device_id('2901');
+  is( $R->intersect( $b200, $b200 )->compute, 0,
+    'an intersected requirement carries no compute flag' );
+  # A subclass row changes the driver choice only: Detect reads the base table.
+  is( My::Test::Requirement->for_device_id('2330')->compute, 0,
+    'subclass row without compute => 0' );
 };
 
 done_testing;
