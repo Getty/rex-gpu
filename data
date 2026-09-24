@@ -1,0 +1,15 @@
+---
+class: standard
+completed: 2026-09-24T04:13:18Z
+created: 2026-09-24T04:11:06Z
+id: 58
+priority: medium
+started: 2026-09-24T04:13:18Z
+status: archived
+title: README.md has no vGPU section (k24 undocumented for users)
+updated: 2026-09-24T04:13:18Z
+---
+
+k24 (NVIDIA vGPU guest detection, commit 34e9534) added a user-visible behaviour change -- gpu_detect() now returns subsystem_vendor_id/subsystem_id/vgpu/vgpu_type per NVIDIA GPU, and install_driver/gpu_setup now DIES before touching the host on a vGPU guest (Azure NVadsA10 v5, AWS G6f, VMware/KVM vGPU, ...) without an already-working licensed vGPU guest driver, even when a non-vGPU GPU sits next to it. README.md (the user-facing overview per CLAUDE.md) has zero mention of "vgpu" (grep -in vgpu README.md is empty), even though it already has dedicated "NVSwitch / HGX" and "MIG" sections for other k23/k49 and CDI behaviour. Someone deploying gpu_setup to a cloud GPU VM via the README alone gets no warning that it may die there and why. Fix: add a short "NVIDIA vGPU guests" section to README.md (modelled on the NVSwitch/HGX section), covering: how vgpu is detected, that install_driver dies without a working vGPU guest driver (naming the vGPU type), and that a working GRID driver is left alone. lib/Rex/GPU.pm POD (lines ~106-113) and lib/Rex/GPU/Detect.pm POD ("NVIDIA vGPU guests" section) already have the accurate text to summarize from. Found during pre-release audit of 0.002.
+
+Duplicate of #61 (same finding: README.md missing vGPU section for k24). Archiving in favor of #61. Found independently by two audit forks during the 0.002 pre-release audit.
