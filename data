@@ -1,0 +1,15 @@
+---
+class: standard
+completed: 2026-09-24T04:13:10Z
+created: 2026-09-24T04:10:54Z
+id: 57
+priority: medium
+started: 2026-09-24T04:13:10Z
+status: archived
+title: 'lib/Rex/GPU.pm DESCRIPTION: stale RTX/Quadro/Tesla/0302 compute rule'
+updated: 2026-09-24T04:13:10Z
+---
+
+POD in =head1 DESCRIPTION, pipeline item 1 (lib/Rex/GPU.pm:323), still says: "Only CUDA-capable NVIDIA GPUs (RTX, Quadro, Tesla, PCI class C<0302>) trigger driver installation." That is the pre-k45/k54/k55 name/PCI-class rule. The =method gpu_setup block just above it (lines 96-104) and Detect.pm/Requirement.pm already document the current rule correctly: compute is decided by GPU generation from the PCI device ID (Requirement generations table), Maxwell or newer (GeForce MX/GT/GTX 9xx included), regardless of PCI class; Kepler or older is skipped with a warning at any PCI class, including a class-0302 Tesla K80/K40/K20. Fix: reword the DESCRIPTION item 1 to match, e.g. "Only CUDA-capable NVIDIA GPUs trigger driver installation, decided by GPU generation from the PCI device ID (Maxwell or newer; GeForce MX, GT and GTX 9xx included), not by marketing name or PCI class alone; Kepler or older is skipped with a warning at any PCI class." Found during pre-release audit of 0.002.
+
+Duplicate of #60 (same finding: lib/Rex/GPU.pm:323 stale RTX/Quadro/Tesla/0302 DESCRIPTION). Archiving in favor of #60 (more detail, priority:high). Found independently by two audit forks during the 0.002 pre-release audit.
