@@ -1,0 +1,17 @@
+---
+claimed_at: 2026-09-24T01:51:13Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:51:13Z
+created: 2026-09-24T01:43:29Z
+id: 53
+priority: low
+started: 2026-09-24T01:43:40Z
+status: done
+title: 'SUSE: kein Lock-Wait fuer zypper (cloud-init haelt zypp-Lock beim Erstboot)'
+updated: 2026-09-24T01:51:13Z
+---
+
+Aus #52: apt-Pfad hat DPkg::Lock::Timeout, zypper nicht. Bei gehaltenem zypp-Lock stirbt add_repo jetzt laut mit exit 7 (vorher spaeter). Loesung pruefen: ZYPP_LOCK_TIMEOUT=<s> als Env fuer alle zypper-Aufrufe (Setup::SUSE + _install_toolkit_suse). Container-verifizierbar.
+
+Erledigt in 5ae6c2f: ZYPP_LOCK_TIMEOUT=120 vor jedem zypper-Aufruf (Setup::SUSE->zypper, package_manager_command in Setup::Rpm). Container-verifiziert (leap 15.6/16.0, alle genutzten Subcommands warten). Offen: pciutils-Bootstrap auf SUSE geht ueber Rex::Pkg ohne Lock-Wait. Nicht auf GPU-Hardware.
