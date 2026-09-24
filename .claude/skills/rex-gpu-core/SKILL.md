@@ -42,6 +42,12 @@ with no driver yet). The compiled regexes at the top of the file are the contrac
 - **Virtual displays are skipped per line** (k17): `1af4` virtio, `1b36` QEMU, `15ad`
   VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
   to an emulated console is still detected; only-virtual output returns empty arrays.
+- **vGPU guests by (device, subsystem) pair** (k24): only with an NVIDIA GPU, a read-only
+  `lspci -vmmnn -d 10de:` gives each GPU `subsystem_(vendor_)id` by slot (`0000:` domain
+  normalised) and `vgpu 0|1`(+`vgpu_type`) from `Rex::GPU::NVIDIA::VGPU` (NVIDIA's
+  `sVgpuUsmTypes[]`, regenerate with `maint/gen-vgpu-types.pl`); unknown pair ⇒ 0,
+  `compute` untouched. Setup `plan` dies for any `vgpu` GPU (mixed too) after
+  `already_installed`, so a working GRID driver passes; missing key ⇒ not a vGPU.
 
 `_is_nvidia_compute` decides by **generation, not marketing name** (k45/k54, maintainer:
 "every GPU usable for AI", MX/GT/GTX 9xx included while a current branch supports it).
@@ -183,7 +189,7 @@ nouveau; without it the NVIDIA module can't bind. `verify_nvidia` (module loaded
 ## Housekeeping
 
 `$VERSION` is repeated in every module under `lib/` (`GPU.pm`, `Detect.pm`, `NVIDIA.pm`,
-`NVIDIA/Requirement.pm`, `NVIDIA/Setup.pm` and every `NVIDIA/Setup/*.pm`) — bump them together
+`NVIDIA/Requirement.pm`, `NVIDIA/VGPU.pm`, `NVIDIA/Setup.pm` and every `NVIDIA/Setup/*.pm`) — bump them together
 (`grep -rn 'our \$VERSION' lib/`). A change to what a Rexfile author sees (a new option, a
 detection outcome, a package choice) wants a `Changes` `{{$NEXT}}` entry naming the effect
 and its POD updated in the same edit. Perl house style and dist mechanics: skills

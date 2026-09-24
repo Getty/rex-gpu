@@ -12,6 +12,7 @@ use Rex::Commands::Run;
 use Rex::Logger;
 use Rex::GPU::NVIDIA ();
 use Rex::GPU::NVIDIA::Requirement;
+use Rex::GPU::NVIDIA::VGPU;
 
 require Rex::Exporter;
 use base qw(Rex::Exporter);
@@ -94,6 +95,10 @@ detected NVSwitch, see below):
         pci_class => "0302",   # "0300" = VGA controller, "0302" = 3D controller
         compute   => 1,        # 1 if CUDA-capable, 0 otherwise
         device_id => "27b0",  # [10de:XXXX]; undef if lspci printed no vendor:device pair
+        subsystem_vendor_id => "10de", # from lspci -vmmnn; undef if not found
+        subsystem_id        => "16fa", # likewise
+        vgpu      => 0,        # 1 for an NVIDIA vGPU guest device, see below
+        # vgpu_type => "NVIDIA A10-2Q",  # only when vgpu is 1
       }
     ],
     amd => [
@@ -126,6 +131,15 @@ NVSwitches are not PCI devices on the host (NVIDIA's Fabric Manager guide),
 so C<nvswitch> stays C<[]> there. The key is additive; C<nvidia> and C<amd>
 are unchanged.
 
+When an NVIDIA GPU was found, a third read-only command, C<lspci -vmmnn -d
+10de:>, reads each NVIDIA device's subsystem IDs by PCI slot. Every
+C<nvidia> element gets C<subsystem_vendor_id> and C<subsystem_id> (C<undef>
+if that output has no record for its slot), and C<vgpu>: C<1> if the pair
+of device ID and subsystem ID is an NVIDIA vGPU type, C<0> otherwise; with
+C<1> also C<vgpu_type>, NVIDIA's name for the type. See L</NVIDIA vGPU
+guests>. C<compute> is not affected by it. A host without an NVIDIA GPU runs
+neither this command nor the NVSwitch one.
+
 If no supported GPU is found, or if the only display devices are virtual,
 all three arrays are empty (C<[]>) -- C<nvswitch> too, since it is only
 probed when an NVIDIA GPU was found. A virtual display next to a real
@@ -150,10 +164,13 @@ sub detect {
   # real card (karr #17). Vendor checks run first, so a [10de:]/[1002:] line
   # is never classified virtual — only a line that is not NVIDIA/AMD can be.
   my $virtual = 0;
+  my @nvidia_slots;
   for my $line (split /\n/, $pci_output) {
     if ($line =~ $NVIDIA_VENDOR_RE) {
       my $gpu = _parse_nvidia_line($line);
-      push @{$result->{nvidia}}, $gpu if $gpu;
+      next unless $gpu;
+      push @{$result->{nvidia}}, $gpu;
+      push @nvidia_slots, _pci_slot($line);
     }
     elsif ($line =~ $AMD_VENDOR_RE) {
       my $gpu = _parse_amd_line($line);
@@ -171,6 +188,9 @@ sub detect {
   # NVSwitch (karr #23): only where there is an NVIDIA GPU for it to connect,
   # so a host without one runs no extra command.
   $result->{nvswitch} = _detect_nvswitch() if @{$result->{nvidia}};
+
+  # vGPU guest (karr #24): likewise only with an NVIDIA GPU, read-only.
+  _detect_vgpu($result->{nvidia}, \@nvidia_slots) if @{$result->{nvidia}};
 
   return $result;
 }
@@ -217,6 +237,81 @@ sub _detect_nvswitch {
   Rex::Logger::info('  [ok] NVSwitch: '.scalar(@switches).' ('.$switches[0]{name}.')')
     if @switches;
   return \@switches;
+}
+
+# vGPU guest (karr #24): lspci -nn shows a vGPU with the physical GPU's
+# device ID, so only the subsystem ID tells it apart -- NVIDIA gives every
+# vGPU type its own (Rex::GPU::NVIDIA::VGPU). `lspci -vmmnn -d 10de:` prints
+# it per slot; each GPU gets subsystem_vendor_id/subsystem_id (undef if its
+# slot is not in that output), vgpu 0|1 and, for 1, vgpu_type. compute is
+# not touched: whether a driver can be installed is install_driver's call.
+sub _detect_vgpu {
+  my ( $gpus, $slots ) = @_;
+  my $out = run 'lspci -vmmnn -d 10de: 2>/dev/null', auto_die => 0;
+  my $sub = _parse_lspci_vmm($out);
+  for my $i (0 .. $#$gpus) {
+    my $gpu = $gpus->[$i];
+    my $rec = defined $slots->[$i] ? $sub->{ $slots->[$i] } : undef;
+    # a slot whose device ID is not the GPU's is not that GPU
+    undef $rec if $rec && defined $gpu->{device_id}
+      && ( $rec->{device_id} // '' ) ne lc $gpu->{device_id};
+    $gpu->{subsystem_vendor_id} = $rec ? $rec->{subsystem_vendor_id} : undef;
+    $gpu->{subsystem_id}        = $rec ? $rec->{subsystem_id} : undef;
+    my $type = Rex::GPU::NVIDIA::VGPU->type_for(
+      $gpu->{device_id}, $gpu->{subsystem_id}, $gpu->{subsystem_vendor_id});
+    $gpu->{vgpu} = defined $type ? 1 : 0;
+    next unless defined $type;
+    $gpu->{vgpu_type} = $type;
+    Rex::Logger::info('  [vgpu] NVIDIA: '.$gpu->{name}.' is an NVIDIA vGPU guest device (type '
+      .$type.', 10de:'.$gpu->{device_id}.' subsystem '.$gpu->{subsystem_id}
+      .') -- it needs the licensed NVIDIA vGPU guest driver');
+  }
+  return;
+}
+
+# `lspci -vmmnn` records (blank-line separated "Key:<TAB>value" lines) =>
+# { slot => { device_id, subsystem_vendor_id, subsystem_id } }, IDs
+# lowercase, undef where lspci printed none. Anything else is ignored.
+sub _parse_lspci_vmm {
+  my ( $out ) = @_;
+  my %by_slot;
+  for my $record (split /\n\s*\n/, $out // '') {
+    my %f;
+    for my $line (split /\n/, $record) {
+      $f{$1} = $2 if $line =~ /\A(Slot|Device|SVendor|SDevice):\s*(.*?)\s*\z/;
+    }
+    next unless defined $f{Slot};
+    my $slot = _normalize_slot($f{Slot});
+    next unless defined $slot;
+    my %id = map {
+      my ( $id ) = ( $f{$_} // '' ) =~ /\[([0-9a-f]{4})\]\z/i;
+      ( $_ => defined $id ? lc $id : undef );
+    } qw( Device SVendor SDevice );
+    $by_slot{$slot} = {
+      device_id           => $id{Device},
+      subsystem_vendor_id => $id{SVendor},
+      subsystem_id        => $id{SDevice}
+    };
+  }
+  return \%by_slot;
+}
+
+# The PCI address an `lspci -nn` line starts with, normalized.
+sub _pci_slot {
+  my ( $line ) = @_;
+  my ( $slot ) = $line =~ /\A(\S+)\s/;
+  return _normalize_slot($slot);
+}
+
+# lspci -nn prints every slot with its domain once any device has a non-zero
+# one; -vmm prints it only for a device whose domain is non-zero. The
+# domain 0000 is dropped so both forms of the same device compare equal.
+sub _normalize_slot {
+  my ( $slot ) = @_;
+  return unless defined $slot
+    && $slot =~ /\A(?:([0-9a-f]{4,}):)?([0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\z/i;
+  my ( $domain, $bdf ) = ( $1, lc $2 );
+  return defined $domain && $domain !~ /\A0+\z/ ? lc($domain).':'.$bdf : $bdf;
 }
 
 sub _parse_nvswitch_line {
@@ -452,7 +547,39 @@ appear side by side, and the real card is still detected. A VM whose display
 devices are all virtual returns empty arrays, as before. The vendor checks
 run first, so a C<10de>/C<1002> line is never treated as virtual — this also
 means an NVIDIA vGPU guest device (vendor C<10de>) is detected like a
-passed-through card; C<lspci -nn> cannot tell the two apart.
+passed-through card; C<lspci -nn> cannot tell the two apart. The subsystem
+ID can, see L</NVIDIA vGPU guests>.
+
+=head2 NVIDIA vGPU guests
+
+A VM on an NVIDIA vGPU (a slice of a physical GPU: Azure NVadsA10 v5, AWS
+G6f, a vGPU on VMware or KVM) sees a PCI device with the B<physical> GPU's
+vendor and device ID, the same C<[10de:XXXX]> line in C<lspci -nn> as the
+card itself. What differs is the subsystem ID: NVIDIA gives every vGPU type
+its own, and publishes the pairs in its open GPU kernel modules. L</detect>
+reads them with C<lspci -vmmnn -d 10de:> (run only when an NVIDIA GPU was
+found) and looks each GPU's device ID, subsystem vendor and subsystem ID up
+in L<Rex::GPU::NVIDIA::VGPU> (1135 pairs, Turing to Blackwell Ultra, from
+NVIDIA's open-gpu-kernel-modules 615.71.09):
+
+=over
+
+=item * a known pair with subsystem vendor C<10de>: C<vgpu =E<gt> 1> and
+C<vgpu_type> (e.g. C<GRID A100X-1-5C>, C<NVIDIA A10-2Q>);
+
+=item * anything else -- a physical or passed-through card (none of the 616
+physical device/subsystem pairs NVIDIA's 615.71.09 README lists is in the
+vGPU table), a vGPU type newer than the table, a
+slot C<lspci -vmmnn> did not list: C<vgpu =E<gt> 0>, detection as before.
+
+=back
+
+C<compute> stays what the generation says: a vGPU of a compute GPU is
+compute. A vGPU guest needs NVIDIA's licensed vGPU guest driver, not the
+datacenter driver L<Rex::GPU::NVIDIA/install_driver> installs (whose open
+kernel module refuses an Ampere-or-newer vGPU); C<install_driver> therefore
+dies for one before it changes the host, unless a working driver is
+already there.
 
 =head2 NVIDIA compute classification
 

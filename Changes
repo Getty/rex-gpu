@@ -1,6 +1,16 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - gpu_detect recognises NVIDIA vGPU guest devices (Azure NVadsA10 v5, AWS
+    G6f, ...) by PCI device and subsystem ID, read with a read-only
+    `lspci -vmmnn -d 10de:` on hosts with an NVIDIA GPU: each NVIDIA GPU
+    gets subsystem_vendor_id, subsystem_id, vgpu (0|1) and vgpu_type;
+    compute is unchanged. New Rex::GPU::NVIDIA::VGPU holds NVIDIA's table
+    (open-gpu-kernel-modules 615.71.09, MIT). install_driver / gpu_setup on
+    a vGPU guest without a working driver die before changing the host,
+    asking for the licensed vGPU guest driver, also next to a non-vGPU GPU;
+    with a working driver they go on as usual. Not hardware-verified
+    (karr #24)
   - install_driver and install_container_toolkit on openSUSE Leap wait up
     to 120 seconds for the zypp lock (ZYPP_LOCK_TIMEOUT, like apt's
     DPkg::Lock::Timeout) on every zypper call, so a fresh boot where

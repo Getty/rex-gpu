@@ -85,8 +85,10 @@ subtest 'HGX H100: 8 GPUs + 4 NVSwitches' => sub {
   is(scalar @{ $r->{nvswitch} }, 4, '4 NVSwitches');
   is_deeply($r->{nvswitch}[0], { name => 'GH100 [H100 NVSwitch]', vendor => 'nvidia',
     pci_class => '0680', device_id => '22a3' }, 'NVSwitch element');
-  is_deeply($cmds, [ $LSPCI_PROBE, $DISPLAY_READ, $NVSWITCH_READ ],
-    'probe, display lspci, then the second, read-only lspci');
+  # karr #24 appends the read-only vGPU subsystem read on NVIDIA hosts
+  is_deeply($cmds, [ $LSPCI_PROBE, $DISPLAY_READ, $NVSWITCH_READ,
+    'lspci -vmmnn -d 10de: 2>/dev/null' ],
+    'probe, display lspci, then the second and third, read-only lspci');
 };
 
 subtest 'NVSwitch recognised by ID with a stale pci.ids, and by name' => sub {

@@ -78,11 +78,33 @@ unloaded before the NVIDIA kernel module can bind to the device.
 
 Optional arrayref of the GPUs this driver install is for.
 L<Rex::GPU/gpu_setup> passes every CUDA-capable NVIDIA GPU it detected here,
-in the shape L<Rex::GPU::Detect/detect> returns. Only C<device_id> and
-C<name> are read, so a caller that finds the GPUs itself -- without
-C<lspci> -- passes just those:
+in the shape L<Rex::GPU::Detect/detect> returns. Only C<device_id>,
+C<name> and the vGPU keys (C<vgpu>, C<vgpu_type>, C<subsystem_id>) are
+read, so a caller that finds the GPUs itself -- without C<lspci> -- passes
+just the first two; a GPU without C<vgpu> is not a vGPU:
 
   install_driver(gpu => { device_id => '2b85', name => 'NVIDIA GeForce RTX 5090' });
+
+B<NVIDIA vGPU guest> (karr #24; C<vgpu =E<gt> 1>, see
+L<Rex::GPU::Detect/NVIDIA vGPU guests>): such a device needs NVIDIA's
+licensed vGPU guest (GRID) driver, which none of the package sources
+Rex::GPU installs from carries, and the open C<nvidia.ko> of the datacenter packages
+refuses an Ampere-or-newer vGPU. The already-installed check below runs
+first: a guest whose vGPU driver already works (C<nvidia-smi -L> lists the
+GPU and C<libcuda.so.1> is in the linker cache) goes on as usual, and
+L<Rex::GPU/gpu_setup> then installs the container toolkit, CDI and
+containerd for it. Without a working driver C<install_driver> B<dies> after
+that probe and before anything on the host is changed:
+
+  NVIDIA vGPU guest (type NVIDIA A10-2Q, 10de:2236 sub 14b9): install the
+  licensed NVIDIA vGPU guest driver, then run again. Nothing was changed on
+  the host
+
+The same when a vGPU is passed together with a GPU that is not one (a
+passed-through card next to it): one NVIDIA kernel module drives every GPU
+of the host, so the vGPU guest driver and the driver Rex::GPU would install
+exclude each other; the message names both. With a working driver that
+mixed host also goes on as usual.
 
 C<device_id> is four hex digits, without C<0x> (sysfs C<device> reads
 C<0x2b85>) and without a newline; any other defined value dies before the

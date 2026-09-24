@@ -6,6 +6,10 @@ requires 'Rex', '1.14.0';
 
 recommends 'Rex::LibSSH';
 
+on 'develop' => sub {
+  requires 'Path::Tiny';
+};
+
 on 'test' => sub {
   requires 'Path::Tiny';
   requires 'Test::More', '0.98';

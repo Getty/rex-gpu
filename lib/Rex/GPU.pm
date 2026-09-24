@@ -40,6 +40,10 @@ NVSwitch chips under C<nvswitch>:
   #       vendor    => "nvidia",
   #       pci_class => "0302",   # 0300 = VGA, 0302 = 3D/compute
   #       compute   => 1,        # 1 if CUDA-capable
+  #       device_id => "27b0",
+  #       subsystem_vendor_id => "10de",
+  #       subsystem_id        => "16fa",
+  #       vgpu      => 0,        # 1 for an NVIDIA vGPU guest device
   #     }
   #   ],
   #   amd => [
@@ -56,7 +60,10 @@ NVSwitch chips under C<nvswitch>:
 Virtual display devices (virtio, QEMU, VMware, VirtualBox) are skipped. If
 they are the only display devices all three arrays (C<nvidia>, C<amd>,
 C<nvswitch>) are empty; a real card passed through next to one (vfio-pci,
-cloud GPU VM) is still detected. See
+cloud GPU VM) is still detected. An NVIDIA vGPU guest device is told
+apart from a physical or passed-through card by its PCI subsystem ID, read
+with another read-only C<lspci> only on hosts with an NVIDIA GPU: C<vgpu =E<gt> 1>
+and C<vgpu_type> (see L<Rex::GPU::Detect/NVIDIA vGPU guests>). See
 L<Rex::GPU::Detect> for details on the classification logic.
 
 =cut
@@ -95,6 +102,15 @@ with a warning: no driver is installed for it, and it does not stop the
 installation for a newer GPU on the same host. GPUs that cannot share one
 driver (a V100 next to a B200) make C<gpu_setup> die before the host is
 changed, unless a working driver is already installed.
+
+On an NVIDIA vGPU guest (C<vgpu =E<gt> 1> in the L</gpu_detect> result:
+Azure NVadsA10 v5, AWS G6f, ...) the GPU needs NVIDIA's licensed vGPU guest
+driver, which Rex::GPU does not install. If that driver already works
+(C<nvidia-smi -L> lists the GPU and C<libcuda.so.1> is in the linker cache)
+C<gpu_setup> goes on as on any host with a working driver: container
+toolkit, CDI specs, containerd. If not, it dies in
+L<Rex::GPU::NVIDIA/install_driver> before anything on the host is changed,
+naming the vGPU type -- also when a GPU that is not a vGPU sits next to it.
 
 On an HGX baseboard with NVSwitches (HGX-2, HGX A100, HGX H100/H200:
 C<nvswitch> in the L</gpu_detect> result is not empty) the NVSwitches are

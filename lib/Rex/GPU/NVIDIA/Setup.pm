@@ -24,7 +24,7 @@ Empty (the default) keeps the GPU-agnostic package selection. Elements that
 are not hashrefs are ignored.
 
 Each GPU is a hashref; the elements L<Rex::GPU::Detect/detect> returns for
-C<nvidia> fit, but only two keys are read, so a caller that finds the GPU
+C<nvidia> fit, but only the keys below are read, so a caller that finds the GPU
 another way (e.g. sysfs, without C<lspci>) passes just these:
 
   { device_id => '2b85', name => 'NVIDIA GeForce RTX 5090' }
@@ -43,6 +43,13 @@ without C<[10de:XXXX]>) is accepted and means exactly that: an unknown GPU,
 no constraint.
 
 =item * C<name> -- for log lines and messages only. Optional.
+
+=item * C<vgpu> -- true for an NVIDIA vGPU guest device
+(L<Rex::GPU::Detect/NVIDIA vGPU guests>); C<vgpu_type> and C<subsystem_id>
+go into the message. L</plan> dies for one, before anything on the host is
+changed; L</already_installed> runs first, so a guest whose vGPU driver
+already works is not refused. Missing (a caller that finds its GPUs itself)
+means not a vGPU. Optional.
 
 =back
 
@@ -635,6 +642,9 @@ returns against the requirement.
 
 sub plan {
   my ( $self ) = @_;
+  # vGPU guest (karr #24): after already_installed (a guest whose vGPU
+  # driver runs passes there) and before anything on the host is changed.
+  $self->_reject_vgpu_guest;
   # Kepler or older (karr #26), on any GPU in the list: die here, after
   # already_installed (a host whose operator installed 470 by hand still
   # passes) and before anything on the host is changed or even read.
@@ -1101,6 +1111,34 @@ sub _reject_unsupported_gpu {
     . "that. Nothing was changed on the host. Install the driver yourself; once "
     . "`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
     . "install_driver skips the driver step\n";
+}
+
+# Die for a vGPU guest device among the GPUs (karr #24): it needs NVIDIA's
+# licensed vGPU guest driver, which no package source carries, and the open
+# nvidia.ko of the datacenter packages refuses an Ampere+ vGPU function. With
+# a non-vGPU GPU next to it both are named: one NVIDIA kernel module drives
+# every GPU of the host, so the two drivers cannot both be installed. A GPU
+# hash without vgpu (a caller that finds its GPUs itself) is not a vGPU.
+sub _reject_vgpu_guest {
+  my ( $self ) = @_;
+  my @gpus = grep { ref $_ eq 'HASH' } @{ $self->gpus };
+  my @vgpu = grep { $_->{vgpu} } @gpus;
+  return unless @vgpu;
+  my @other = grep { !$_->{vgpu} } @gpus;
+  die join('; ', map {
+      'NVIDIA vGPU guest (type '.( $_->{vgpu_type} // 'unknown' ).', 10de:'
+        .( $_->{device_id} // '????' ).' sub '.( $_->{subsystem_id} // '????' ).')'
+    } @vgpu)
+    .( @other
+      ? ' next to '.join(', ', map {
+          "NVIDIA GPU '".( $_->{name} // 'unknown' )."' (10de:"
+            .( $_->{device_id} // '????' ).', not a vGPU)'
+        } @other)
+        .': one NVIDIA kernel module drives every GPU of the host, and the '
+        .'driver Rex::GPU installs does not drive a vGPU'
+      : '' )
+    .': install the licensed NVIDIA vGPU guest driver, then run again. '
+    ."Nothing was changed on the host\n";
 }
 
 # `uname -m` / dpkg arch -> the token NVIDIA's CUDA repos use under
