@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T00:01:23Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T00:01:23Z
+created: 2026-09-23T02:57:28Z
+id: 21
+priority: medium
+started: 2026-09-23T23:51:49Z
+status: done
+title: Blackwell-GPU mit unaufgeloestem lspci-Namen (Klasse 0300) wird nicht als compute
+  erkannt
+updated: 2026-09-24T00:01:23Z
+---
+
+Aus #16: Ist pci.ids veraltet, zeigt lspci nur "Device [10de:2b85]". Klasse-0302-Karten (B200) sind trotzdem compute, aber RTX 50xx / RTX PRO Blackwell als VGA (0300) ohne "RTX" im Namen fallen durch _is_nvidia_compute -> Pipeline wird komplett uebersprungen (wie heute). Blackwell-ID-Ranges bewusst NICHT in die compute-Pruefung aufgenommen: wuerde Treiber-Installs (inkl. Laptop-Chips) auf Maschinen ausloesen, die heute nichts bekommen, und erreicht Rex::Rancher gpu => 1. Braucht Contract-Entscheidung.
+
+ENTSCHEIDUNG Maintainer 2026-09-24: explizite Allowlist per Device-ID (RTX 50xx Desktop, RTX PRO Blackwell) als compute; Laptop-Chips bleiben aussen vor.
