@@ -29,7 +29,8 @@ C<pciutils> only if C<lspci> is not on the host's C<PATH> (dies if it still
 is not afterwards), then parses C<lspci -nn> output. See
 L<Rex::GPU::Detect/detect>.
 
-Returns a hashref with detected GPUs grouped by vendor:
+Returns a hashref with detected GPUs grouped by vendor, plus the HGX
+NVSwitch chips under C<nvswitch>:
 
   my $gpus = gpu_detect();
   # {
@@ -53,8 +54,9 @@ Returns a hashref with detected GPUs grouped by vendor:
   # }
 
 Virtual display devices (virtio, QEMU, VMware, VirtualBox) are skipped. If
-they are the only display devices both arrays are empty; a real card passed
-through next to one (vfio-pci, cloud GPU VM) is still detected. See
+they are the only display devices all three arrays (C<nvidia>, C<amd>,
+C<nvswitch>) are empty; a real card passed through next to one (vfio-pci,
+cloud GPU VM) is still detected. See
 L<Rex::GPU::Detect> for details on the classification logic.
 
 =cut

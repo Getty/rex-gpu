@@ -145,8 +145,9 @@ pciutils> checked by C<rpm -q pciutils>. Dies if that check fails or
 C<lspci> is still not found afterwards -- before C<lspci> runs, so a host
 without it never reports "no GPU".
 
-Returns a hashref with C<nvidia> and C<amd> array refs. Each element is a
-hashref describing one detected GPU:
+Returns a hashref with three array refs, always all present: C<nvidia> and
+C<amd> (one hashref per detected GPU) and C<nvswitch> (one hashref per
+detected NVSwitch, see below):
 
   {
     nvidia => [
@@ -189,9 +190,10 @@ so C<nvswitch> stays C<[]> there. The key is additive; C<nvidia> and C<amd>
 are unchanged.
 
 If no supported GPU is found, or if the only display devices are virtual,
-both arrays are empty (C<[]>). A virtual display next to a real NVIDIA/AMD
-card (GPU passthrough, cloud GPU VM) is skipped on its own line and the real
-card is still reported.
+all three arrays are empty (C<[]>) -- C<nvswitch> too, since it is only
+probed when an NVIDIA GPU was found. A virtual display next to a real
+NVIDIA/AMD card (GPU passthrough, cloud GPU VM) is skipped on its own line
+and the real card is still reported.
 
 =cut
 
