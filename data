@@ -1,0 +1,16 @@
+---
+claimed_at: 2026-09-24T04:24:47Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:24:47Z
+created: 2026-09-24T04:14:33Z
+id: 63
+priority: high
+started: 2026-09-24T04:15:05Z
+status: done
+title: 'Offline-Tests fuer den alten Kern: Reboot, containerd-Schreibpfad, CDI, Verbindungspruefung,
+  verify_nvidia, gpu_setup ohne NVIDIA'
+updated: 2026-09-24T04:24:47Z
+---
+
+Aus Coverage-Audit 2026-09-24 (Devel::Cover, GPU.pm 54% Branch, NVIDIA.pm 76%): _reboot_and_wait nie aufgerufen (NVIDIA.pm:1396-1425), reboot=>1-Zweig (336-337, GPU.pm:263); containerd Dispatch/Heal/Schreiben (NVIDIA.pm:695-712, 1204-1269, 1139, 1079 v3-only config); generate_cdi_specs (1316-1350); _check_connection (GPU.pm:222-236); gpu_setup AMD-only / ohne NVIDIA (GPU.pm:250, 280); verify_nvidia (737-755, 784/806); Toolkit auf unbekanntem OS (606).
