@@ -34,45 +34,22 @@ default is `rke2`; values `rke2` | `k3s` | `containerd` | `none`.
 ## Detection — PCI class codes, not nvidia-smi
 
 `Rex::GPU::Detect` parses `lspci -nn`, never a driver tool (detection must work on a host
-with no driver yet). The compiled regexes at the top of the file are the contract:
+with no driver yet). The compiled regexes at the top of the file are the contract: display
+class `[0300]`/`[0302]`, vendor `10de` NVIDIA / `1002` AMD. `compute` is decided by
+**generation, not marketing name**; **unknown defaults to `0`** (safe: no install) with a
+warning — keep it 0. `detect()` first ensures `lspci` (`command -v`, else pciutils via
+dnf + `rpm -q` on RHEL names Rex::Pkg can't handle; k46).
 
-- Display class `[0300]` (VGA) or `[0302]` (3D/datacenter). `0302` ⇒ compute, unless
-  the device ID is Kepler-or-older (k55: that check runs first).
-- Vendor IDs: `10de` NVIDIA, `1002` AMD.
-- **Virtual displays are skipped per line** (k17): `1af4` virtio, `1b36` QEMU, `15ad`
-  VMware, `80ee` VirtualBox. Vendor checks run first, so a passthrough VM's real card next
-  to an emulated console is still detected; only-virtual output returns empty arrays.
-- **vGPU guests by (device, subsystem) pair** (k24): only with an NVIDIA GPU, a read-only
-  `lspci -vmmnn -d 10de:` gives each GPU `subsystem_(vendor_)id` by slot (`0000:` domain
-  normalised) and `vgpu 0|1`(+`vgpu_type`) from `Rex::GPU::NVIDIA::VGPU` (NVIDIA's
-  `sVgpuUsmTypes[]`, regenerate with `maint/gen-vgpu-types.pl`); unknown pair ⇒ 0,
-  `compute` untouched. Setup `plan` dies for any `vgpu` GPU (mixed too) after
-  `already_installed`, so a working GRID driver passes; missing key ⇒ not a vGPU.
-
-`_is_nvidia_compute` decides by **generation, not marketing name** (k45/k54, maintainer:
-"every GPU usable for AI", MX/GT/GTX 9xx included while a current branch supports it).
-The device ID's Requirement row carries a tri-state `compute`: 1 for
-Maxwell 1340 up to Blackwell Ultra (the rows cover 0000–2FFF gap-free + 3182/31C2–31C3),
-0 for Kepler-or-older <1340 → not compute + warning "needs branch 470 … skipped, no
-driver installed", checked **before** the `0302` class rule (k55), so a K80/K40/K20 is
-skipped too (a skip, not a die: a Kepler next to an Ada leaves the Ada install alone);
-then `0302` ⇒ compute; undef (no row, ≥3000) → name rules, each naming only Maxwell+ products
-(RTX, GTX 1xxx/9xx/745/750, GT 1xxx, GeForce MX, TITAN X/Xp/V/RTX, Quadro M/P/T/GP/GV,
-Tesla M/P/V/T4, A100-style codes); no negative rules. **Unknown defaults to `0`** (safe:
-no install) with a warning — keep it 0. `plan` still rejects a Kepler passed to
-`install_driver` directly.
-
-`detect()` first ensures `lspci` (`command -v`, else pciutils — dnf + rpm -q for the
-lsb_release RHEL names Rex::Pkg can't handle; k46), and only if an NVIDIA GPU was found
-scans `lspci -nn -d 10de:` for NVSwitch bridges (class `0680`, IDs 1ac2/1af1/22a3) into
-`nvswitch => [...]` (k23). HGX B200/B300 NVSwitches are NOT on the host PCI bus: `Setup::nvlink_platform_ids` (overridable, 2901/2909/3182 → `hgx-nvlink5`, 2941/31c2/31c3 → `nvl72`) makes `install_driver` warn once after the driver (FM + nvlsm + OFED + kernel ≥5.17 not automated; one read-only `systemctl is-active`) or note IMEX (k49) — no install, verify unaffected.
+**Hardware and distro combinations live in [references/hardware.md](references/hardware.md)**
+(`.claude/skills/rex-gpu-core/references/hardware.md` from the repo root; not preloaded — Read it)
+— generation/ID table, virtual displays, vGPU guests, NVSwitch / HGX B200/B300 NVLink
+fabric / NVL72, and the per-distro driver matrix with its traps. Read the relevant section
+before changing a detection rule, an ID range, a package list or a Setup class, and update
+it in the same change.
 
 **Which driver a GPU needs is a separate question** (epic #25): `Rex::GPU::NVIDIA::Requirement`
 (Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,
-min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF
-open ≥570 (GB10 2E12 ≥580: first listed in 580.119.02) / B300 / GB300 open ≥580;
-Maxwell/Pascal/Volta 1340–1DF6 proprietary ≤580; Turing..Hopper 1DF7–28FF `either`, no
-bounds (row only for label + compute); <1340 Kepler or older ≤470 (rejected).
+min_branch, max_branch}` via its overridable `generations` table (ranges in the reference).
 Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs and croaks on
 conflict (`conflicts` lists without dying). The `compute` flag lives in these rows (one
 table, no second list); Detect reads the base table, not a subclass.
@@ -106,34 +83,9 @@ in `install_driver` (connection + toolkit check). Every family runs through Moo 
 `Setup::SUSE`; experimental, epic #25) with the fixed flow `already_installed → plan → prepare_host → prepare_source → resolve_plan → install_packages →
 verify_packages → post_install`. `plan` is host-read-only; `run_cmd` / `pkg_cmd` /
 `file_cmd` are the only routes to the host. No class for the OS ⇒ `install_driver`
-still probes `nvidia-smi` and rejects Kepler, then dies. Each
-family has a trap that is already solved in the code; do not "simplify" these away:
-
-- **Debian** — enable `contrib non-free non-free-firmware` first, per recognised Debian
-  archive entry in both `sources.list` and deb822 `*.sources` (k36/k40/k41: a `signed-by`
-  naming only `debian-archive-*` keyrings decides alone, host irrelevant; without it the URI
-  must pass the overridable `is_debian_archive_uri` — keyring check `is_debian_archive_keyring`
-  is overridable too; unknown mirrors are left alone and warn with the override hint); install `nvidia-driver` + `nvidia-smi` + the *running* kernel's
-  headers only; non-free branch from a fixed table (11→470, 12→535, 13→550, else unknown).
-  Blackwell on Debian 12/13 instead uses NVIDIA's CUDA repo (`cuda-keyring`,
-  `nvidia-driver-cuda` + `nvidia-kernel-open-dkms`, no non-free; k18; `unavailable` elsewhere). Never the `linux-headers-$arch`
-  metapackage — it pulls a new kernel whose grub/initramfs post-install returns non-zero.
-- **Ubuntu** — sources `-server` (newest via `apt-cache search`, `-open` filtered, ≥580),
-  `-server-open` (≥580; Blackwell), pinned `nvidia-driver-580-server` (pre-Turing, candidate
-  checked after `apt-get update`); search runs after `apt-get update`, empty ⇒ die (no 570
-  fallback: the search matches 570 too). **Do not add `nvidia-smi` to the package list**: on 24.04 it is a
-  virtual package with no install candidate and the driver metapackage pulls it anyway.
-- **RHEL/Rocky/Alma/CentOS** — EPEL + `crb`(≥9)/`powertools`(<9) + the CUDA repo. **v10+
-  has no module streams**: install `kmod-nvidia-open-dkms` + `nvidia-driver` +
-  `nvidia-driver-cuda` directly; <10 uses `dnf module enable nvidia-driver:open-dkms` +
-  `nvidia-open`. Pre-Turing: stream `580-dkms` (<10) or a `*nvidia*580*` versionlock (10)
-  with the proprietary `kmod-nvidia-latest-dkms` (k26). Get the major version from
-  `_rhel_major_version` — see the trap below.
-- **openSUSE Leap** — `rpm -e` any stale `nvidia*`/`libnvidia*` first, add the GFX repo by
-  **baseurl** (zypper can't parse yum `.repo` files), install the `signed-kmp-meta` package
-  (`G06` for 15.x, `G07` for 16.x; pre-Turing: proprietary `nvidia-driver-G06-kmp-meta`), then `zypper addlock libnvidia-ml libnvidia-cfg`. The
-  meta package co-installs kmp + userspace at one version; the lock stops a later update
-  re-splitting them into a `Driver/library version mismatch`.
+still probes `nvidia-smi` and rejects Kepler, then dies. Each family (Debian, Ubuntu,
+RHEL family, openSUSE) has traps already solved in the code — see
+[references/hardware.md](references/hardware.md#distro-matrix--setup_class_for_os).
 
 After the branch: Setup `post_install` (write the nouveau blacklist, regenerate initramfs
 via `update-initramfs`/`dracut`), then reboot-and-verify or `modprobe nvidia`.
