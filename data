@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T04:22:35Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:22:35Z
+created: 2026-09-24T04:11:28Z
+id: 60
+priority: high
+started: 2026-09-24T04:14:52Z
+status: done
+title: 'POD: gpu_setup DESCRIPTION beschreibt Compute-Erkennung noch als RTX/Quadro/Tesla/0302-Liste
+  (widerspricht k45/k54/k55)'
+updated: 2026-09-24T04:22:35Z
+---
+
+lib/Rex/GPU.pm:323 (=head1 DESCRIPTION, Pipeline-Schritt 1) sagt noch: 'Only CUDA-capable NVIDIA GPUs (RTX, Quadro, Tesla, PCI class 0302) trigger driver installation.' Das ist die alte namens-/klassenbasierte Logik von vor k45/k54/k55. Der korrekte Stand steht in derselben Datei 70 Zeilen darueber, in '=method gpu_setup' (Zeilen 96-104): Kriterium ist die GPU-Generation (Rex::GPU::NVIDIA::Requirement), nicht der Marketingname oder die PCI-Klasse; jede Maxwell-oder-neuere GPU zaehlt (GeForce MX, GT, GTX 9xx eingeschlossen), Kepler-oder-aelter wird uebersprungen, auch bei PCI-Klasse 0302 (karr #55). Fix: Zeile 323 an den Wortlaut von Zeilen 96-104 angleichen oder dorthin verweisen (L</gpu_setup>). Release-relevant: ein Leser der DESCRIPTION (z.B. CPAN-Uebersicht) schliesst faelschlich, dass eine GTX 980 oder MX150 keinen Treiber bekommt bzw. dass Namens-/Klassenregeln entscheiden. Gehoert zu rex-gpu-worker (lib/-Aenderung, POD-only, kein Verhaltenscode).
+
+Erledigt in 3953362.
