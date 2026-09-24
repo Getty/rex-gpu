@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T17:35:12Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T17:35:12Z
+created: 2026-09-24T16:11:19Z
+id: 68
+priority: low
+started: 2026-09-24T17:31:05Z
+status: done
+title: Die-Meldungen 'Nothing was changed on the host' + 'changes nothing' bei Retrofit
+  ungenau
+updated: 2026-09-24T17:35:12Z
+---
+
+Aus k67 (nur Doku gefixt). (1) Setup.pm plan/select_source-Dies (~:698, :730) sagen "Nothing was changed on the host"; ueber gpu_setup kann pciutils schon installiert sein (_ensure_lspci). Code-Aenderung an Fehlermeldungen. (2) README :74 / GPU.pm :124 sagen bei installiertem Treiber "changes nothing"; FM-/nvlink-Retrofit ruft refresh_package_index (apt-get update) -- keine neue Quelle, aber Index aktualisiert. Wortlaut praezisieren.
+
+Erledigt in 64d8ae9. Nur Meldungstexte + Doku, kein Host-Pfad geaendert.
