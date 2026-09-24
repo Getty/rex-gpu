@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-24T13:17:32Z
+created: 2026-09-24T00:01:36Z
+id: 48
+priority: low
+started: 2026-09-24T13:17:32Z
+status: done
+title: 'Upstream Rex: is_redhat kennt Rocky/RockyLinux/AlmaLinux/CentOSStream/OracleLinux
+  nicht (lsb_release-Namen)'
+updated: 2026-09-24T13:17:32Z
+---
+
+Notiz zum Melden bei Rex (1.16.1): Rex::Commands::Gather::is_redhat fehlen die IDs, die lsb_release -s -i auf aktuellen RHEL-Rebuilds liefert: Rocky, CentOSStream (redhat-lsb-core 4.1), RockyLinux, OracleLinux (EPEL lsb_release 3.2), AlmaLinux (beide). get_operating_system gibt sie roh zurueck -> is_redhat falsch, Rex::Pkg->get baut Rex::Pkg::Rocky und stirbt "OS/Provider not supported"; Ergebnis haengt davon ab, ob lsb_release installiert ist. Zusaetzlich: is_redhat nutzt den Namen als unverankerten, unescapten Regex (grep { /$os/i } @redhat_clones) -- RedHatEnterprise passt nur als Teilstring von RedHatEnterpriseServer. Vorschlag: IDs ergaenzen, lc eq statt Regex, Fallback auf /etc/os-release ID/ID_LIKE. Rex::GPU umgeht das lokal (k39). Maintainer-Entscheidung, ob/wo upstream gemeldet wird.
+
+Issue-Text formuliert 2026-09-24 (gegen 1.16.1 und RexOps/Rex master verifiziert; kein bestehendes Issue): scratchpad/rex-issue-is_redhat.md. Einreichen macht der Maintainer.
+
+Upstream gemeldet: https://github.com/RexOps/Rex/issues/1661 (2026-09-24)
