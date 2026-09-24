@@ -514,7 +514,8 @@ refreshed, replacing any existing C<nvidia-container-toolkit> entry; a
 failed C<zypper addrepo> or C<refresh> (e.g. an HTTP error or an
 unresolvable host, which only the refresh reveals) dies before
 C<zypper install>, and a repository that fails its refresh is removed again
-(L<Rex::GPU::NVIDIA::Setup::SUSE/add_repo>).
+(L<Rex::GPU::NVIDIA::Setup::SUSE/add_repo>). Every zypper call waits up
+to 120 seconds for the zypp lock (L<Rex::GPU::NVIDIA::Setup::SUSE/zypper>).
 
 The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
 through L<Rex::Commands::Pkg/pkg>, and the result is checked with C<dpkg -l>
@@ -938,7 +939,9 @@ sub _install_toolkit_suse {
     "https://nvidia.github.io/libnvidia-container/stable/rpm/$arch");
 
   # zypper's exit code is not the evidence (karr #27): rpm -q is, as on RHEL.
-  run "zypper install -y nvidia-container-toolkit", auto_die => 0;
+  # karr #53: waits for the zypp lock, as add_repo does.
+  my $zypper = Rex::GPU::NVIDIA::Setup::SUSE->zypper;
+  run "$zypper install -y nvidia-container-toolkit", auto_die => 0;
   my $check = run "rpm -q nvidia-container-toolkit 2>&1", auto_die => 0;
   die "nvidia-container-toolkit not installed\n" if $? != 0;
 }

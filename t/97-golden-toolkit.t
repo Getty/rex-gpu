@@ -72,7 +72,7 @@ for my $os (qw( rocky-9 rhel-9 rocky-9-lsb alma-9-lsb )) {
 # openSUSE (karr #27): a failed zypper install dies on rpm -q, as on RHEL.
 golden_is(
   toolkit_on(host_profile('leap-15.6', responses => [
-    [ 'zypper install -y nvidia-container-toolkit' => 'No provider of nvidia-container-toolkit found.', 104 ],
+    [ 'ZYPP_LOCK_TIMEOUT=120 zypper install -y nvidia-container-toolkit' => 'No provider of nvidia-container-toolkit found.', 104 ],
     [ 'rpm -q nvidia-container-toolkit 2>&1' => 'package nvidia-container-toolkit is not installed', 1 ]
   ])),
   'toolkit/leap-15.6--install-failed'
@@ -84,7 +84,7 @@ golden_is(
 {
   my $url = 'https://nvidia.github.io/libnvidia-container/stable/rpm/x86_64';
   my $rec = toolkit_on(host_profile('leap-15.6', responses => [
-    [ 'zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>&1' =>
+    [ 'ZYPP_LOCK_TIMEOUT=120 zypper --gpg-auto-import-keys refresh nvidia-container-toolkit 2>&1' =>
         "Retrieving repository 'nvidia-container-toolkit' metadata [.error]\nRepository 'nvidia-container-toolkit' is invalid.\n[nvidia-container-toolkit|$url] Failed to retrieve new repository metadata.\nHistory:\n - [|] Error trying to read from '$url'\n - Download (curl) error for '$url/content':\n   Error code: Connection failed\n   Error message: Could not resolve host: nvidia.github.io\nSkipping repository 'nvidia-container-toolkit' because of the above error.\nCould not refresh the repositories because of errors.", 4 ]
   ]));
   like($rec->{error}, qr{^zypper refresh of repository nvidia-container-toolkit \(\Q$url\E\) failed \(exit 4\): .*Could not resolve host.*removed again; nothing was installed from it}s,
@@ -94,7 +94,7 @@ golden_is(
 }
 {
   my $rec = toolkit_on(host_profile('leap-16.0', responses => [
-    [ qr{^zypper addrepo --refresh } =>
+    [ qr{^ZYPP_LOCK_TIMEOUT=120 zypper addrepo --refresh } =>
         "Adding repository 'nvidia-container-toolkit' [...error]\nRepository named 'nvidia-container-toolkit' already exists. Please use another alias.", 4 ]
   ]));
   like($rec->{error}, qr{^zypper addrepo of repository nvidia-container-toolkit \(.*\) failed \(exit 4\): .*already exists}s,
@@ -106,7 +106,7 @@ golden_is(
 # package installed (the harness's rpm -q default) passes.
 {
   my $rec = toolkit_on(host_profile('leap-15.6', responses => [
-    [ 'zypper install -y nvidia-container-toolkit' => '', 107 ]
+    [ 'ZYPP_LOCK_TIMEOUT=120 zypper install -y nvidia-container-toolkit' => '', 107 ]
   ]));
   is($rec->{error}, undef, 'leap-15.6: zypper exits 107, rpm -q finds the package => no die');
 }

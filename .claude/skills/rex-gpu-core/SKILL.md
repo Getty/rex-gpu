@@ -135,7 +135,8 @@ inert helpers only.
 
 Two more resilience rules baked into every apt path, both for **fresh-boot** Hetzner
 hosts where cloud-init/unattended-upgrades still hold the dpkg lock:
-- `-o DPkg::Lock::Timeout=120` on every `apt-get`.
+- `-o DPkg::Lock::Timeout=120` on every `apt-get`. SUSE's twin: every zypper call goes
+  through `Setup::SUSE->zypper` (`ZYPP_LOCK_TIMEOUT=120 zypper`; default is exit 7 at once; k53).
 - `systemctl stop unattended-upgrades apt-daily* || true` before the first install.
 - `apt-get update` runs `auto_die => 0` — it returns non-zero on snap/PPA repo warnings
   that are not real failures.

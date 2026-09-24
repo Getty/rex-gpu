@@ -16,6 +16,37 @@ C<zypper>.
 
 sub package_manager { 'zypper' }
 
+=method zypper_lock_timeout
+
+Seconds every C<zypper> of this class waits for the zypp lock
+(C<ZYPP_LOCK_TIMEOUT>). Default C<120>, like the apt layer's
+L<Rex::GPU::NVIDIA::Setup::Apt/apt_lock_timeout>: on a fresh boot cloud-init
+can still hold it, and zypper otherwise fails at once with exit 7. A method,
+not an attribute, so it also answers on the class (L</add_repo> is called
+on it); override it in a subclass.
+
+=method zypper
+
+  $self->zypper            # "ZYPP_LOCK_TIMEOUT=120 zypper"
+
+The C<zypper> invocation every command of this class starts with, and its
+L<Rex::GPU::NVIDIA::Setup::Rpm/package_manager_command>. A lock still held
+after L</zypper_lock_timeout> fails the command with exit 7 as before.
+
+=cut
+
+sub zypper_lock_timeout { 120 }
+
+sub zypper {
+  my ( $self ) = @_;
+  return 'ZYPP_LOCK_TIMEOUT='.$self->zypper_lock_timeout.' zypper';
+}
+
+sub package_manager_command {
+  my ( $self ) = @_;
+  return $self->zypper;
+}
+
 =method sources
 
 One kmp meta package from NVIDIA's GFX repository for the Leap release
@@ -183,8 +214,9 @@ then C<zypper --gpg-auto-import-keys refresh ALIAS>. An existing entry is
 always replaced, never kept, so a re-run -- or a host upgraded to a Leap
 release with another URL -- ends up with this URL.
 
+Each of them waits up to L</zypper_lock_timeout> for the zypp lock.
 B<Dies> if C<addrepo> exits non-zero (after the C<rr> that happens only for
-a real error, e.g. the zypp lock held by another process, exit 7), naming
+a real error, e.g. the zypp lock still held after that wait, exit 7), naming
 alias, URL, exit code and zypper's output. C<addrepo> of a base URL does not
 contact the server, so an HTTP error or an unresolvable host shows only in
 the C<refresh> (exit 4, "Repository ... is invalid"): then the entry just
@@ -198,13 +230,13 @@ sub add_repo {
   my ( $self, $alias, $url ) = @_;
   # karr #52: both exit codes used to be ignored. rr first keeps re-runs from
   # tripping over addrepo's "already exists" (exit 4).
-  $self->run_cmd('zypper rr '.$alias.' 2>/dev/null || true', auto_die => 0);
-  my $out = $self->run_cmd('zypper addrepo --refresh '.$url.' '.$alias.' 2>&1', auto_die => 0);
+  $self->run_cmd($self->zypper.' rr '.$alias.' 2>/dev/null || true', auto_die => 0);
+  my $out = $self->run_cmd($self->zypper.' addrepo --refresh '.$url.' '.$alias.' 2>&1', auto_die => 0);
   $self->_die_zypper_repo('addrepo', $alias, $url, $out) if $? != 0;
-  $out = $self->run_cmd('zypper --gpg-auto-import-keys refresh '.$alias.' 2>&1', auto_die => 0);
+  $out = $self->run_cmd($self->zypper.' --gpg-auto-import-keys refresh '.$alias.' 2>&1', auto_die => 0);
   return if $? == 0;
   my $exit = $?;
-  $self->run_cmd('zypper rr '.$alias.' 2>/dev/null || true', auto_die => 0);
+  $self->run_cmd($self->zypper.' rr '.$alias.' 2>/dev/null || true', auto_die => 0);
   $? = $exit;
   $self->_die_zypper_repo('refresh', $alias, $url, $out);
 }
@@ -231,7 +263,7 @@ non-free libraries back in and cause the version mismatch again.
 sub install_packages {
   my ( $self, $plan ) = @_;
   $self->SUPER::install_packages($plan);
-  $self->run_cmd('zypper addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true', auto_die => 0);
+  $self->run_cmd($self->zypper.' addlock libnvidia-ml libnvidia-cfg 2>/dev/null || true', auto_die => 0);
 }
 
 1;

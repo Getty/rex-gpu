@@ -54,6 +54,17 @@ isa_ok($RHEL, $RPM);
 isa_ok($SUSE, $RPM);
 is($RHEL->package_manager, 'dnf',    'RHEL installs with dnf');
 is($SUSE->package_manager, 'zypper', 'SUSE installs with zypper');
+# karr #53: zypper waits for the zypp lock like apt-get for the dpkg lock;
+# the class-method call is the one install_container_toolkit makes.
+is($RHEL->package_manager_command, 'dnf', 'RHEL runs dnf unprefixed');
+is($SUSE->zypper, 'ZYPP_LOCK_TIMEOUT=120 zypper', 'SUSE zypper waits 120s for the zypp lock');
+is($SUSE->package_manager_command, $SUSE->zypper, '... and installs with that invocation');
+{
+  package Local::SUSE::Patient;
+  use parent -norequire, 'Rex::GPU::NVIDIA::Setup::SUSE';
+  sub zypper_lock_timeout { 600 }
+}
+is(Local::SUSE::Patient->zypper, 'ZYPP_LOCK_TIMEOUT=600 zypper', '... overridable in a subclass');
 
 #### setup_class_for_os
 

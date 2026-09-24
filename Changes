@@ -1,6 +1,11 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver and install_container_toolkit on openSUSE Leap wait up
+    to 120 seconds for the zypp lock (ZYPP_LOCK_TIMEOUT, like apt's
+    DPkg::Lock::Timeout) on every zypper call, so a fresh boot where
+    cloud-init still holds it no longer fails at once with exit 7.
+    Not hardware-verified (karr #53)
   - install_driver and install_container_toolkit on openSUSE Leap die when
     zypper cannot add or refresh NVIDIA's GFX / container toolkit
     repository (e.g. an HTTP error, an unresolvable host, the zypp lock),

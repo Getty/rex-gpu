@@ -18,9 +18,22 @@ manager in the L</verify_packages> error.
 
 sub package_manager { 'dnf' }
 
+=method package_manager_command
+
+The invocation L</install_packages> and L</install_versioned_package> run:
+L</package_manager> here; L<Rex::GPU::NVIDIA::Setup::SUSE> prefixes the
+zypp lock wait. Error messages keep naming L</package_manager>.
+
+=cut
+
+sub package_manager_command {
+  my ( $self ) = @_;
+  return $self->package_manager;
+}
+
 =method install_packages
 
-C<< <package_manager> install -y >> of C<< $plan->{packages} >> through
+C<< <package_manager_command> install -y >> of C<< $plan->{packages} >> through
 L<Rex::GPU::NVIDIA::Setup/run_cmd> with C<auto_die =E<gt> 0> -- B<never>
 L<Rex::Commands::Pkg/pkg>. C<Rex::Pkg::Dnf> dies on any non-zero exit, and
 the DKMS module build or initramfs regeneration in a driver package's
@@ -33,7 +46,7 @@ sub install_packages {
   my ( $self, $plan ) = @_;
   Rex::Logger::info('  Installing: '.join(', ', @{ $plan->{packages} }));
   my $pkg_str = join(' ', @{ $plan->{packages} });
-  $self->run_cmd($self->package_manager.' install -y '.$pkg_str, auto_die => 0);
+  $self->run_cmd($self->package_manager_command.' install -y '.$pkg_str, auto_die => 0);
 }
 
 =method verify_packages
@@ -73,7 +86,7 @@ package (C<nvidia-driver>): C<580.95.05>.
 
 =method install_versioned_package
 
-C<< <package_manager> install -y PKG-VERSION >> with C<auto_die =E<gt> 0>,
+C<< <package_manager_command> install -y PKG-VERSION >> with C<auto_die =E<gt> 0>,
 the name-version form without an epoch: NVIDIA's driver packages carry epoch
 3, its C<nvidia-fabricmanager> epoch 0, so the driver's full EVR would not
 match. There is no availability check before the driver install on this
@@ -98,7 +111,7 @@ sub installed_driver_version {
 
 sub install_versioned_package {
   my ( $self, $pkg, $version ) = @_;
-  $self->run_cmd($self->package_manager.' install -y '.$pkg.'-'.$version, auto_die => 0);
+  $self->run_cmd($self->package_manager_command.' install -y '.$pkg.'-'.$version, auto_die => 0);
 }
 
 sub verify_versioned_package {

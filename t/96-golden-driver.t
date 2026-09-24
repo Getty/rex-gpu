@@ -162,7 +162,7 @@ golden_is(
 # open meta package is not there, dies after the addlock, before nouveau.
 golden_is(
   driver_on(host_profile('leap-15.6', responses => [
-    [ 'zypper install -y nvidia-open-driver-G06-signed-kmp-meta' =>
+    [ 'ZYPP_LOCK_TIMEOUT=120 zypper install -y nvidia-open-driver-G06-signed-kmp-meta' =>
         "No provider of 'nvidia-open-driver-G06-signed-kmp-meta' found.", 104 ],
     [ 'rpm -q --whatprovides nvidia-open-driver-G06-signed-kmp-meta 2>&1' =>
         'no package provides nvidia-open-driver-G06-signed-kmp-meta', 1 ]
@@ -177,14 +177,14 @@ golden_is(
 {
   my $url = 'https://download.nvidia.com/opensuse/leap/15.6/';
   my $rec = driver_on(host_profile('leap-15.6', responses => [
-    [ 'zypper --gpg-auto-import-keys refresh nvidia-gfx 2>&1' =>
+    [ 'ZYPP_LOCK_TIMEOUT=120 zypper --gpg-auto-import-keys refresh nvidia-gfx 2>&1' =>
         "Retrieving repository 'nvidia-gfx' metadata [.error]\nRepository 'nvidia-gfx' is invalid.\n[nvidia-gfx|$url] Failed to retrieve new repository metadata.\nHistory:\n - [nvidia-gfx|$url] Repository type can't be determined.\nPlease check if the URIs defined for this repository are pointing to a valid repository.\nSkipping repository 'nvidia-gfx' because of the above error.\nCould not refresh the repositories because of errors.", 4 ]
   ]), gpu_fixture('ada'));
   like($rec->{error}, qr{^zypper refresh of repository nvidia-gfx \(\Q$url\E\) failed \(exit 4\): .*is invalid.*removed again; nothing was installed from it}s,
     'leap-15.6 + Ada, GFX refresh fails: dies with alias, URL and zypper output');
   my @lines = @{ $rec->{lines} };
   is_deeply([ grep { / install |addlock|dracut/ } @lines ], [], '... no install after the failed refresh');
-  like($lines[-1], qr{^run: zypper rr nvidia-gfx }, '... and the broken entry is removed again');
+  like($lines[-1], qr{^run: ZYPP_LOCK_TIMEOUT=120 zypper rr nvidia-gfx }, '... and the broken entry is removed again');
   golden_is($rec, 'driver/leap-15.6--ada--refresh-failed');
 }
 
@@ -192,7 +192,7 @@ golden_is(
 # dies there, no refresh, no install.
 {
   my $rec = driver_on(host_profile('leap-16.0', responses => [
-    [ qr{^zypper addrepo --refresh } =>
+    [ qr{^ZYPP_LOCK_TIMEOUT=120 zypper addrepo --refresh } =>
         "System management is locked by the application with pid 4242 (zypper).\nClose this application before trying again.", 7 ]
   ]), gpu_fixture('ada'));
   like($rec->{error}, qr{^zypper addrepo of repository nvidia-gfx \(https://download\.nvidia\.com/opensuse/leap/16\.0/\) failed \(exit 7\): System management is locked.*; nothing was installed from it}s,
@@ -205,8 +205,8 @@ golden_is(
 # otherwise exit 4 ("Repository named 'nvidia-gfx' already exists").
 for my $os (qw( leap-15.6 leap-16.0 )) {
   my @lines = @{ driver_on(host_profile($os), gpu_fixture('ada'))->{lines} };
-  my ($rr)  = grep { $lines[$_] =~ /^run: zypper rr nvidia-gfx / } 0..$#lines;
-  my ($add) = grep { $lines[$_] =~ /^run: zypper addrepo / } 0..$#lines;
+  my ($rr)  = grep { $lines[$_] =~ /^run: ZYPP_LOCK_TIMEOUT=120 zypper rr nvidia-gfx / } 0..$#lines;
+  my ($add) = grep { $lines[$_] =~ /^run: ZYPP_LOCK_TIMEOUT=120 zypper addrepo / } 0..$#lines;
   ok(defined $rr && defined $add && $rr < $add, $os.': zypper rr nvidia-gfx precedes addrepo');
 }
 
