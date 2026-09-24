@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-09-24T03:44:00Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T03:44:00Z
+created: 2026-09-24T00:25:18Z
+id: 49
+priority: medium
+started: 2026-09-24T03:39:17Z
+status: done
+title: 'HGX B200/B300: NVSwitch nicht auf dem PCI-Bus -- Erkennung via CX-7-VPD +
+  nvlsm/OFED/IB-Tools'
+updated: 2026-09-24T03:44:00Z
+---
+
+Aus #23 (Recherche, NVIDIA Fabric Manager Guide): Bei HGX B200/B300 sind die NVSwitches keine PCIe-Geraete des Hosts; sichtbar sind nur ConnectX-7-Bridge-Funktionen (15b3:1021), von normalen NICs nur ueber PCIe-VPD (SMDL=SW_MNG) unterscheidbar. Zusaetzlich noetig: NVLink Subnet Manager (nvlsm), OFED/MOFED, libibumad3, infiniband-diags, Kernel >= 5.17. nvlink5-NNN-Meta zog das bis 595; ab 610 leeres Transitional-Paket, Installationsweg fuer nvlsm undokumentiert. GB200/GB300 NVL72: Compute-Trays brauchen nvidia-imex + Konfiguration statt Fabric Manager. Scope-Entscheidung Maintainer.
+
+Recherche 2026-09-24: Ab 610 ist nvlink5 ein leeres Dummy-Paket (Ubuntu), fehlt auf RHEL 9 ganz; nvlsm nur noch als altes Einzelpaket 2025.12.211 im CUDA-Repo, im Driver Installation Guide 615 nicht erwaehnt, nicht im Ubuntu-Archiv, nicht in DOCA 3.5. Empfehlung: (a) B200/B300-IDs (2901/2909/3182) in [0302] -> Treiber wie bisher + laute Warnung (FM+NVLSM+OFED+Kernel>=5.17 noetig, sonst cudaErrorSystemNotReady); (c) GB200/GB300 NVL72 nur Hinweis (IMEX). Kein (b) Auto-Install, solange NVIDIA keinen nvlsm-Weg fuer 610+ dokumentiert.
+
+Maintainer-Entscheidung 2026-09-24: (a) B200/B300 (2901/2909/3182) in [0302] erkennen, Treiber wie bisher, danach laute Warnung (FM+NVLSM+OFED+Kernel>=5.17, sonst cudaErrorSystemNotReady); (c) GB200/GB300 NVL72 nur Hinweis (IMEX); nur Warnung, verify bleibt ok; Auto-Install spaeter als eigenes Ticket.
+
+Erledigt in 75cf4f5 (gepusht): Setup->nvlink_platform_ids (2901/2909/3182 hgx-nvlink5, 2941/31c2/31c3 nvl72); Warnung einmal nach Install/already-installed mit read-only is-active; GB200 nur IMEX-Info. Nicht auf Hardware.
