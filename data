@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T01:34:37Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:34:37Z
+created: 2026-09-23T20:13:36Z
+id: 43
+priority: medium
+started: 2026-09-24T01:34:21Z
+status: done
+title: eg/custom-setup/lib/My/GPU/Setup.pm landet im Tarball -- PAUSE-Indexierung
+  pruefen (MetaNoIndex eg?)
+updated: 2026-09-24T01:34:37Z
+---
+
+Aus T5: [@Author::GETTY] setzt kein no_index fuer eg/. Pruefen, ob META provides nur lib/ listet (dann ignoriert PAUSE My::GPU::Setup) oder ob [MetaNoIndex] directory = eg noetig ist -- sonst wuerde das Paket My::GPU::Setup auf CPAN beansprucht. Vor dem naechsten Release klaeren (release-checker).
+
+Geklaert per dzil build (2026-09-24): META.json provides listet NUR die 11 Rex::GPU::*-Pakete aus lib/ ([MetaProvides::Package] im Bundle). PAUSE indexiert bei vorhandenem provides ausschliesslich diese -> My::GPU::Setup, My::GPU::UbuntuDrivers (eg/) und Test::RexGPU::Golden (t/lib) werden NICHT beansprucht. Kein [MetaNoIndex] noetig. Beifund: Tarball enthaelt .claude/ (Agents, Rules, Skills, settings.json) und CLAUDE.md -- Bundle-Frage (Git::GatherDir excludet nur README.md/.karr), bewusst? -> an Maintainer.
