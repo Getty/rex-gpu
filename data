@@ -1,0 +1,21 @@
+---
+claimed_at: 2026-09-24T03:50:00Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T03:50:00Z
+created: 2026-09-23T03:00:06Z
+id: 24
+priority: low
+started: 2026-09-24T03:39:13Z
+status: done
+title: NVIDIA-vGPU-Gaeste erkennen (brauchen GRID-Treiber, nicht den Datacenter-Pfad)
+updated: 2026-09-24T03:50:00Z
+---
+
+Aus #17: lspci -nn unterscheidet vGPU-Gast nicht von Passthrough (beide 10de, normaler Name). Seit #17 wird ein vGPU-Gast mit emulierter Konsole (typisch KVM/Proxmox) erkannt statt zufaellig verdeckt -> Standard-Treiberpipeline laeuft, verify_nvidia warnt vermutlich (stirbt nicht). Idee: Subsystem-ID via lspci -vnn bzw. /sys pruefen und vGPU-Gaeste ueberspringen/loggen. Braucht echten vGPU-Gast zur Verifikation.
+
+Recherche 2026-09-24: Erkennung via (device_id, subsystem_id) gegen NVIDIAs sVgpuUsmTypes[] (open-gpu-kernel-modules 615.71.09, src/common/shared/inc/g_vgpu_chip_flags.h, 1135 Eintraege Turing..Blackwell, MIT), keine Kollision mit den 616 physischen Paaren der README. Offenes nvidia.ko lehnt Ampere+-vGPU-VF ab (osapi.c 'not supported by open nvidia.ko') -> nutzlos, nicht schaedlich. Vorschlag: zweiter read-only lspci -vmmnn -d 10de:, Feld vgpu/vgpu_type; install_driver stirbt vor jedem Host-Befehl, wenn vgpu und kein Treiber; mit GRID-Treiber laeuft Toolkit/CDI normal. Entscheidungen offen: Verhalten ohne Treiber, gemischter Gast, Tabellenpflege (Generator).
+
+Maintainer-Entscheidung 2026-09-24: Feld vgpu/vgpu_type; mit vorhandenem (GRID-)Treiber normal weiter; ohne Treiber stirbt install_driver vor jedem Host-Befehl; gemischter Gast (vGPU + Passthrough) -> Abbruch; Tabelle per Generator-Skript aus NVIDIAs g_vgpu_chip_flags.h.
+
+Erledigt in 34e9534 (gepusht): Detect zweiter read-only lspci -vmmnn -d 10de:, Felder subsystem_id/subsystem_vendor_id/vgpu/vgpu_type; Rex::GPU::NVIDIA::VGPU (generiert via maint/gen-vgpu-types.pl aus NVIDIA 615.71.09, 1135 Paare); Setup::plan stirbt bei vGPU ohne Treiber (auch gemischt) vor jeder Aenderung. Nicht auf Hardware (Azure NVadsA10_v5 / AWS G6f pruefen).
