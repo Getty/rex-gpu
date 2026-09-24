@@ -1,6 +1,13 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver on RHEL/Rocky/Alma/CentOS dies when dnf config-manager
+    --add-repo cannot add NVIDIA's CUDA repository (e.g. an HTTP error on
+    the .repo URL), naming the URL and dnf's output, before any driver
+    package is installed. It used to carry on and fail later with
+    "nvidia-driver not installed after dnf install". A re-run whose .repo
+    is already in place but whose download fails now dies too.
+    Not hardware-verified (karr #47)
   - gpu_detect (and so gpu_setup and Rex::Rancher gpu => 1) installs
     nothing when lspci is already on the host's PATH (command -v lspci).
     Without it, pciutils goes through Rex::Pkg as before, except on Rocky,

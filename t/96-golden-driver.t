@@ -142,6 +142,22 @@ golden_is(
   'driver/rocky-9--ada--not-installed'
 );
 
+# RHEL (karr #47): dnf config-manager --add-repo fails (HTTP error on the
+# CUDA .repo URL, nothing written) -- dies naming the URL and dnf's output,
+# before dnf clean / module enable / any install.
+{
+  my $url = 'https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo';
+  my $rec = driver_on(host_profile('rocky-9', responses => [
+    [ qr{^dnf config-manager --add-repo } =>
+        "Adding repo from: $url\nCurl error (22): HTTP response code said error for $url [The requested URL returned error: 404]\nError: Configuration of repo failed", 1 ]
+  ]), gpu_fixture('ada'));
+  like($rec->{error}, qr{^dnf config-manager --add-repo \Q$url\E failed \(exit 1\): .*error: 404.*no driver was installed}s,
+    'rocky-9 + Ada, add-repo fails: dies with URL and dnf output');
+  is_deeply([ grep { / install |module enable|clean expire-cache/ } @{ $rec->{lines} } ], [],
+    '... nothing after the add-repo is emitted');
+  golden_is($rec, 'driver/rocky-9--ada--add-repo-failed');
+}
+
 # openSUSE (karr #27): zypper install fails (no provider, exit 104) -- the
 # open meta package is not there, dies after the addlock, before nouveau.
 golden_is(

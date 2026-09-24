@@ -8,7 +8,7 @@ run: dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.
 run: rpm -q epel-release 2>&1
 run: uname -m
 run: subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
-run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo 2>/dev/null
+run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo 2>&1
 run: dnf clean expire-cache
 run: dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true
 run: dnf install -y kernel-devel-matched kernel-headers nvidia-open

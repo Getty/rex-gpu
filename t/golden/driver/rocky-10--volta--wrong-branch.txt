@@ -7,7 +7,7 @@ run: cat /etc/os-release 2>/dev/null
 pkg: epel-release ensure=present
 run: dnf config-manager --set-enabled crb 2>/dev/null || true
 run: uname -m
-run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/cuda-rhel10.repo 2>/dev/null
+run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/cuda-rhel10.repo 2>&1
 run: dnf clean expire-cache
 pkg: python3-dnf-plugin-versionlock ensure=present
 run: dnf versionlock add '*nvidia*580*'

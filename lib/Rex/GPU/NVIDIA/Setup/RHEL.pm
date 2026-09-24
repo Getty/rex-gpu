@@ -263,7 +263,10 @@ sub prepare_host {
 =method prepare_source
 
 Adds NVIDIA's CUDA repository C<rhelN> for the host architecture (read here,
-C<uname -m>: aarch64 is the C<sbsa> tree), expires dnf's cache, then selects
+C<uname -m>: aarch64 is the C<sbsa> tree) with C<dnf config-manager
+--add-repo>; if that exits non-zero (e.g. the C<.repo> URL answers with an
+HTTP error, so nothing was written) it B<dies> with the URL and dnf's output,
+before any driver package is installed. Then it expires dnf's cache and selects
 the driver branch the chosen source asks for:
 
 =over
@@ -289,9 +292,20 @@ sub prepare_source {
   # published under the "sbsa" tree, not "x86_64".
   my $distro = "rhel$major";
   my $arch   = $self->_cuda_repo_arch($self->arch);
+  my $repo_url = "https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo";
   Rex::Logger::info("  Adding NVIDIA CUDA repo ($distro/$arch)...");
-  $self->run_cmd("dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/$distro/$arch/cuda-$distro.repo 2>/dev/null",
-    auto_die => 0);
+  # karr #47: on an HTTP error --add-repo writes no .repo and exits non-zero;
+  # ignored, that only surfaced as "nvidia-driver not installed" after dnf
+  # install. Die here, naming the URL and dnf's own words.
+  my $out = $self->run_cmd("dnf config-manager --add-repo $repo_url 2>&1", auto_die => 0);
+  if ($? != 0) {
+    my $exit = $? >> 8;
+    $out //= '';
+    $out =~ s/\s+\z//;
+    die "dnf config-manager --add-repo $repo_url failed (exit $exit)"
+      . (length $out ? ": $out" : '')
+      . "; no driver was installed\n";
+  }
   $self->run_cmd('dnf clean expire-cache', auto_die => 0);
 
   my $source = $plan->{source} or return;

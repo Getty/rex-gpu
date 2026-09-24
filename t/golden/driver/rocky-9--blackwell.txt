@@ -7,7 +7,7 @@ run: cat /etc/os-release 2>/dev/null
 pkg: epel-release ensure=present
 run: dnf config-manager --set-enabled crb 2>/dev/null || true
 run: uname -m
-run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo 2>/dev/null
+run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo 2>&1
 run: dnf clean expire-cache
 run: dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true
 run: dnf install -y kernel-devel-matched kernel-headers nvidia-open
