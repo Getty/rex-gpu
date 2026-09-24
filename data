@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T01:42:33Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T01:42:33Z
+created: 2026-09-23T18:38:14Z
+id: 41
+priority: medium
+started: 2026-09-24T01:36:28Z
+status: done
+title: 'Debian: eigene/unbekannte Mirrors (apt-cacher, Firmen-Mirror, ftp.*.de/debian)
+  bekommen kein non-free mehr'
+updated: 2026-09-24T01:42:33Z
+---
+
+Folge aus #36/#40: non-free wird nur fuer erkannte Debian-Archiv-URIs ergaenzt (*.debian.org, Hetzner /debian/, mirror+file). Der alte sed hat jede deb-Zeile mit main erweitert -> Hosts mit eigenem Debian-Mirror warnen jetzt und sterben am dpkg-Check (laut, aber Regression). Loesung natuerlich im Epic #25: Setup::Debian mit ueberschreibbarer Methode fuer Archiv-URIs bzw. Option debian_mirrors => [...]. Bis dahin evtl. Heuristik (Pfad /debian/ + Debian-Signed-By).
+
+Erledigt in 5a8ec41: is_debian_archive_uri / is_debian_archive_keyring oeffentlich+ueberschreibbar; signed-by mit ausschliesslich debian-archive-Keyrings entscheidet allein (Host egal); Warnung nennt Override + eg/custom-setup; eg/custom-setup/lib/My/GPU/DebianMirror.pm. Offen: rex-gpu-core Skill-Text nachziehen; doppelter k36-Bullet in Changes beim Release-Audit mergen. Nicht auf Hardware (Debian 12/13 mit apt-cacher-ng / Firmen-Mirror).
