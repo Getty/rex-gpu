@@ -47,6 +47,11 @@ GTX 10xx/16xx are compute; MX, GT/GTS/NVS, GTX 2xx–9xx are not; **unknown defa
 `0`** (safe: no install) with a warning. Changing that default from 0 to 1 means an
 unrecognised laptop chip triggers a datacenter driver install — keep it 0.
 
+`detect()` first ensures `lspci` (`command -v`, else pciutils — dnf + rpm -q for the
+lsb_release RHEL names Rex::Pkg can't handle; k46), and only if an NVIDIA GPU was found
+scans `lspci -nn -d 10de:` for NVSwitch bridges (class `0680`, IDs 1ac2/1af1/22a3) into
+`nvswitch => [...]` (k23). HGX B200/B300 NVSwitches are NOT on the host PCI bus.
+
 **Which driver a GPU needs is a separate question** (epic #25): `Rex::GPU::NVIDIA::Requirement`
 (Moo, experimental) maps the PCI device ID to `{kernel_module open|proprietary|either,
 min_branch, max_branch}` via its overridable `generations` table — Blackwell 2900–2FFF
