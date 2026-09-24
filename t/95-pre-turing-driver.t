@@ -129,7 +129,12 @@ subtest 'Ubuntu: pinned proprietary 580 -server for pre-Turing only' => sub {
 
 subtest 'RHEL: stream on 8/9, versionlock on 10, proprietary kmod' => sub {
   my $RHEL = 'Rex::GPU::NVIDIA::Setup::RHEL';
-  my $plan = sub { plan_for($RHEL, $_[1], os => 'Redhat', release => $_[0].'.0')->{source} };
+  # os_release injected: left lazy, plan() runs `cat /etc/os-release` on the
+  # machine running the test, and Rex's local exec reads that output with an
+  # unlocalised while(<$fh>), clobbering the caller's $_ (karr #59).
+  my $plan = sub {
+    plan_for($RHEL, $_[1], os => 'Redhat', release => $_[0].'.0', os_release => {})->{source}
+  };
   for my $major (8, 9) {
     my $p = $plan->($major, $v100);
     is($p->{module_stream}, '580-dkms', "RHEL $major => stream 580-dkms");

@@ -540,6 +540,8 @@ before anything is changed:
 
 =over
 
+=item * an NVIDIA vGPU guest device among the GPUs (see L</gpus>);
+
 =item * a GPU no installable driver branch supports (Kepler or older, even
 one among several GPUs);
 

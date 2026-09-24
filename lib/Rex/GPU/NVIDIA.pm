@@ -622,7 +622,9 @@ sub install_container_toolkit {
   Rex::Logger::info("NVIDIA Container Toolkit installed");
 }
 
-=method configure_containerd($runtime)
+=method configure_containerd
+
+  configure_containerd($runtime);
 
 Configure the containerd runtime to use the NVIDIA container runtime.
 The C<nvidia-container-runtime> binary must already be installed
@@ -1471,7 +1473,7 @@ components include C<main>, and either C<Signed-By> / C<[signed-by=...]>
 names only C<debian-archive-*> keyrings under C</usr/share/keyrings> (whatever
 the URI, so a mirror of your own signed with Debian's key counts), or there
 is no C<signed-by> and every URI is a C<*.debian.org> host, Hetzner's
-C<mirror.hetzner.com/debian/> mirror or the cloud images'
+C<mirror.hetzner.com/debian/> (or C<.de>) mirror or the cloud images'
 C<mirror+file:/etc/apt/mirrors/debian*.list>. Third-party sources and unknown
 mirrors are left untouched, and a file with nothing to add is not rewritten;
 if no Debian archive entry is recognised in either format, a warning is
@@ -1487,9 +1489,10 @@ L</install_driver> or C<set gpu_nvidia_setup> -- see
 L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>.
 
 The package choice also depends on the GPU generation, read from the PCI
-device ID of the GPU passed as C<gpu> to L</install_driver>
-(L<Rex::GPU/gpu_setup> passes it automatically). Without that option every
-host gets the default selection below.
+device IDs of the GPUs passed as C<gpus> (or C<gpu>) to L</install_driver>
+(L<Rex::GPU/gpu_setup> passes every compute GPU it detected); one driver has
+to fit them all. Without that option every host gets the default selection
+below.
 
 =over
 
@@ -1509,11 +1512,16 @@ versionlock) with C<kmod-nvidia-latest-dkms>, and openSUSE uses
 C<nvidia-driver-G06-kmp-meta>.
 
 =item * B<Kepler or older>: no supported branch is installed and
-L</install_driver> dies before changing the host.
+L</install_driver> dies before changing the host. L<Rex::GPU/gpu_setup>
+never passes one: detection skips it with a warning.
+
+=item * B<NVIDIA vGPU guest> (C<vgpu =E<gt> 1>): it needs NVIDIA's licensed
+vGPU guest driver, which is not installed here; unless a working driver is
+already there, L</install_driver> dies before changing the host.
 
 =back
 
-See the C<gpu> option of L</install_driver> for the exact packages.
+See the C<gpus> option of L</install_driver> for the exact packages.
 
 On Ubuntu, the newest available C<nvidia-driver-NNN-server> package is
 auto-detected and installed by default. It is looked up after C<apt-get

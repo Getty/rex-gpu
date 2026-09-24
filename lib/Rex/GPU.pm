@@ -320,12 +320,16 @@ The full pipeline, as executed by L</gpu_setup>:
 
 =item 1. B<GPU detection> — PCI class code scan via C<lspci -nn> to identify
 NVIDIA and AMD hardware, filtering out virtual GPUs (virtio, QEMU, VMware).
-Only CUDA-capable NVIDIA GPUs (RTX, Quadro, Tesla, PCI class C<0302>) trigger
-driver installation.
+Only CUDA-capable NVIDIA GPUs trigger driver installation, decided by the GPU
+generation read from the PCI device ID, not by name or PCI class: Maxwell and
+newer count (GeForce MX, GT and GTX 9xx included), Kepler and older are
+skipped with a warning at any PCI class. See L</gpu_setup>.
 
 =item 2. B<NVIDIA driver installation> — Distribution-appropriate packages
-via DKMS for kernel-version independence. Nouveau is blacklisted and the
-initramfs is regenerated.
+via DKMS for kernel-version independence, chosen so one driver fits every
+detected GPU. Nouveau is blacklisted and the initramfs is regenerated. An
+NVIDIA vGPU guest without a working driver dies before the host is changed
+(see L</gpu_setup>).
 
 =item 3. B<NVIDIA Container Toolkit> — Installs C<nvidia-container-toolkit>
 from the official NVIDIA repository for all supported distributions, unless
@@ -376,8 +380,11 @@ C<known_hosts> before deploying:
 
   ssh-keyscan <host> >> ~/.ssh/known_hosts
 
-=item * B<Disable the check Rexfile-wide> — what the bundled C<eg/> examples do
-for first-contact provisioning; a deliberate security tradeoff:
+The bundled C<eg/Rexfile> and C<eg/hetzner-gpu.pl> do this in a
+C<before 'ALL'> hook.
+
+=item * B<Disable the check Rexfile-wide> — for first-contact provisioning;
+a deliberate security tradeoff:
 
   use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
 

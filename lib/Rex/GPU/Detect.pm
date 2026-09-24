@@ -128,8 +128,7 @@ it C<... NVSwitch>; another NVIDIA bridge device is logged and skipped. An
 NVSwitch host needs NVIDIA Fabric Manager, which L<Rex::GPU/gpu_setup>
 installs with the driver. HGX B200/B300 are B<not> detected: their
 NVSwitches are not PCI devices on the host (NVIDIA's Fabric Manager guide),
-so C<nvswitch> stays C<[]> there. The key is additive; C<nvidia> and C<amd>
-are unchanged.
+so C<nvswitch> stays C<[]> there.
 
 When an NVIDIA GPU was found, a third read-only command, C<lspci -vmmnn -d
 10de:>, reads each NVIDIA device's subsystem IDs by PCI slot. Every
@@ -651,14 +650,13 @@ warning. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
 implemented.
 
 Each detected NVIDIA GPU also carries its raw C<device_id> (the C<[10de:XXXX]>
-field, or C<undef> if lspci printed none). L<Rex::GPU> passes the whole GPU
-hashref through to L<Rex::GPU::NVIDIA/install_driver>, which uses
-L</open_kernel_module_required> on the device ID to pick the correct Ubuntu
-driver package variant for Blackwell-architecture silicon (B200/GB200/B300,
-GeForce RTX 50xx, RTX PRO Blackwell, GB10) that has no proprietary kernel
-module at all, and L</legacy_driver_requirement> to keep a pre-Turing GPU
-(Maxwell/Pascal/Volta, e.g. the V100) on the proprietary 580 branch and to
-reject a Kepler-or-older one.
+field, or C<undef> if lspci printed none). L<Rex::GPU> passes every compute
+GPU hashref through to L<Rex::GPU::NVIDIA/install_driver>, which chooses the
+driver from the device IDs through L<Rex::GPU::NVIDIA::Requirement>: the open
+kernel module for Blackwell-architecture silicon (B200/GB200/B300, GeForce
+RTX 50xx, RTX PRO Blackwell, GB10), which has no proprietary one, the
+proprietary 580 branch for a pre-Turing GPU (Maxwell/Pascal/Volta, e.g. the
+V100), and a refusal for a Kepler-or-older one passed to it directly.
 
 =head1 SEE ALSO
 

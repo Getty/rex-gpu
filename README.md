@@ -6,9 +6,9 @@ GPU detection and driver management for [Rex](https://www.rexify.org/). Automate
 
 The full pipeline, driven by a single `gpu_setup()` call:
 
-1. **GPU detection** — scans PCI devices via `lspci -nn`, identifies NVIDIA and AMD hardware, filters out virtual GPUs (virtio, QEMU, VMware). Only CUDA-capable NVIDIA GPUs trigger installation: every datacenter GPU (PCI class `0302`) and, by the generation read from the PCI device ID, every Maxwell or newer GPU — GeForce MX, GT 1030 and GTX 9xx included. Kepler and older GPUs (last driver branch 470, no longer packaged) are skipped with a warning.
-2. **NVIDIA driver installation** — distribution-appropriate packages via DKMS for kernel-version independence. Blacklists `nouveau`, regenerates initramfs.
-3. **NVIDIA Container Toolkit** — installs from the official NVIDIA repository for all supported distributions.
+1. **GPU detection** — scans PCI devices via `lspci -nn`, identifies NVIDIA and AMD hardware, filters out virtual GPUs (virtio, QEMU, VMware). Only CUDA-capable NVIDIA GPUs trigger installation, decided by the GPU generation read from the PCI device ID, not by name or PCI class (see [Supported GPUs](#supported-gpus)).
+2. **NVIDIA driver installation** — distribution-appropriate packages via DKMS for kernel-version independence, one driver chosen to fit every detected GPU. Blacklists `nouveau`, regenerates initramfs. Skipped if a working driver (`nvidia-smi -L` lists a GPU and `libcuda.so.1` is in the linker cache) is already there.
+3. **NVIDIA Container Toolkit** — installs from the official NVIDIA repository for all supported distributions; an already installed toolkit is left as it is, not upgraded.
 4. **CDI spec generation** — writes `/etc/cdi/nvidia.yaml` so the Kubernetes device plugin enumerates GPU resources without privileged containers.
 5. **Containerd runtime configuration** — injects the NVIDIA runtime into the containerd config for the target Kubernetes distribution (`rke2`, `k3s`, or standalone `containerd`).
 
@@ -48,9 +48,30 @@ The verified target set is the RKE2 Linux family above. **openSUSE Leap / SLES i
 
 GPUs tested include the **NVIDIA RTX 4000 SFF Ada Generation** (PCI class `0302`, datacenter compute profile).
 
+Every `apt-get` waits up to 120 seconds for the dpkg lock and every `zypper` up to 120 seconds for the zypp lock, so a fresh boot where cloud-init or unattended-upgrades still holds it does not fail the install (`apt_lock_timeout` / `zypper_lock_timeout` in a setup class of your own change it).
+
+On Debian, `contrib non-free non-free-firmware` is added only to entries recognised as Debian's own archive: signed with Debian's archive keyring, or without `signed-by` on a `*.debian.org` host, Hetzner's `mirror.hetzner.com`/`.de` Debian mirror or the cloud images' `mirror+file:` list. A mirror of your own is left alone, so `nvidia-driver` has no candidate there; teach it by overriding `is_debian_archive_uri` (see `eg/custom-setup/lib/My/GPU/DebianMirror.pm`).
+
+### Supported GPUs
+
+Decided by generation (PCI device ID), whatever the marketing name or PCI class:
+
+| Generation | Compute | Driver |
+|---|---|---|
+| Turing, Ampere, Ada, Hopper | yes | the distro's default (Ubuntu newest `-server`, Debian `non-free`, RHEL CUDA-repo open DKMS, openSUSE open `G06`/`G07`) |
+| Blackwell, Blackwell Ultra (B200/GB200/B300, RTX 50xx, RTX PRO Blackwell, GB10) | yes | open kernel module only: Ubuntu `-server-open`, Debian 12/13 NVIDIA's CUDA repository (other Debian releases die before the host is changed) |
+| Maxwell, Pascal, Volta (V100, P100, GTX 9xx/10xx, GT 1030, MX1xx–MX3xx) | yes | proprietary 580 branch, their last: Ubuntu `nvidia-driver-580-server`, RHEL pinned 580 kmod, openSUSE `G06` proprietary, Debian `non-free` |
+| Kepler and older (K80/K40/K20, GT 710, GTX 7xx) | no | none — last branch 470 is no longer packaged; skipped with a warning at any PCI class, a newer GPU on the same host still gets its driver |
+
+GPUs that cannot share one driver (a V100 next to a B200) make `gpu_setup` die before the host is changed, unless a working driver is already installed. An unrecognised NVIDIA model beyond the table defaults to no install, with a warning. AMD GPUs are detected and logged; no AMD driver is installed.
+
+### NVIDIA vGPU guests
+
+On a VM with an NVIDIA vGPU (Azure NVadsA10 v5, AWS G6f, a vGPU on VMware or KVM) `lspci -nn` shows the physical GPU's device ID; `gpu_detect` tells the vGPU apart by its PCI subsystem ID and reports `vgpu => 1` and `vgpu_type` (e.g. `NVIDIA A10-2Q`). Such a guest needs NVIDIA's licensed vGPU guest (GRID) driver, which Rex::GPU does not install. If that driver already works, `gpu_setup` goes on as on any host with a working driver: container toolkit, CDI specs, containerd. If not, it dies before anything on the host is changed, naming the vGPU type — also when a non-vGPU GPU sits next to it. Not tested on a vGPU guest.
+
 ### NVSwitch / HGX (Fabric Manager)
 
-On an HGX baseboard whose NVSwitches are PCI devices on the host (HGX-2, HGX A100, HGX H100/H200), `gpu_detect` lists them under `nvswitch`, and `gpu_setup` installs NVIDIA Fabric Manager together with the driver, at exactly the driver's version, and enables `nvidia-fabricmanager.service`. Without it CUDA does not initialise on those hosts. Debian 11 and openSUSE have no Fabric Manager source and die before the host is changed. On a host whose driver is already installed, Fabric Manager is added only if the host's own package sources offer it at exactly the running driver's version; otherwise `gpu_setup` warns and changes nothing (no package source is added, the driver is not touched). **HGX B200/B300 are not covered:** their NVSwitches are not visible on the host PCI bus. `gpu_setup` recognises them by the GPU device IDs (B200 `2901`/`2909`, B300 `3182`), installs the driver as usual and then warns once that CUDA needs NVIDIA Fabric Manager, the NVLink Subnet Manager (`nvlsm`), OFED/MOFED (`libibumad3`, `infiniband-diags`) and kernel 5.17 or newer; install and start those yourself, or CUDA jobs fail with `cudaErrorSystemNotReady`. GB200/GB300 NVL72 compute trays run no Fabric Manager (it runs on the switch trays); they get a note that multi-node NVLink needs `nvidia-imex`, which Rex::GPU does not set up. None of this has been tested on HGX hardware.
+On an HGX baseboard whose NVSwitches are PCI devices on the host (HGX-2, HGX A100, HGX H100/H200), `gpu_detect` lists them under `nvswitch`, and `gpu_setup` installs NVIDIA Fabric Manager together with the driver, at exactly the driver's version, and enables `nvidia-fabricmanager.service`. Without it CUDA does not initialise on those hosts. Debian's `non-free` has no Fabric Manager, so Debian 12/13 takes NVIDIA's CUDA repository instead; Debian 11 and openSUSE die before the host is changed. On a host whose driver is already installed, Fabric Manager is added only if the host's own package sources offer it at exactly the running driver's version; otherwise `gpu_setup` warns and changes nothing (no package source is added, the driver is not touched). **HGX B200/B300 are not covered:** their NVSwitches are not visible on the host PCI bus. `gpu_setup` recognises them by the GPU device IDs (B200 `2901`/`2909`, B300 `3182`), installs the driver as usual and then warns once that CUDA needs NVIDIA Fabric Manager, the NVLink Subnet Manager (`nvlsm`), OFED/MOFED (`libibumad3`, `infiniband-diags`) and kernel 5.17 or newer; install and start those yourself, or CUDA jobs fail with `cudaErrorSystemNotReady`. GB200/GB300 NVL72 compute trays run no Fabric Manager (it runs on the switch trays); they get a note that multi-node NVLink needs `nvidia-imex`, which Rex::GPU does not set up. None of this has been tested on HGX hardware.
 
 ### MIG (A100 / H100 / B200)
 
@@ -72,6 +93,13 @@ sub sources { my ( $self ) = @_; return ( { name => 'pinned-580-open', kernel_mo
 
 Choose it per call with `gpu_setup(setup => 'My::GPU::Setup')` (a class name or an object), or for the whole Rexfile with `set gpu_nvidia_setup => 'My::GPU::Setup'`, which also applies to Rex::Rancher's `gpu => 1`. Without either, Rex::GPU chooses the class by OS. The detected GPUs' requirements still apply: a source the GPUs cannot use is skipped. `gpu_setup(requirement => { kernel_module => 'open', min_branch => 580 })` narrows the choice further, but cannot override what the GPUs need. See `eg/custom-setup/` and the `WRITING YOUR OWN SETUP` section of `Rex::GPU::NVIDIA::Setup`.
 
+## Examples
+
+- `eg/Rexfile` — `detect`, `setup` and Rex::Rancher node/server/agent tasks
+- `eg/hetzner-gpu.pl` — full Hetzner deploy through Rex::Rancher
+- `eg/custom-setup/` — a setup class of your own (`My::GPU::Setup`), and `My::GPU::DebianMirror` for a Debian mirror
+- `eg/ubuntu-drivers/` — the Ubuntu package chosen by `ubuntu-drivers list --gpgpu`; `install_driver` alone with a GPU found without `lspci`
+
 ## Requirements
 
 This module requires [Rex::LibSSH](https://metacpan.org/pod/Rex::LibSSH) (or SFTP) on the connection backend. Hetzner servers don't enable SFTP by default:
@@ -89,7 +117,7 @@ Rex::LibSSH 0.004 and later verify the server's host key against `known_hosts` b
 ssh-keyscan <host> >> ~/.ssh/known_hosts
 ```
 
-or disable the check Rexfile-wide, as the bundled `eg/` examples do for first-contact provisioning (a deliberate security tradeoff):
+(`eg/Rexfile` and `eg/hetzner-gpu.pl` do this in a `before 'ALL'` hook), or disable the check Rexfile-wide for first-contact provisioning (a deliberate security tradeoff):
 
 ```perl
 use Rex -feature => ['1.4', 'disable_strict_host_key_checking'];
