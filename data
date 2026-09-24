@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T02:51:08Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T02:51:08Z
+created: 2026-09-24T02:35:32Z
+id: 54
+priority: medium
+started: 2026-09-24T02:35:38Z
+status: done
+title: Compute-Klassifizierung nach Generation statt Marketingnamen (Maxwell+ = compute,
+  Kepler- = skip mit Meldung)
+updated: 2026-09-24T02:51:08Z
+---
+
+Maintainer-Entscheidung 2026-09-24 (Folge aus #45): Alle KI-tauglichen GPUs sind compute, auch MX/GT/GTX-9xx mit wenig VRAM, solange ein aktueller Treiberzweig sie unterstuetzt. Kriterium ist die Generation aus der Requirement-Tabelle (per Device-ID, unabhaengig von pci.ids): Maxwell..Blackwell Ultra -> compute. Kepler und aelter (braucht <=470, EOL, auf aktuellen Distros nicht paketiert) -> compute 0 mit klarer Meldung statt Treiber-Install-Abbruch. Unbekannte ID + unbekannter Name -> weiterhin 0. Namensregeln nur noch Fallback ohne ID. 0302 bleibt immer compute. Die Maxwell-Ausschluesse (GTX [2-9]xx, GT, MX) hatten keinen bekannten Grund.
+
+Erledigt in d8cea8a (gepusht): Requirement-Tabelle deckt 0000-2FFF lueckenlos + 3182/31C2/31C3, compute 1/0/undef; Kepler -> Skip mit Warnung; Namensregeln nur Fallback. Quellen: NVIDIA supportedchips 615/580/550/535, pci.ids, Ubuntu Modaliases. Offene Entscheidung: 0302-Kepler (K80/K40/K20) ist weiter compute per Klasse -> plan stirbt, blockiert auch Ada daneben. Nicht auf Hardware.
