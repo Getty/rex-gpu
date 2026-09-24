@@ -212,7 +212,7 @@ golden_is(hgx_on(host_profile('rocky-10', responses => [ @RHEL_FM ])), 'driver/r
 for my $case ([ 'debian-12', release => '11.11' ], [ 'leap-15.6' ], [ 'leap-16.0' ]) {
   my ( $os, @over ) = @$case;
   my $rec = hgx_on(host_profile($os, @over));
-  like($rec->{error}, qr/no NVIDIA Fabric Manager package for the NVSwitch on this host.*Nothing was changed/,
+  like($rec->{error}, qr/no NVIDIA Fabric Manager package for the NVSwitch on this host.*No driver package was installed and no package source was added/,
     "$os @over HGX H100: dies naming the missing Fabric Manager");
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
 }

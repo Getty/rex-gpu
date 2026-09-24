@@ -20,10 +20,10 @@ Revision history for Rex-GPU
     gets subsystem_vendor_id, subsystem_id, vgpu (0|1) and vgpu_type;
     compute is unchanged. New Rex::GPU::NVIDIA::VGPU holds NVIDIA's table
     (open-gpu-kernel-modules 615.71.09, MIT). install_driver / gpu_setup on
-    a vGPU guest without a working driver die before changing the host,
-    asking for the licensed vGPU guest driver, also next to a non-vGPU GPU;
-    with a working driver they go on as usual. Not hardware-verified
-    (karr #24)
+    a vGPU guest without a working driver die before any driver package is
+    installed, asking for the licensed vGPU guest driver, also next to a
+    non-vGPU GPU; with a working driver they go on as usual. Not
+    hardware-verified (karr #24)
   - install_driver and install_container_toolkit on openSUSE Leap wait up
     to 120 seconds for the zypp lock (ZYPP_LOCK_TIMEOUT, like apt's
     DPkg::Lock::Timeout) on every zypper call, so a fresh boot where
@@ -85,9 +85,11 @@ Revision history for Rex-GPU
     nvidia-smi -q, else one loud warning; it never dies. Without a known
     nvlsm source (other Ubuntu releases, RHEL 8, openSUSE) it dies before
     any driver package is installed. An already-installed driver gets the
-    missing packages from the host's own sources only. GB200/GB300 (2941, 31C2,
-    31C3) get an info line that multi-node NVLink needs nvidia-imex. The
-    IDs are Rex::GPU::NVIDIA::Setup's overridable nvlink_platform_ids.
+    missing packages from the host's own sources only (index refreshed, no
+    source added; one not offered warns) and ib_umad loaded. GB200/GB300
+    (2941, 31C2, 31C3) get an info line that multi-node NVLink needs
+    nvidia-imex. The IDs are Rex::GPU::NVIDIA::Setup's overridable
+    nvlink_platform_ids.
     Not hardware-verified (karr #49, #56)
   - install_driver and install_container_toolkit accept Rocky Linux,
     AlmaLinux and CentOS Stream under the names Rex reports when

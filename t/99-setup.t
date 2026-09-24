@@ -197,7 +197,7 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
 
   $rec = record_host(host => host_profile('debian-12'),
     code => sub { $DEB->new(gpu => gpu_fixture('kepler'))->plan });
-  like($rec->{error}, qr/Kepler or older.*Nothing was changed/, 'Kepler dies in plan');
+  like($rec->{error}, qr/Kepler or older.*No driver package was installed and no package source was added/, 'Kepler dies in plan');
   is_deeply($rec->{lines}, [], '... before any host interaction');
 }
 
@@ -485,7 +485,7 @@ is($SUSE->repo_url('15.6'), 'https://download.nvidia.com/opensuse/leap/15.6/',
   is($UBU->new->requirement->describe, 'any kernel module, any driver branch', 'no GPU => no constraint');
   ok(!eval { $UBU->new(gpus => [ gpu_fixture('volta'), gpu_fixture('b200') ])->requirement; 1 },
     'V100 + B200: building the requirement dies');
-  like($@, qr/^No single NVIDIA driver supports all GPUs on this host: .*B200.* needs the open kernel module, but .*V100.* needs the proprietary one\. Nothing was changed on the host/,
+  like($@, qr/^No single NVIDIA driver supports all GPUs on this host: .*B200.* needs the open kernel module, but .*V100.* needs the proprietary one\. No driver package was installed and no package source was added/,
     '... naming both GPUs, without a Perl file/line');
 
   # a subclass reorders its sources: a GPU without constraints takes the new first
@@ -506,7 +506,7 @@ is($SUSE->repo_url('15.6'), 'https://download.nvidia.com/opensuse/leap/15.6/',
     $RHEL->new(%facts, os => 'Redhat', release => '9.6',
       requirement => $R->new(kernel_module => 'proprietary', min_branch => 590))->plan; 1 },
     'RHEL, proprietary 590+: no source fits');
-  like($@, qr/^No NVIDIA driver source on this Redhat 9\.6 host fits NVIDIA GPU \(proprietary kernel module, driver branch 590 or newer\) -- cuda-open-dkms: open kernel module, the proprietary one is needed; cuda-580-dkms: branch 580 is older than 590\. Nothing was changed on the host/,
+  like($@, qr/^No NVIDIA driver source on this Redhat 9\.6 host fits NVIDIA GPU \(proprietary kernel module, driver branch 590 or newer\) -- cuda-open-dkms: open kernel module, the proprietary one is needed; cuda-580-dkms: branch 580 is older than 590\. No driver package was installed and no package source was added/,
     '... every candidate with its reason');
   ok(!eval {
     $SUSE->new(%facts, os => 'SuSE', release => '16.0',

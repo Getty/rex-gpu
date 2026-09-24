@@ -338,13 +338,13 @@ for my $case (
 ) {
   my ( $label, $os, $over, $re ) = @$case;
   my $rec = driver(hgx_host($os, %$over), @B200);
-  like($rec->{error}, qr/^HGX B200\/B300 on this .*$re.*nothing was changed on the host/s, "$label: dies");
+  like($rec->{error}, qr/^HGX B200\/B300 on this .*$re.*no driver package was installed and no package source was added/s, "$label: dies");
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... after read-only commands only');
 }
 
 {
   my $rec = driver(host_profile('leap-15.6'), @B200);
-  like($rec->{error}, qr/no NVIDIA Fabric Manager package for the HGX B200\/B300 NVLink fabric on this host.*Nothing was changed/s,
+  like($rec->{error}, qr/no NVIDIA Fabric Manager package for the HGX B200\/B300 NVLink fabric on this host.*No driver package was installed and no package source was added/s,
     'openSUSE: dies, no Fabric Manager source');
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... after read-only commands only');
 }

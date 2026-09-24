@@ -2,4 +2,4 @@
 # Host interactions Rex::GPU emits, in order. Regenerate with
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 run: nvidia-smi -L 2>&1
-DIE: NVIDIA vGPU guest (type NVIDIA A10-2Q, 10de:2236 sub 14b9): install the licensed NVIDIA vGPU guest driver, then run again. Nothing was changed on the host
+DIE: NVIDIA vGPU guest (type NVIDIA A10-2Q, 10de:2236 sub 14b9): install the licensed NVIDIA vGPU guest driver, then run again. No driver package was installed and no package source was added

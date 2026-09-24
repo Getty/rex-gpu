@@ -237,7 +237,7 @@ my $VGPU_DIE = qr/\ANVIDIA vGPU guest \(type NVIDIA A10-2Q, 10de:2236 sub 14b9\)
 
 for my $os (host_names()) {
   my $rec = driver_on($os, [ $A10 ]);
-  like($rec->{error}, qr/$VGPU_DIE: install the licensed NVIDIA vGPU guest driver, then run again\. Nothing was changed on the host\z/,
+  like($rec->{error}, qr/$VGPU_DIE: install the licensed NVIDIA vGPU guest driver, then run again\. No driver package was installed and no package source was added\z/,
     "$os + vGPU, no driver: dies");
   is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], '... after the nvidia-smi probe only');
 

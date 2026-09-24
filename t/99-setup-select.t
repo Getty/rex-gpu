@@ -251,7 +251,7 @@ PM
 
   ok(!eval { $UBU->new(%facts, gpu => gpu_fixture('volta'), extra_requirement => { kernel_module => 'open' })->requirement; 1 },
     'V100 + open: cannot loosen, dies');
-  like($@, qr/^No NVIDIA driver meets both what the GPUs need and the requirement option \(open kernel module, any driver branch\): .*Nothing was changed on the host/,
+  like($@, qr/^No NVIDIA driver meets both what the GPUs need and the requirement option \(open kernel module, any driver branch\): .*No driver package was installed and no package source was added/,
     '... naming both sides');
 }
 

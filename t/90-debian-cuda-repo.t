@@ -91,7 +91,7 @@ subtest 'Blackwell on an unsupported release/arch => dies (fail loud)' => sub {
     my $label = defined $rel ? "'$rel'" : 'undef';
     ok(!eval { repo($rtx5090, $rel, 'amd64'); 1 }, "release $label dies");
     like($@, qr/Debian 12 and 13/, "release $label: message names the supported releases");
-    like($@, qr/Nothing was changed on the host/, "release $label: ... and that nothing changed");
+    like($@, qr/No driver package was installed and no package source was added/, "release $label: ... and that no driver package was installed");
   }
   for my $arch ('i386', 'ppc64el', '', undef) {
     my $label = defined $arch ? "'$arch'" : 'undef';

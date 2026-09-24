@@ -108,7 +108,7 @@ subtest 'real lspci line => device id => requirement' => sub {
 subtest '_reject_unsupported_legacy_gpu' => sub {
   my $rej = \&Rex::GPU::NVIDIA::_reject_unsupported_legacy_gpu;
   ok(!eval { $rej->($k80); 1 }, 'Tesla K80 dies');
-  like($@, qr/Kepler or older.*470.*Nothing was changed/s, 'message names generation, branch, no change');
+  like($@, qr/Kepler or older.*470.*No driver package was installed and no package source was added/s, 'message names generation, branch, no change');
   ok(!eval { $rej->($c2050); 1 }, 'Fermi Tesla C2050 dies');
   for my $g ($v100, $p100, $t4, $rtx4000, $b200, undef, {}, 'x') {
     my $label = ref $g ? ($g->{device_id} // 'no device_id') : ($g // 'undef');

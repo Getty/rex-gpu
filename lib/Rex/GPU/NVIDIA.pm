@@ -99,8 +99,8 @@ containerd for it. Without a working driver C<install_driver> B<dies> after
 that probe and before anything on the host is changed:
 
   NVIDIA vGPU guest (type NVIDIA A10-2Q, 10de:2236 sub 14b9): install the
-  licensed NVIDIA vGPU guest driver, then run again. Nothing was changed on
-  the host
+  licensed NVIDIA vGPU guest driver, then run again. No driver package was
+  installed and no package source was added
 
 The same when a vGPU is passed together with a GPU that is not one (a
 passed-through card next to it): one NVIDIA kernel module drives every GPU
@@ -261,7 +261,7 @@ host is changed. With an already-installed driver the missing ones of those
 packages are installed from the host's B<current> package sources only (no
 repository is added, as for Fabric Manager above; a package still missing
 only warns), C<ib_umad> is loaded, the unit started if anything was
-installed, and the Fabric State is checked the same way.
+installed or loaded, and the Fabric State is checked the same way.
 GB200/GB300 NVL72 compute trays get an info line instead: multi-node NVLink
 needs C<nvidia-imex> and its configuration, which Rex::GPU does not set up.
 

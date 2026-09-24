@@ -93,8 +93,8 @@ sub _check_gpus {
     my $id = $gpu->{device_id};
     next if !defined $id || $id =~ /\A[0-9a-f]{4}\z/i;
     croak "NVIDIA GPU '".( $gpu->{name} // 'unknown' )."': device_id '".$id."' is not "
-      .'a PCI device ID of four hex digits, e.g. 2b85 (no 0x, no newline). Nothing '
-      .'was changed on the host';
+      .'a PCI device ID of four hex digits, e.g. 2b85 (no 0x, no newline). No driver '
+      .'package was installed and no package source was added';
   }
   return;
 }
@@ -271,7 +271,8 @@ sub _build_requirement {
   my @reqs = map { $class->from_gpu($_) } @gpus;
   if ( my @conflicts = $class->conflicts(@reqs) ) {
     die 'No single NVIDIA driver supports all GPUs on this host: '
-      .join('; ', @conflicts).'. Nothing was changed on the host. Install the '
+      .join('; ', @conflicts).'. No driver package was installed and no package '
+      .'source was added. Install the '
       ."driver yourself; once `nvidia-smi -L` lists the GPUs and libcuda.so.1 is in "
       ."the linker cache, install_driver skips the driver step\n";
   }
@@ -281,8 +282,9 @@ sub _build_requirement {
   # GPUs need dies here, in plan, before anything on the host is changed.
   if ( my @conflicts = $class->conflicts($gpu_req, $extra) ) {
     die 'No NVIDIA driver meets both what the GPUs need and '.$extra->who.' ('
-      .$extra->describe.'): '.join('; ', @conflicts).'. Nothing was changed on the '
-      ."host. Loosen the requirement, or install the driver yourself\n";
+      .$extra->describe.'): '.join('; ', @conflicts).'. No driver package was '
+      .'installed and no package source was added. '
+      ."Loosen the requirement, or install the driver yourself\n";
   }
   return $class->intersect($gpu_req, $extra);
 }
@@ -333,7 +335,7 @@ sub adopt {
     unless ref $gpus eq 'ARRAY';
   croak ref($self).' object passed as setup => has already run install -- it '
     .'holds that host\'s facts and GPUs. Build a new object per host, or pass a '
-    .'class name. Nothing was changed on the host'
+    .'class name. No driver package was installed and no package source was added'
     if $self->_installed;
   my $extra = defined $arg{extra_requirement}
     ? $self->_coerce_requirement($arg{extra_requirement}) : undef;
@@ -349,11 +351,11 @@ sub adopt {
   croak ref($self).' object passed as setup => already has a fixed requirement '
     .'(given to new or built by plan), so the detected GPUs or the requirement '
     .'option could not be checked. Build it without requirement =>, or pass a '
-    .'class name. Nothing was changed on the host'
+    .'class name. No driver package was installed and no package source was added'
     if $self->_has_requirement;
   croak ref($self).' object passed as setup => has an extra_requirement of its '
-    .'own and the requirement option was given too; pass one of them. Nothing '
-    .'was changed on the host'
+    .'own and the requirement option was given too; pass one of them. No driver '
+    .'package was installed and no package source was added'
     if $extra && $self->extra_requirement;
   $self->_set_gpus($gpus) if $take_gpus;
   $self->_set_extra_requirement($extra) if $extra;
@@ -635,8 +637,8 @@ C<kernel_module>, C<branch> or C<branch_at_least>, C<unavailable>. Called
 by L</plan>, so it must only read the host, and it does not look at a
 package index: on a fresh host that index is stale or empty until
 L</prepare_source> refreshes it. Dies when none fits, naming the GPUs, what
-they need and every rejected candidate with its reason; nothing has been
-changed on the host then.
+they need and every rejected candidate with its reason; no driver package
+has been installed and no package source added then.
 
 =method resolve_plan
 
@@ -695,8 +697,8 @@ sub plan {
     my $why = $self->nvlink_fabric_unavailable($source);
     die 'HGX B200/B300 on this '.$self->os.' '.( $self->release // '' ).' host: '.$why
       .'. Without nvlsm and Fabric Manager CUDA fails with cudaErrorSystemNotReady, so '
-      .'nothing was changed on the host. Install the driver, Fabric Manager and nvlsm '
-      ."yourself\n" if defined $why;
+      .'no driver package was installed and no package source was added. Install the '
+      ."driver, Fabric Manager and nvlsm yourself\n" if defined $why;
   }
   $plan->{source} = $source;
   push @{ $plan->{packages} }, @{ $source->{packages} // [] };
@@ -727,7 +729,8 @@ sub select_source {
   }
   die 'No NVIDIA driver source on this '.$self->os.' '.( $self->release // '' ).' host fits '
     .$requirement->who.' ('.$requirement->describe.') -- '.join('; ', @rejected)
-    .'. Nothing was changed on the host. Install the driver yourself; once '
+    .'. No driver package was installed and no package source was added. Install '
+    .'the driver yourself; once '
     ."`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
     ."install_driver skips the driver step\n";
 }
@@ -1398,7 +1401,8 @@ sub _reject_unsupported_gpu {
   die "NVIDIA GPU '" . ($gpu->{name} // 'unknown') . "' (10de:$gpu->{device_id}) is "
     . $req->generation." silicon: no driver newer than the end-of-life "
     . $req->max_branch." branch supports it, and Rex::GPU does not install "
-    . "that. Nothing was changed on the host. Install the driver yourself; once "
+    . "that. No driver package was installed and no package source was added. "
+    . "Install the driver yourself; once "
     . "`nvidia-smi -L` lists the GPU and libcuda.so.1 is in the linker cache, "
     . "install_driver skips the driver step\n";
 }
@@ -1428,7 +1432,7 @@ sub _reject_vgpu_guest {
         .'driver Rex::GPU installs does not drive a vGPU'
       : '' )
     .': install the licensed NVIDIA vGPU guest driver, then run again. '
-    ."Nothing was changed on the host\n";
+    ."No driver package was installed and no package source was added\n";
 }
 
 # `uname -m` / dpkg arch -> the token NVIDIA's CUDA repos use under

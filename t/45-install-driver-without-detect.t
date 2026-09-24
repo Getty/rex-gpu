@@ -63,7 +63,7 @@ for my $os (host_names()) {
   is_deeply([ pci_lines($rec) ], [], '... no lspci / pciutils line');
 
   $rec = driver_on($os, gpu => minimal('kepler'));
-  like($rec->{error}, qr/Kepler or older.*Nothing was changed on the host/,
+  like($rec->{error}, qr/Kepler or older.*No driver package was installed and no package source was added/,
     "$os + minimal K80: refused like the detected one");
   is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], '... after the nvidia-smi probe only');
 
@@ -78,7 +78,7 @@ is($detect_called, 0, 'Rex::GPU::Detect::detect was never called');
 for my $bad ('0x2b85', "2b85\n", '2b8', '2b855', 'GB202', '') {
   ( my $shown = $bad ) =~ s/\n/\\n/;
   my $rec = driver_on('ubuntu-24.04', gpu => { device_id => $bad, name => 'NVIDIA GeForce RTX 5090' });
-  like($rec->{error}, qr/device_id '.*' is not a PCI device ID of four hex digits.*Nothing was changed on the host/s,
+  like($rec->{error}, qr/device_id '.*' is not a PCI device ID of four hex digits.*No driver package was installed and no package source was added/s,
     "device_id '$shown' dies");
   is_deeply($rec->{lines}, [], '... before any host interaction');
 }

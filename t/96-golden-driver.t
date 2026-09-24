@@ -102,7 +102,7 @@ golden_is(driver_on(host_profile('rocky-9'), gpu_fixture('pascal')), 'driver/roc
 
 for my $os (host_names()) {
   my $rec = driver_on(host_profile($os), gpu_fixture('kepler'));
-  like($rec->{error}, qr/Kepler or older.*Nothing was changed on the host/,
+  like($rec->{error}, qr/Kepler or older.*No driver package was installed and no package source was added/,
     "$os + K80 dies with the Kepler message");
   is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ],
     "$os + K80: only the nvidia-smi probe ran");
@@ -372,12 +372,12 @@ for my $os (host_names()) {
   }
 
   my $rec = driver_for(host_profile($os), qw( volta b200 ));
-  like($rec->{error}, qr/^No single NVIDIA driver supports all GPUs on this host: GB100 \[B200\] \(Blackwell, 10de:2901\) needs the open kernel module, but GV100GL \[Tesla V100 PCIe 16GB\] \(Maxwell\/Pascal\/Volta, 10de:1db4\) needs the proprietary one\. Nothing was changed on the host/,
+  like($rec->{error}, qr/^No single NVIDIA driver supports all GPUs on this host: GB100 \[B200\] \(Blackwell, 10de:2901\) needs the open kernel module, but GV100GL \[Tesla V100 PCIe 16GB\] \(Maxwell\/Pascal\/Volta, 10de:1db4\) needs the proprietary one\. No driver package was installed and no package source was added/,
     "$os + V100+B200 dies naming both GPUs");
   is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], "$os + V100+B200: only the nvidia-smi probe ran");
 
   $rec = driver_for(host_profile($os), qw( ada kepler ));
-  like($rec->{error}, qr/GK210GL \[Tesla K80\].*Kepler or older.*Nothing was changed on the host/,
+  like($rec->{error}, qr/GK210GL \[Tesla K80\].*Kepler or older.*No driver package was installed and no package source was added/,
     "$os + Ada+K80: a Kepler anywhere in the list is rejected");
   is_deeply($rec->{lines}, [ 'run: nvidia-smi -L 2>&1' ], "$os + Ada+K80: only the nvidia-smi probe ran");
 }

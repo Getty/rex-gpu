@@ -121,7 +121,9 @@ no Fabric Manager is not used (Debian's C<non-free>; Debian 12/13 takes
 NVIDIA's CUDA repository instead, Debian 11 and openSUSE die before any
 driver package is installed). If the driver is already installed, Fabric
 Manager is added only when the host's own package sources offer it at exactly the loaded
-driver's version; otherwise it warns and changes nothing. See the
+driver's version (asked after an C<apt-get update> on Debian/Ubuntu);
+otherwise it warns and installs nothing. No package source is added and the
+driver is not touched either way. See the
 C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>. Hosts without
 NVSwitch are unchanged.
 HGX B200/B300 have no NVSwitch on the host PCI bus (C<nvswitch> is empty
@@ -132,6 +134,10 @@ from NVIDIA's CUDA repository -- on Ubuntu added for this, pinned to
 C<nvlsm> alone), loads C<ib_umad>, warns on a kernel older than 5.17
 (except on the RHEL family), and after the start checks that every GPU
 reports C<Fabric State: Completed> -- a loud warning if not, never a die.
+With the driver already installed, the missing ones of these packages are
+installed from the host's own package sources (after an C<apt-get update> on
+Debian/Ubuntu; no source is added, one not offered only warns) and
+C<ib_umad> is loaded.
 Where no C<nvlsm> source is known it dies before any driver package is installed. GB200/GB300 NVL72 compute
 trays need no Fabric Manager (it runs on the NVLink switch trays); an info
 line notes that multi-node NVLink needs C<nvidia-imex>, which is not set
