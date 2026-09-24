@@ -1,0 +1,20 @@
+---
+claimed_at: 2026-09-24T02:22:56Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T02:22:56Z
+created: 2026-09-23T23:55:00Z
+id: 45
+priority: low
+started: 2026-09-24T02:17:21Z
+status: done
+title: RTX-Laptop-GPUs mit aufgeloestem Namen gelten per \bRTX\b als compute -- Ergebnis
+  haengt an pci.ids
+updated: 2026-09-24T02:22:56Z
+---
+
+Aus #21: "GeForce RTX 5090 Laptop GPU" (Name aufgeloest) -> compute ueber die Namensregel; dieselbe Karte mit veralteter pci.ids ("Device [10de:2c18]") -> nicht compute. Seit jeher so fuer alle RTX-Laptop-Chips. Entscheidung: Laptop-Namen (" Laptop GPU", Max-Q mobile) explizit ausschliessen? Ausserdem offen: RTX PRO Blackwell Embedded (2C77 2C79 2D79 2DF9) und RTX 6000D (2BB9) in die Allowlist?
+
+Maintainer-Entscheidung 2026-09-24: alle KI-tauglichen GPUs rein, RTX ganz sicher -- Laptop-RTX, Embedded und RTX 6000D sind compute. Umsetzung systemisch: jede Blackwell-Generation-ID (Requirement-Tabelle) ist compute, statt Einzel-IDs.
+
+Erledigt in 7a2a13f: Requirement-Generationen-Tabelle traegt compute; Blackwell-Zeilen (2900-2FFF, 3182, 31C2/31C3) = compute. Allowlist %NVIDIA_COMPUTE_DEVICE_IDS entfernt (alle Eintraege lagen im Bereich). Offen fuer Maintainer: MX- und GT-Chips (z.B. MX550, GT 1030) sind CUDA-faehig, bleiben aber compute 0. Nicht auf Hardware.
