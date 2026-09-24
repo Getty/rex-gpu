@@ -271,6 +271,20 @@ sub _madison_version_for {
   return;
 }
 
+=method nvlink_fabric_packages
+
+C<nvlsm>, C<infiniband-diags>, C<libibumad3> (see
+L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_packages>): the Debian package names
+C<nvlsm>'s own dependencies and NVIDIA's gpu-driver-container use.
+
+=cut
+
+# karr #56, research of 2026-09-24: the nvlsm .deb (CUDA repo, 2025.12.211)
+# Depends on libibumad3; NVIDIA's gpu-driver-container installs
+# `nvlsm infiniband-diags` unversioned; the Fabric Manager start script
+# needs ibstat (infiniband-diags).
+sub nvlink_fabric_packages { ( 'nvlsm', 'infiniband-diags', 'libibumad3' ) }
+
 =method initramfs_command
 
 C<update-initramfs -u 2E<gt>/dev/null>.

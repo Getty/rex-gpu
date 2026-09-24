@@ -108,6 +108,146 @@ sub sources {
   );
 }
 
+=method nvlink_fabric_packages
+
+The apt layer's (C<nvlsm>, C<infiniband-diags>, C<libibumad3>) plus
+C<linux-modules-extra-$kernel> of the running kernel, which holds the
+C<ib_umad> module on Ubuntu -- the running kernel's package only, never a
+metapackage that pulls a new kernel.
+
+=method nvlink_fabric_unavailable
+
+A reason unless the release is 22.04 or 24.04 on amd64: NVIDIA's CUDA
+repositories C<ubuntu2204>/C<ubuntu2404> for C<x86_64> are where C<nvlsm>
+was verified; Ubuntu's archive has none.
+
+=method prepare_nvlink_fabric_source
+
+Ubuntu's archive has no C<nvlsm>, so on an HGX B200/B300 -- and only there
+-- NVIDIA's CUDA repository is added, B<after> the driver and Fabric Manager
+are installed and verified, so it cannot influence which driver package
+L</resolve_source> finds:
+
+=over
+
+=item * the repository's signing key is taken from NVIDIA's
+C<cuda-keyring_1.1-1_all.deb> (downloaded with C<curl -f>, unpacked with
+C<dpkg-deb>) into C</usr/share/keyrings/cuda-archive-keyring.gpg>; the
+package itself is B<not> installed, because it also installs
+C</etc/apt/preferences.d/cuda-repository-pin-600>, which raises every
+package of that repository to priority 600 -- above Ubuntu's own driver;
+
+=item * L</nvlsm_pin_file> pins every package of
+C<developer.download.nvidia.com> to priority -1 (never installed) except
+C<nvlsm> (500) -- the driver, Fabric Manager and every library stay
+Ubuntu's, now and on later upgrades; it is written before the source;
+
+=item * L</nvlsm_source_file> gets the repository line, then C<apt-get
+update>.
+
+=back
+
+A host that has C<cuda-keyring> installed already has the repository (with
+NVIDIA's own pin): nothing is added there, only C<apt-get update>. Dies,
+before anything is added, when the key cannot be fetched; the driver and
+Fabric Manager stay installed.
+
+=method nvlsm_pin_file
+
+C</etc/apt/preferences.d/rex-gpu-nvlsm.pref>.
+
+=method nvlsm_source_file
+
+C</etc/apt/sources.list.d/rex-gpu-nvlsm.list>.
+
+=cut
+
+sub nvlink_fabric_packages {
+  my ( $self ) = @_;
+  # ib_umad.ko is in linux-modules-extra-<kver> (research 2026-09-24,
+  # checked for 6.8.0-142-generic); the running kernel's own package.
+  return ( $self->SUPER::nvlink_fabric_packages, 'linux-modules-extra-'.$self->kernel );
+}
+
+# nvlsm verified in repos/ubuntu2204 and repos/ubuntu2404 (x86_64), research
+# of 2026-09-24; not in Ubuntu's archive, not in DOCA.
+my %NVLSM_REPO = ( '22.04' => 'ubuntu2204', '24.04' => 'ubuntu2404' );
+
+sub _nvlsm_repo {
+  my ( $self ) = @_;
+  my ($release) = ( $self->release // '' ) =~ /^(\d+\.\d+)/;
+  my $distro = defined $release ? $NVLSM_REPO{$release} : undef;
+  return unless defined $distro && ( $self->arch // '' ) eq 'amd64';
+  return {
+    distro      => $distro,
+    arch        => 'x86_64',
+    url         => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/x86_64/",
+    keyring_url => "https://developer.download.nvidia.com/compute/cuda/repos/$distro/x86_64/cuda-keyring_1.1-1_all.deb"
+  };
+}
+
+sub nvlink_fabric_unavailable {
+  my ( $self ) = @_;
+  return if $self->_nvlsm_repo;
+  return "nvlsm is only in NVIDIA's CUDA repository, which Rex::GPU uses for it on Ubuntu "
+    ."22.04 and 24.04 (amd64) only, not on release '".( $self->release // '' )."' ("
+    .( $self->arch // '' ).')';
+}
+
+sub nvlsm_pin_file    { '/etc/apt/preferences.d/rex-gpu-nvlsm.pref' }
+sub nvlsm_source_file { '/etc/apt/sources.list.d/rex-gpu-nvlsm.list' }
+
+sub prepare_nvlink_fabric_source {
+  my ( $self, $plan ) = @_;
+  my $repo = $self->_nvlsm_repo
+    or die 'No NVIDIA CUDA repository for nvlsm on this Ubuntu host; the driver and '
+      ."Fabric Manager are installed, nvlsm is not\n";
+  $self->run_cmd("dpkg -l cuda-keyring 2>/dev/null | grep -q '^ii'", auto_die => 0);
+  if ($? == 0) {
+    Rex::Logger::info('  cuda-keyring is installed: NVIDIA\'s CUDA repository is already '
+      .'configured (with its own apt pin), nothing is added');
+    $self->refresh_package_index;
+    return;
+  }
+  Rex::Logger::info("  Adding NVIDIA's CUDA repository ($repo->{distro}/$repo->{arch}) for nvlsm "
+    .'only, every other package of it pinned out');
+  my $keyring = '/usr/share/keyrings/cuda-archive-keyring.gpg';
+  $self->run_cmd('DEBIAN_FRONTEND=noninteractive '.$self->apt_get.' install -y --no-upgrade curl',
+    auto_die => 0);
+  $self->verify_packages({ verify => [ 'curl' ] });
+  $self->run_cmd(q{t=$(mktemp -d) && curl -fsSL -o "$t/cuda-keyring.deb" }.$repo->{keyring_url}
+    .q{ && dpkg-deb --fsys-tarfile "$t/cuda-keyring.deb" | tar -xO ./usr/share/keyrings/cuda-archive-keyring.gpg > "$t/key.gpg"}
+    .q{ && test -s "$t/key.gpg" && install -m 0644 "$t/key.gpg" }.$keyring
+    .q{; rc=$?; rm -rf "$t"; exit $rc},
+    auto_die => 0);
+  die "Could not fetch the signing key of NVIDIA's CUDA repository ($repo->{keyring_url}) "
+    ."into $keyring; the driver and Fabric Manager are installed, nvlsm is not\n" if $? != 0;
+  $self->file_cmd($self->nvlsm_pin_file, content => $self->_nvlsm_pin, mode => 644);
+  $self->file_cmd($self->nvlsm_source_file,
+    content => 'deb [signed-by='.$keyring.'] '.$repo->{url}." /\n", mode => 644);
+  $self->refresh_package_index;
+  return;
+}
+
+# apt_preferences(5): the first specific-form record (Package: nvlsm) decides
+# nvlsm's priority; every other package of that origin gets the general
+# record's -1, "prevents the version from being installed". cuda-keyring's
+# own pin (Package: * / release l=NVIDIA CUDA / 600) is NOT installed: a
+# general record, it would win the maximum over -1.
+sub _nvlsm_pin {
+  return join("\n",
+    'Explanation: Rex::GPU (HGX B200/B300): NVIDIA\'s CUDA repository is here for nvlsm only.',
+    'Explanation: Nothing else is installed or upgraded from it; the NVIDIA driver stays Ubuntu\'s.',
+    'Package: *',
+    'Pin: origin developer.download.nvidia.com',
+    'Pin-Priority: -1',
+    '',
+    'Package: nvlsm',
+    'Pin: origin developer.download.nvidia.com',
+    'Pin-Priority: 500',
+    '');
+}
+
 =method resolve_source
 
 Runs after the apt layer's C<apt-get update>
@@ -168,7 +308,10 @@ sub resolve_source {
 
 B<Experimental>, like L<Rex::GPU::NVIDIA::Setup>. The NVIDIA driver install
 for Ubuntu: the C<-server> driver packages from Ubuntu's own archive on the
-apt layer L<Rex::GPU::NVIDIA::Setup::Apt>.
+apt layer L<Rex::GPU::NVIDIA::Setup::Apt>. On an HGX B200/B300 also
+Ubuntu's C<nvidia-fabricmanager-NNN>, and C<nvlsm> from NVIDIA's CUDA
+repository, pinned so that nothing else comes from it
+(L</prepare_nvlink_fabric_source>).
 
 =head1 SEE ALSO
 

@@ -105,6 +105,9 @@ subtest 'open_kernel_module_required — Blackwell device-ID ranges (karr #16)' 
   package T::Ubuntu;
   use Moo;
   extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  # The B200's NVLink fabric source (karr #56, plan dies without one on
+  # arm64) is t/94's claim; this test is about the driver choice only.
+  sub nvlink_fabric_unavailable { return }
   sub run_cmd {
     my ( $self, $cmd ) = @_;
     $? = 0;

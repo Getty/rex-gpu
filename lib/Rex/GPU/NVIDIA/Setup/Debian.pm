@@ -42,6 +42,24 @@ it, and the CUDA repository installs C<nvidia-fabricmanager> at the version
 of the installed C<nvidia-kernel-open-dkms>. On Debian 11 such a host dies
 before it is changed.
 
+An HGX B200/B300 (L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_needed>) is
+such a host too, and its NVLink fabric packages
+(L<Rex::GPU::NVIDIA::Setup::Apt/nvlink_fabric_packages>: C<nvlsm> from the
+same CUDA repository, C<infiniband-diags> and C<libibumad3> from Debian)
+are installed after Fabric Manager; see
+L<Rex::GPU::NVIDIA::Setup/install_nvlink_fabric>.
+
+=method fabric_manager_package
+
+The base class's, except for driver branch 570 or 575 (only on an
+already-installed driver, L<Rex::GPU::NVIDIA::Setup/retrofit_fabric_manager>):
+there NVIDIA's CUDA repository names it C<nvidia-fabricmanager-NNN>.
+
+=method nvlink_fabric_unavailable
+
+A reason unless the chosen driver source is NVIDIA's CUDA repository
+(C<nvlsm> is in no Debian archive).
+
 =method nonfree_branch
 
   my $branch = $self->nonfree_branch($major);   # 12 => 535
@@ -58,6 +76,25 @@ Override it for a release this table does not know.
 # nvidia-graphics-drivers/ checked 2026-09-23: bullseye 470.256.02,
 # bookworm 535.261.03, trixie 550.163.01. forky/sid (550 today) is
 # deliberately absent: it moves.
+# karr #56, research of 2026-09-24 (Packages.gz of debian12): the CUDA repo
+# builds nvidia-fabricmanager-570 / -575, and one unversioned
+# nvidia-fabricmanager from 580 on. A fresh install always takes >= 590.
+sub fabric_manager_package {
+  my ( $self, $source ) = @_;
+  my $pkg = $self->SUPER::fabric_manager_package($source);
+  return $pkg unless defined $pkg && ( $source->{branch} // '' ) =~ /\A57[05]\z/;
+  return 'nvidia-fabricmanager-'.$source->{branch};
+}
+
+# nvlsm: CUDA repos debian12 and debian13 carry it (research 2026-09-24),
+# Debian's archive does not.
+sub nvlink_fabric_unavailable {
+  my ( $self, $source ) = @_;
+  return if $source && $source->{cuda_repo};
+  return "nvlsm is only in NVIDIA's CUDA repository, and the driver source "
+    .( $source ? $source->{name} : '(none)' ).' is not it';
+}
+
 sub nonfree_branch {
   my ( $self, $major ) = @_;
   my %branch = ( 11 => 470, 12 => 535, 13 => 550 );

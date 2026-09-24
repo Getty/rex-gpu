@@ -44,6 +44,9 @@ use Rex::GPU::NVIDIA::Requirement;
   package T::Ubuntu;
   use Moo;
   extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
+  # The B200's NVLink fabric source (karr #56) is t/94's claim; this test is
+  # about the driver choice only (and its arch x86_64 is not dpkg's amd64).
+  sub nvlink_fabric_unavailable { return }
   sub run_cmd { $? = 0; return 'nvidia-driver-590-server' }
 }
 

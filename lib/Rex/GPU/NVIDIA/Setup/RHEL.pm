@@ -125,6 +125,33 @@ the installed C<nvidia-driver>'s exact version
 (C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without constraints and Blackwell get C<cuda-open-dkms>,
 Maxwell/Pascal/Volta C<cuda-580-dkms>.
 
+On an HGX B200/B300 (L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_needed>)
+Fabric Manager is installed the same way, then C<nvlsm> from the same CUDA
+repository and C<infiniband-diags> + C<libibumad> from the distribution
+(L</nvlink_fabric_packages>).
+
+=method fabric_manager_package
+
+The base class's, except for driver branch 570 or 575 (only on an
+already-installed driver, L<Rex::GPU::NVIDIA::Setup/retrofit_fabric_manager>):
+there NVIDIA's CUDA repository names it C<nvidia-fabric-manager>.
+
+=method nvlink_fabric_packages
+
+C<nvlsm>, C<infiniband-diags>, C<libibumad>, unversioned (see
+L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_packages>): C<nvlsm> from NVIDIA's
+CUDA repository, the other two from BaseOS / AppStream.
+
+=method nvlink_fabric_unavailable
+
+A reason below RHEL 9: C<nvlsm> was checked in the C<rhel9> and C<rhel10>
+repositories only.
+
+=method nvlink_kernel_backported
+
+True: NVIDIA supports HGX B200/B300 on RHEL 9.6/9.8 with its 5.14 kernel, so
+no kernel warning on the RHEL family.
+
 =method plan
 
 The base plan plus C<< $plan->{major} >> and C<< $plan->{rhel} >>
@@ -187,6 +214,34 @@ sub sources {
     }
   );
 }
+
+# karr #56, research of 2026-09-24 (rhel9 primary.xml): nvidia-fabric-manager
+# (with the hyphen) for 570/575, nvidia-fabricmanager from 580 on. A fresh
+# install always takes >= 580.
+sub fabric_manager_package {
+  my ( $self, $source ) = @_;
+  my $pkg = $self->SUPER::fabric_manager_package($source);
+  return $pkg unless defined $pkg && ( $source->{branch} // '' ) =~ /\A57[05]\z/;
+  return 'nvidia-fabric-manager';
+}
+
+# nvlsm: CUDA repos rhel9 and rhel10 (2025.06.5 .. 2025.12.211); rpm Requires
+# (libibumad or libibumad3). libibumad in BaseOS, infiniband-diags in
+# AppStream on Rocky 9/10 (research 2026-09-24). NVIDIA's gpu-driver-container
+# installs `infiniband-diags nvlsm` unversioned.
+sub nvlink_fabric_packages { ( 'nvlsm', 'infiniband-diags', 'libibumad' ) }
+
+sub nvlink_fabric_unavailable {
+  my ( $self ) = @_;
+  return if $self->major >= 9;
+  return "nvlsm was verified in NVIDIA's CUDA repositories for RHEL 9 and 10 only, "
+    .'not for release '.( $self->release // '' );
+}
+
+# NVIDIA's release notes list RHEL 9.6 (B200) and 9.8 (B300) -- kernel 5.14
+# with backports -- as supported; maintainer decision (karr #56): no kernel
+# warning on the RHEL family.
+sub nvlink_kernel_backported { 1 }
 
 sub plan {
   my ( $self ) = @_;

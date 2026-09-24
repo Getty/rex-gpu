@@ -480,6 +480,8 @@ my @READ_ONLY = (
   qr{${RUN}rpm -qa },
   qr{${RUN}LC_ALL=C apt-get -o DPkg::Lock::Timeout=\d+ -s install },
   qr{${RUN}dnf -q list --showduplicates --available },
+  # karr #56: the HGX B200/B300 Fabric State read
+  qr{${RUN}nvidia-smi -q 2>&1$},
   qr{^can_run: }
 );
 

@@ -212,18 +212,56 @@ Then, as after an install, it warns if the unit is not active. Omitted or empty
 (the default, and every caller that finds its GPUs without C<lspci>): no
 Fabric Manager, nothing changes.
 
-HGX B200/B300 are not NVSwitch hosts here -- their NVSwitches are not PCI
-devices on the host, so there are no C<nvswitches> and none of the above
-runs. They are recognised by the GPUs' device IDs instead
-(L<Rex::GPU::NVIDIA::Setup/nvlink_platforms>, from C<gpus>, so also for a
-caller without L<Rex::GPU::Detect>): the driver is installed as for any
-other Blackwell, then -- also when it was already installed -- one warning,
-however many GPUs, says that CUDA needs NVIDIA Fabric Manager, the NVLink
-Subnet Manager (C<nvlsm>), OFED/MOFED (C<libibumad3>, C<infiniband-diags>)
-and kernel 5.17 or newer, none of which Rex::GPU installs or checks, and
-that CUDA jobs fail with C<cudaErrorSystemNotReady> without them. The
-warning names whether C<nvidia-fabricmanager.service> is active (C<systemctl
-is-active>, the only command it runs). L</verify_nvidia> is not affected.
+B<HGX B200/B300> (karr #56): their NVSwitches are not PCI devices on the
+host, so there are no C<nvswitches>; they are recognised by the GPUs'
+device IDs instead (B200 C<2901>/C<2909>, B300 C<3182>;
+L<Rex::GPU::NVIDIA::Setup/nvlink_platforms>, from C<gpus>, so also for a
+caller without L<Rex::GPU::Detect>), and everything above applies to them
+as to an NVSwitch host -- the driver source must provide Fabric Manager, it
+is installed at exactly the driver's version and its unit enabled and
+started. On top of that, after Fabric Manager:
+
+=over
+
+=item * C<nvlsm> (the NVLink Subnet Manager; no service of its own,
+C<nvidia-fabricmanager.service> starts it), C<infiniband-diags> and
+C<libibumad3> (RHEL family: C<libibumad>), plus on Ubuntu
+C<linux-modules-extra> of the running kernel, B<unversioned> -- the newest
+the repository has, as NVIDIA's own gpu-driver-container installs them --
+through C<apt-get>/C<dnf> and checked with C<dpkg -l>/C<rpm -q> (dies if
+one is missing; the driver and Fabric Manager stay installed);
+
+=item * C<nvlsm> comes from NVIDIA's CUDA repository. On Debian 12/13 and
+the RHEL family that is where the driver came from. Ubuntu's driver comes
+from Ubuntu's archive, which has no C<nvlsm>: the CUDA repository is added
+there, only on these hosts, after the driver and Fabric Manager are
+installed, with an apt pin that lets nothing but C<nvlsm> come from it (see
+L<Rex::GPU::NVIDIA::Setup::Ubuntu/prepare_nvlink_fabric_source>);
+
+=item * C<ib_umad> is loaded (C<modprobe>) and listed in
+C</etc/modules-load.d/ib_umad.conf> -- Fabric Manager's start script
+refuses to run without it;
+
+=item * a running kernel older than 5.17 gets a warning (not on the RHEL
+family, whose 5.14 kernel NVIDIA supports for these boards); nothing stops;
+
+=item * after Fabric Manager is started (or the reboot), C<nvidia-smi -q>
+must show C<Fabric State: Completed>, C<Status: Success> for every GPU,
+read up to 12 times 10 seconds apart while the unit is active
+(L<Rex::GPU::NVIDIA::Setup/check_nvlink_fabric>). If not, one loud warning
+with what it read and where to look; C<install_driver> does not die and
+L</verify_nvidia> is not affected.
+
+=back
+
+Where Rex::GPU knows no C<nvlsm> source -- Ubuntu other than 22.04/24.04
+or not amd64, RHEL before 9, Debian other than 12/13 -- and on openSUSE
+(no Fabric Manager source), C<install_driver> dies before anything on the
+host is changed. With an already-installed driver the missing ones of those
+packages are installed from the host's B<current> package sources only (no
+repository is added, as for Fabric Manager above; a package still missing
+only warns), C<ib_umad> is loaded, the unit started if anything was
+installed, and the Fabric State is checked the same way.
 GB200/GB300 NVL72 compute trays get an info line instead: multi-node NVLink
 needs C<nvidia-imex> and its configuration, which Rex::GPU does not set up.
 
@@ -327,9 +365,13 @@ sub install_driver {
     # source is added, the driver is not touched; otherwise it only warns.
     # The driver runs, so a Fabric Manager installed now can start now.
     if ($setup->fabric_manager_needed) {
+      my $fm = $setup->retrofit_fabric_manager;
+      # HGX B200/B300 (karr #56): nvlsm & co. from the host's own sources
+      my $fabric = $setup->nvlink_fabric_needed ? $setup->retrofit_nvlink_fabric : 0;
       run "systemctl start ".$setup->fabric_manager_service, auto_die => 0
-        if $setup->retrofit_fabric_manager;
-      _check_fabric_manager($setup);
+        if $fm || $fabric;
+      my $active = _check_fabric_manager($setup);
+      $setup->check_nvlink_fabric($active) if $setup->nvlink_fabric_needed;
     }
     _note_nvlink_platforms($setup);
     return;
@@ -345,11 +387,13 @@ sub install_driver {
     run "systemctl start ".$setup->fabric_manager_service, auto_die => 0
       if $setup->fabric_manager_needed;
   }
-  _check_fabric_manager($setup) if $setup->fabric_manager_needed;
+  my $fm_active = $setup->fabric_manager_needed ? _check_fabric_manager($setup) : 0;
 
   # Driver only (karr #42): the toolkit comes after this step in gpu_setup,
   # so verify_nvidia's nvidia-ctk check could only warn here.
   verify_nvidia_driver();
+  # HGX B200/B300 (karr #56): Fabric State of every GPU; warns, never dies
+  $setup->check_nvlink_fabric($fm_active) if $setup->nvlink_fabric_needed;
   _note_nvlink_platforms($setup);
 
   Rex::Logger::info("NVIDIA driver installation complete");
@@ -845,17 +889,18 @@ sub _verify_module_and_smi {
   return $ok;
 }
 
-# NVSwitch host (karr #23): is Fabric Manager running? Warns, never dies,
-# like verify_nvidia. Returns 1/0.
+# NVSwitch host (karr #23) or HGX B200/B300 (karr #56): is Fabric Manager
+# running? Warns, never dies, like verify_nvidia. Returns 1/0.
 sub _check_fabric_manager {
   my ($setup) = @_;
-  my $unit = $setup->fabric_manager_service;
+  my $unit  = $setup->fabric_manager_service;
+  my $label = $setup->fabric_label;
   run "systemctl is-active --quiet $unit", auto_die => 0;
   if ($? == 0) {
-    Rex::Logger::info("  [ok] $unit active (NVSwitch)");
+    Rex::Logger::info("  [ok] $unit active ($label)");
     return 1;
   }
-  Rex::Logger::info("NVSwitch present but $unit is not active: CUDA fails with "
+  Rex::Logger::info("$label present but $unit is not active: CUDA fails with "
     ."cudaErrorSystemNotReady until NVIDIA Fabric Manager of the driver's exact version runs. "
     ."After the reboot that loads the NVIDIA driver: systemctl start $unit; if it is not "
     ."installed (install_driver installs it with the driver, or for an existing driver only "
@@ -864,23 +909,13 @@ sub _check_fabric_manager {
 }
 
 # NVLink platforms Rex::GPU does not set up (karr #49), by GPU device ID
-# (Setup nvlink_platforms): a note only, nothing installed, verify unaffected.
-# The one host command is the read-only is-active, on HGX B200/B300 only.
+# (Setup nvlink_platforms): a note only, nothing installed, verify unaffected,
+# no host command. HGX B200/B300 are set up since karr #56 (Setup
+# install_nvlink_fabric / check_nvlink_fabric), so only NVL72 is left here.
 sub _note_nvlink_platforms {
   my ($setup) = @_;
   for my $platform ($setup->nvlink_platforms) {
-    if ($platform eq 'hgx-nvlink5') {
-      my $unit = $setup->fabric_manager_service;
-      run "systemctl is-active --quiet $unit", auto_die => 0;
-      my $fm = $? == 0
-        ? "$unit is active; nvlsm, OFED/MOFED and the kernel were not checked"
-        : "$unit is not active";
-      Rex::Logger::info("HGX B200/B300 (NVLink 5): NVSwitches are not PCIe devices here; CUDA "
-        ."needs NVIDIA Fabric Manager + NVLink Subnet Manager (nvlsm) + OFED/MOFED "
-        ."(libibumad3, infiniband-diags) and kernel >= 5.17 -- not automated by Rex::GPU; "
-        ."without them CUDA jobs fail with cudaErrorSystemNotReady ($fm)", "warn");
-    }
-    elsif ($platform eq 'nvl72') {
+    if ($platform eq 'nvl72') {
       Rex::Logger::info("GB200/GB300 NVL72 compute tray: multi-node NVLink needs nvidia-imex "
         ."and its configuration -- not part of Rex::GPU");
     }

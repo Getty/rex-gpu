@@ -126,9 +126,11 @@ C<[]> otherwise. A device counts only if its ID is a known NVSwitch
 (C<1ac2> HGX-2, C<1af1> HGX A100, C<22a3> HGX H100/H200) or C<lspci> names
 it C<... NVSwitch>; another NVIDIA bridge device is logged and skipped. An
 NVSwitch host needs NVIDIA Fabric Manager, which L<Rex::GPU/gpu_setup>
-installs with the driver. HGX B200/B300 are B<not> detected: their
-NVSwitches are not PCI devices on the host (NVIDIA's Fabric Manager guide),
-so C<nvswitch> stays C<[]> there.
+installs with the driver. HGX B200/B300 NVSwitches are B<not> detected:
+they are not PCI devices on the host (NVIDIA's Fabric Manager guide), so
+C<nvswitch> stays C<[]> there. Their NVLink fabric is recognised by the GPU
+device IDs instead, when the driver is installed
+(L<Rex::GPU::NVIDIA::Setup/nvlink_platforms>).
 
 When an NVIDIA GPU was found, a third read-only command, C<lspci -vmmnn -d
 10de:>, reads each NVIDIA device's subsystem IDs by PCI slot. Every

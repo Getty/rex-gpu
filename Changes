@@ -71,16 +71,23 @@ Revision history for Rex-GPU
     Debian's non-free has none, so such a Debian 12/13 host gets NVIDIA's
     CUDA-repo driver; Debian 11 and openSUSE die before the host is changed.
     Hosts without NVSwitch are unchanged. Not hardware-verified (karr #23)
-  - install_driver (and so gpu_setup) on an HGX B200/B300 (GPU device ID
-    2901, 2909 or 3182; their NVSwitches are not on the host PCI bus, so no
-    Fabric Manager is installed) installs the driver as before, then warns
-    once, also for an already-installed driver, that CUDA needs NVIDIA
-    Fabric Manager, the NVLink Subnet Manager (nvlsm), OFED/MOFED and
-    kernel >= 5.17, none of which Rex::GPU installs, and whether
-    nvidia-fabricmanager.service is active. GB200/GB300 (2941, 31C2, 31C3)
-    get an info line that multi-node NVLink needs nvidia-imex. The IDs are
-    Rex::GPU::NVIDIA::Setup's overridable nvlink_platform_ids.
-    Not hardware-verified (karr #49)
+  - install_driver (and so gpu_setup) sets up the NVLink fabric of an HGX
+    B200/B300 (GPU device ID 2901, 2909 or 3182; its NVSwitches are not on
+    the host PCI bus): Fabric Manager at the driver's exact version as on
+    an NVSwitch host, then nvlsm, infiniband-diags and libibumad(3)
+    unversioned (Ubuntu also linux-modules-extra-$kernel), checked with
+    dpkg/rpm, and ib_umad loaded and listed in modules-load.d. nvlsm comes
+    from NVIDIA's CUDA repository; on Ubuntu 22.04/24.04 it is added for
+    these hosts only, after the driver, pinned so that nothing but nvlsm
+    comes from it. A kernel older than 5.17 warns (not on the RHEL family).
+    After the start every GPU must report Fabric State Completed in
+    nvidia-smi -q, else one loud warning; it never dies. Without a known
+    nvlsm source (other Ubuntu releases, RHEL 8, openSUSE) it dies before
+    the host is changed. An already-installed driver gets the missing
+    packages from the host's own sources only. GB200/GB300 (2941, 31C2,
+    31C3) get an info line that multi-node NVLink needs nvidia-imex. The
+    IDs are Rex::GPU::NVIDIA::Setup's overridable nvlink_platform_ids.
+    Not hardware-verified (karr #49, #56)
   - install_driver and install_container_toolkit accept Rocky Linux,
     AlmaLinux and CentOS Stream under the names Rex reports when
     lsb_release is installed (Rocky, RockyLinux, AlmaLinux, CentOSStream),

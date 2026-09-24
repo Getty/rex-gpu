@@ -114,7 +114,16 @@ no Fabric Manager.
 
 =method fabric_manager_needed
 
-True when L</nvswitches> lists at least one NVSwitch.
+True when L</nvswitches> lists at least one NVSwitch, or
+L</nvlink_fabric_needed> (HGX B200/B300, whose NVSwitches are not on the
+host PCI bus). Everything said above for a host with L</nvswitches> then
+holds for it too.
+
+=method fabric_label
+
+What the Fabric Manager messages name as the reason: C<NVSwitch> on a host
+with L</nvswitches>, C<HGX B200/B300 NVLink fabric> on one that only has
+L</nvlink_fabric_needed>.
 
 =cut
 
@@ -124,34 +133,42 @@ sub _build_nvswitches { [] }
 
 sub fabric_manager_needed {
   my ( $self ) = @_;
-  return ( grep { ref $_ eq 'HASH' } @{ $self->nvswitches } ) ? 1 : 0;
+  return 1 if grep { ref $_ eq 'HASH' } @{ $self->nvswitches };
+  return $self->nvlink_fabric_needed;
+}
+
+sub fabric_label {
+  my ( $self ) = @_;
+  return ( grep { ref $_ eq 'HASH' } @{ $self->nvswitches } )
+    ? 'NVSwitch' : 'HGX B200/B300 NVLink fabric';
 }
 
 =method nvlink_platform_ids
 
   my %platform = $self->nvlink_platform_ids;   # device_id => platform
 
-The GPUs that mark an NVLink platform whose fabric Rex::GPU does not set up,
-as a list of lowercase PCI device IDs and the platform each one marks (karr
-#49; IDs from the supported-GPU table of NVIDIA's open-gpu-kernel-modules
-README, driver 615):
+The GPUs that mark an NVLink platform, as a list of lowercase PCI device
+IDs and the platform each one marks (karr #49; IDs from the supported-GPU
+table of NVIDIA's open-gpu-kernel-modules README, driver 615):
 
 =over
 
 =item * C<hgx-nvlink5> -- HGX B200 (C<2901>, C<2909>) and B300 (C<3182>).
 Their NVSwitches are not PCI devices on the host, so there are no
-L</nvswitches> and no Fabric Manager is installed; CUDA needs NVIDIA Fabric
-Manager, the NVLink Subnet Manager (C<nvlsm>), OFED/MOFED and kernel 5.17 or
-newer.
+L</nvswitches>; CUDA needs NVIDIA Fabric Manager, the NVLink Subnet Manager
+(C<nvlsm>), the InfiniBand user-space stack and kernel 5.17 or newer. It
+makes L</nvlink_fabric_needed> true, so the driver comes with Fabric
+Manager and L</install_nvlink_fabric> (karr #56).
 
 =item * C<nvl72> -- GB200 (C<2941>) and GB300 (C<31c2>, C<31c3>) NVL72
 compute trays: multi-node NVLink needs C<nvidia-imex>; Fabric Manager runs
-on the NVLink switch trays, not here.
+on the NVLink switch trays, not here. Nothing is installed for them, the
+driver choice does not depend on it; L<Rex::GPU::NVIDIA/install_driver>
+logs a note.
 
 =back
 
-Override it to add or drop an ID. Read only by L</nvlink_platforms>; the
-driver choice does not depend on it.
+Override it to add or drop an ID. Read only by L</nvlink_platforms>.
 
 =method nvlink_platforms
 
@@ -159,9 +176,10 @@ driver choice does not depend on it.
 
 The platforms of L</nvlink_platform_ids> that L</gpus> mark, each once,
 sorted; empty on every other host. Reads nothing from the host.
-L<Rex::GPU::NVIDIA/install_driver> logs a note per platform after the
-driver step, also when the driver was already installed; nothing is
-installed for them.
+
+=method nvlink_fabric_needed
+
+True when L</nvlink_platforms> contains C<hgx-nvlink5>.
 
 =cut
 
@@ -184,6 +202,11 @@ sub nvlink_platforms {
     map { $platform{ lc( $_->{device_id} // '' ) } }
     grep { ref $_ eq 'HASH' } @{ $self->gpus };
   return sort keys %seen;
+}
+
+sub nvlink_fabric_needed {
+  my ( $self ) = @_;
+  return ( grep { $_ eq 'hgx-nvlink5' } $self->nvlink_platforms ) ? 1 : 0;
 }
 
 # extra_requirement may be given as a plain hashref; it becomes an object of
@@ -431,6 +454,7 @@ Runs the fixed sequence, each step a method a subclass can override:
   install_packages($plan)
   verify_packages($plan)
   install_fabric_manager($plan)   -> only if fabric_manager_needed
+  install_nvlink_fabric($plan)    -> only if nvlink_fabric_needed
   post_install($plan)
 
 Returns C<1> after an install, C<0> if a working driver was already there.
@@ -456,6 +480,7 @@ sub install {
   $self->install_packages($plan);
   $self->verify_packages($plan);
   $self->install_fabric_manager($plan) if $self->fabric_manager_needed;
+  $self->install_nvlink_fabric($plan) if $self->nvlink_fabric_needed;
   $self->post_install($plan);
   return 1;
 }
@@ -547,7 +572,10 @@ one among several GPUs);
 
 =item * GPUs that cannot share one driver (L</requirement>);
 
-=item * no source that fits the requirement (L</select_source>).
+=item * no source that fits the requirement (L</select_source>);
+
+=item * on an HGX B200/B300 (L</nvlink_fabric_needed>): no known source for
+the NVLink fabric packages (L</nvlink_fabric_unavailable>).
 
 =back
 
@@ -661,6 +689,15 @@ sub plan {
   my @sources = $self->sources;
   return $plan unless @sources;
   my $source = $self->select_source(@sources);
+  # HGX B200/B300 (karr #56): nvlsm must have a source too, known before any
+  # change -- a driver without it cannot run CUDA there either.
+  if ($self->nvlink_fabric_needed) {
+    my $why = $self->nvlink_fabric_unavailable($source);
+    die 'HGX B200/B300 on this '.$self->os.' '.( $self->release // '' ).' host: '.$why
+      .'. Without nvlsm and Fabric Manager CUDA fails with cudaErrorSystemNotReady, so '
+      .'nothing was changed on the host. Install the driver, Fabric Manager and nvlsm '
+      ."yourself\n" if defined $why;
+  }
   $plan->{source} = $source;
   push @{ $plan->{packages} }, @{ $source->{packages} // [] };
   $plan->{verify} = [ @{ $source->{verify} // [] } ];
@@ -729,7 +766,7 @@ sub _fabric_manager_why_not {
   my ( $self, $source ) = @_;
   return unless $self->fabric_manager_needed;
   return if defined $source->{fabric_manager};
-  return 'no NVIDIA Fabric Manager package for the NVSwitch on this host';
+  return 'no NVIDIA Fabric Manager package for the '.$self->fabric_label.' on this host';
 }
 
 # After resolve (the branch is exact now): the package name must be complete
@@ -741,8 +778,8 @@ sub _check_fabric_manager_source {
     ? $self->fabric_manager_unavailable($fm)
     : 'its Fabric Manager package '.( $source->{fabric_manager} // '(none)' )
       .' needs an exact driver branch, and none is known';
-  die 'The NVIDIA driver source '.$source->{name}.' has no Fabric Manager for the NVSwitch '
-    .'on this host: '.$why.'. No driver package was installed, only the package sources '
+  die 'The NVIDIA driver source '.$source->{name}.' has no Fabric Manager for the '
+    .$self->fabric_label.' on this host: '.$why.'. No driver package was installed, only the package sources '
     ."were prepared. Install the driver and a Fabric Manager of exactly its version yourself\n"
     if defined $why;
   Rex::Logger::info('  Fabric Manager package: '.$fm);
@@ -826,14 +863,14 @@ sub install_fabric_manager {
   my ( $self, $plan ) = @_;
   my $source = $plan->{source} // {};
   my $fm = $self->fabric_manager_package($source);
-  die "No Fabric Manager package is known for the NVSwitch on this host; the driver is "
-    ."installed, Fabric Manager is not\n" unless defined $fm;
+  die 'No Fabric Manager package is known for the '.$self->fabric_label.' on this host; the '
+    ."driver is installed, Fabric Manager is not\n" unless defined $fm;
   my $version = $self->installed_driver_version($source);
   die 'Cannot read the installed NVIDIA driver version ('.( $version // 'nothing' ).'); '
     .'Fabric Manager must match it exactly, so none was installed. The driver is '
     ."installed, Fabric Manager is not\n"
     unless $self->_is_driver_version($version);
-  Rex::Logger::info('  Installing NVIDIA Fabric Manager '.$fm.' '.$version.' (NVSwitch)');
+  Rex::Logger::info('  Installing NVIDIA Fabric Manager '.$fm.' '.$version.' ('.$self->fabric_label.')');
   $self->install_versioned_package($fm, $version);
   $self->verify_versioned_package($fm, $version);
   my $unit = $self->fabric_manager_service;
@@ -920,7 +957,7 @@ sub retrofit_fabric_manager {
   my @present = $self->installed_fabric_managers;
   if (@present) {
     my @other = grep { !defined $version || !defined $_->[1] || $_->[1] ne $version } @present;
-    Rex::Logger::info('NVSwitch: Fabric Manager '.join(', ', map { $_->[0].' '.( $_->[1] // 'unknown' ) } @other)
+    Rex::Logger::info($self->fabric_label.': Fabric Manager '.join(', ', map { $_->[0].' '.( $_->[1] // 'unknown' ) } @other)
       .' is installed, but the loaded NVIDIA driver is '.( $version // 'unknown' )
       .'. Fabric Manager must match the driver exactly or '.$unit.' refuses to start; '
       .'it is left as it is -- install the matching version yourself', 'warn')
@@ -929,7 +966,7 @@ sub retrofit_fabric_manager {
   }
   my $fix = 'install NVIDIA Fabric Manager of exactly the loaded driver version yourself';
   unless ($self->_is_driver_version($version)) {
-    Rex::Logger::info('NVSwitch present and no Fabric Manager installed, but the loaded '
+    Rex::Logger::info($self->fabric_label.' present and no Fabric Manager installed, but the loaded '
       .'driver version cannot be read (nvidia-smi --query-gpu=driver_version); nothing '
       .'was installed -- '.$fix, 'warn');
     return 0;
@@ -941,7 +978,7 @@ sub retrofit_fabric_manager {
     push @packages, $fm if defined $fm && !$seen{$fm}++;
   }
   unless (@packages) {
-    Rex::Logger::info('NVSwitch present and no Fabric Manager installed: no driver source '
+    Rex::Logger::info($self->fabric_label.' present and no Fabric Manager installed: no driver source '
       .'Rex::GPU knows on this '.$self->os.' host has a Fabric Manager package, so none is '
       .'installed for the loaded driver '.$version.' -- '.$fix, 'warn');
     return 0;
@@ -955,7 +992,7 @@ sub retrofit_fabric_manager {
       next;
     }
     Rex::Logger::info('  Installing NVIDIA Fabric Manager '.$fm.' '.$version
-      .' for the already-installed driver (NVSwitch)');
+      .' for the already-installed driver ('.$self->fabric_label.')');
     $self->install_versioned_package($fm, $version);
     $self->verify_versioned_package($fm, $version);
     $self->run_cmd('systemctl enable '.$unit, auto_die => 0);
@@ -963,7 +1000,7 @@ sub retrofit_fabric_manager {
       ."; the driver is unchanged\n" if $? != 0;
     return 1;
   }
-  Rex::Logger::info('NVSwitch present and no Fabric Manager installed: the package sources '
+  Rex::Logger::info($self->fabric_label.' present and no Fabric Manager installed: the package sources '
     .'configured on this host offer none for the loaded driver '.$version.' ('
     .join('; ', @why).'). No package source was added and nothing was installed -- '
     .$fix, 'warn');
@@ -1030,6 +1067,257 @@ sub _with_branch {
   return unless defined $source->{branch};
   ( my $filled = $name ) =~ s/%s/$source->{branch}/g;
   return $filled;
+}
+
+#### HGX B200/B300 NVLink fabric (karr #56) ###################################
+
+=method nvlink_fabric_packages
+
+The packages an HGX B200/B300 needs next to the driver and Fabric Manager,
+installed B<unversioned> (the newest the sources offer, as NVIDIA's own
+gpu-driver-container does: C<nvlsm> is versioned independently of the
+driver): the NVLink Subnet Manager C<nvlsm> (from NVIDIA's CUDA
+repository; it has no service of its own -- C<nvidia-fabricmanager.service>
+starts it before Fabric Manager), C<infiniband-diags> (C<ibstat>, which the
+Fabric Manager start script requires) and C<libibumad>. Empty in the base
+class; the apt layer, L<Rex::GPU::NVIDIA::Setup::Ubuntu> and
+L<Rex::GPU::NVIDIA::Setup::RHEL> fill it.
+
+=method nvlink_fabric_unavailable
+
+  my $why = $self->nvlink_fabric_unavailable($source);
+
+Host-read-only, from L</plan> on an HGX B200/B300: a reason when this setup
+knows no source for L</nvlink_fabric_packages> next to the chosen driver
+C<$source>, C<undef> otherwise. L</plan> dies with it before anything is
+changed. The base class returns a reason when there are no packages.
+
+=method install_nvlink_fabric
+
+  $self->install_nvlink_fabric($plan);
+
+The step after L</install_fabric_manager> on an HGX B200/B300
+(L</nvlink_fabric_needed>): L</warn_nvlink_kernel>, then
+L</prepare_nvlink_fabric_source>, L</install_packages> and
+L</verify_packages> of L</nvlink_fabric_packages> -- the same bypass of
+C<Rex::Pkg> as the driver, a package not installed afterwards B<dies> (the
+driver and Fabric Manager stay installed) -- and L</load_ib_umad>.
+
+=method prepare_nvlink_fabric_source
+
+  $self->prepare_nvlink_fabric_source($plan);
+
+Makes L</nvlink_fabric_packages> installable. Nothing here: on Debian and
+the RHEL family they come from the CUDA repository the driver came from.
+L<Rex::GPU::NVIDIA::Setup::Ubuntu> adds NVIDIA's CUDA repository, pinned to
+C<nvlsm> alone.
+
+=method retrofit_nvlink_fabric
+
+  my $installed = $setup->retrofit_nvlink_fabric;
+
+For an HGX B200/B300 whose driver was B<already installed>, after
+L</retrofit_fabric_manager>: L</warn_nvlink_kernel>; then the
+L</nvlink_fabric_packages> that are not installed are installed from the
+host's B<current> package sources (L</refresh_package_index> first) -- no
+repository is added, the driver is not touched -- and L</load_ib_umad>.
+Returns C<1> if it installed or loaded something, C<0> when everything was
+there already (then nothing is changed). A package still missing afterwards
+(e.g. C<nvlsm> on an Ubuntu host without NVIDIA's CUDA repository) only
+warns, naming it.
+
+=method load_ib_umad
+
+Writes C</etc/modules-load.d/ib_umad.conf> (so the module is loaded on every
+boot) and runs C<modprobe ib_umad>: the Fabric Manager start script aborts
+unless C<ib_umad> is loaded. A failed C<modprobe> warns (on Ubuntu the
+module is in C<linux-modules-extra-$kernel>), it does not die.
+
+=method warn_nvlink_kernel
+
+Warns when the running kernel (L</kernel>) is older than 5.17, which NVIDIA's
+Fabric Manager guide requires for HGX B200/B300, unless
+L</nvlink_kernel_backported>. Never stops anything: the kernel is not
+changed by Rex::GPU.
+
+=method nvlink_kernel_backported
+
+True where the distribution supports HGX B200/B300 on an older kernel with
+the needed patches backported, so L</warn_nvlink_kernel> stays quiet: the
+RHEL family (NVIDIA lists RHEL 9.6/9.8 with kernel 5.14 for B200/B300).
+False here.
+
+=method check_nvlink_fabric
+
+  my $ok = $setup->check_nvlink_fabric($fabric_manager_active);
+
+Run by L<Rex::GPU::NVIDIA/install_driver> on an HGX B200/B300 after Fabric
+Manager is started (or the host rebooted): reads C<nvidia-smi -q> and
+expects every GPU's C<Fabric> section at C<State: Completed>,
+C<Status: Success>. While it is not and C<$fabric_manager_active>, it reads
+again, L</fabric_state_poll> times at most. Returns C<1> when the fabric is
+up; otherwise it logs one loud warning with what it read and where to look,
+and returns C<0>. It never dies, and it does not change the host.
+
+=method fabric_state_poll
+
+  my ( $reads, $seconds ) = $self->fabric_state_poll;   # (12, 10)
+
+How often L</check_nvlink_fabric> reads C<nvidia-smi -q> while the fabric
+registers, and the seconds between two reads.
+
+=cut
+
+sub nvlink_fabric_packages { () }
+
+sub nvlink_fabric_unavailable {
+  my ( $self ) = @_;
+  return if $self->nvlink_fabric_packages;
+  return ref($self).' knows no package source for the NVLink Subnet Manager (nvlsm)';
+}
+
+sub prepare_nvlink_fabric_source { }
+
+sub install_nvlink_fabric {
+  my ( $self, $plan ) = @_;
+  $self->warn_nvlink_kernel;
+  my @packages = $self->nvlink_fabric_packages;
+  Rex::Logger::info('  HGX B200/B300: NVLink Subnet Manager and InfiniBand user space ('
+    .join(', ', @packages).')');
+  $self->prepare_nvlink_fabric_source($plan);
+  $self->install_packages({ packages => [ @packages ] });
+  $self->verify_packages({ verify => [ @packages ] });
+  $self->load_ib_umad;
+  return;
+}
+
+sub retrofit_nvlink_fabric {
+  my ( $self ) = @_;
+  $self->warn_nvlink_kernel;
+  my @packages = $self->nvlink_fabric_packages;
+  my @missing  = grep { !$self->_package_installed($_) } @packages;
+  $self->run_cmd(q{lsmod | grep -q '^ib_umad '}, auto_die => 0);
+  my $loaded = $? == 0;
+  return 0 if !@missing && $loaded;
+  if (@missing) {
+    Rex::Logger::info('  HGX B200/B300: installing '.join(', ', @missing)
+      .' for the already-installed driver, from the host\'s own package sources');
+    $self->refresh_package_index;
+    $self->install_packages({ packages => [ @missing ] });
+    if (my @still = grep { !$self->_package_installed($_) } @missing) {
+      Rex::Logger::info('HGX B200/B300: '.join(', ', @still).' not installed -- the package '
+        .'sources configured on this host do not offer '.( @still == 1 ? 'it' : 'them' )
+        .' (nvlsm comes from NVIDIA\'s CUDA repository). No package source was added; '
+        .'without nvlsm CUDA fails with cudaErrorSystemNotReady -- install '
+        .( @still == 1 ? 'it' : 'them' ).' yourself', 'warn');
+    }
+  }
+  $self->load_ib_umad;
+  return 1;
+}
+
+# Whether one of nvlink_fabric_packages is installed: verify_packages for it
+# alone, which dies when it is not.
+sub _package_installed {
+  my ( $self, $pkg ) = @_;
+  return eval { $self->verify_packages({ verify => [ $pkg ] }); 1 } ? 1 : 0;
+}
+
+sub load_ib_umad {
+  my ( $self ) = @_;
+  $self->file_cmd('/etc/modules-load.d/ib_umad.conf', content => "ib_umad\n");
+  $self->run_cmd('modprobe ib_umad', auto_die => 0);
+  Rex::Logger::info('modprobe ib_umad failed: the Fabric Manager start script needs the '
+    .'module, so nvidia-fabricmanager.service will not start until it is loaded (on Ubuntu '
+    .'it is in linux-modules-extra-'.( $self->kernel // '$(uname -r)' ).')', 'warn')
+    if $? != 0;
+  return;
+}
+
+sub nvlink_kernel_backported { 0 }
+
+sub warn_nvlink_kernel {
+  my ( $self ) = @_;
+  return if $self->nvlink_kernel_backported;
+  my $kernel = $self->kernel;
+  my ( $major, $minor ) = ( $kernel // '' ) =~ /^(\d+)\.(\d+)/;
+  if (!defined $major) {
+    Rex::Logger::info('HGX B200/B300: cannot read the kernel version ('.( $kernel // 'nothing' )
+      .'); NVIDIA requires kernel 5.17 or newer for the NVLink fabric', 'warn');
+    return;
+  }
+  return if $major > 5 || ( $major == 5 && $minor >= 17 );
+  Rex::Logger::info('HGX B200/B300: kernel '.$kernel.' is older than 5.17, which NVIDIA '
+    .'requires for the NVLink 5 fabric (Fabric Manager user guide); Fabric Manager and nvlsm '
+    .'may not come up on it. Boot a newer kernel -- on Ubuntu 22.04 the HWE kernel '
+    .'(linux-generic-hwe-22.04). Rex::GPU does not change the kernel', 'warn');
+  return;
+}
+
+sub fabric_state_poll { ( 12, 10 ) }
+
+sub check_nvlink_fabric {
+  my ( $self, $active ) = @_;
+  my ( $reads, $seconds ) = $self->fabric_state_poll;
+  my $want = scalar grep { ref $_ eq 'HASH' } @{ $self->gpus };
+  my @states;
+  for my $read (1 .. ( $active ? $reads : 1 )) {
+    sleep $seconds if $read > 1 && $seconds;
+    my $out = $self->run_cmd('nvidia-smi -q 2>&1', auto_die => 0);
+    @states = $self->_fabric_states($out);
+    if ($self->_fabric_complete($want, @states)) {
+      Rex::Logger::info('  [ok] NVLink fabric: Fabric State Completed, Status Success on '
+        .scalar(@states).' GPU'.( @states == 1 ? '' : 's' ));
+      return 1;
+    }
+  }
+  my $seen = @states
+    ? join('; ', map { 'GPU '.$_.': '.( $states[$_]{state} // 'no State' ).' / '
+        .( $states[$_]{status} // 'no Status' ) } 0 .. $#states)
+    : 'no Fabric section';
+  my $unit = $self->fabric_manager_service;
+  Rex::Logger::info('HGX B200/B300: the NVLink fabric is not up -- nvidia-smi -q reports '
+    .$seen.( $want > @states ? ' ('.$want.' GPUs expected)' : '' )
+    .', not State Completed / Status Success on every GPU. CUDA jobs fail with '
+    .'cudaErrorSystemNotReady until it is. Look at systemctl status '.$unit
+    .', journalctl -u '.$unit.', /var/log/nvlsm.log, lsmod | grep ib_umad and the kernel '
+    .'(5.17 or newer); after the first-deploy reboot check again with nvidia-smi -q', 'warn');
+  return 0;
+}
+
+# Pure: every "Fabric" section of `nvidia-smi -q` output, in GPU order, as
+# { state => ..., status => ... } (a key is missing when the section has no
+# such line). The first State / Status inside the section count; a line
+# indented no deeper than "Fabric" ends it.
+sub _fabric_states {
+  my ( $self, $out ) = @_;
+  my ( @states, $cur, $indent );
+  for my $line (split /\n/, $out // '') {
+    next unless $line =~ /\S/;
+    my $depth = length( ( $line =~ /^([ \t]*)/ )[0] );
+    if ($line =~ /^[ \t]*Fabric[ \t]*$/) {
+      $cur = {};
+      $indent = $depth;
+      push @states, $cur;
+      next;
+    }
+    next unless $cur;
+    if ($depth <= $indent) { undef $cur; next }
+    if ($line =~ /^[ \t]*(State|Status)[ \t]*:[ \t]*(.*?)\s*$/) {
+      $cur->{ lc $1 } //= $2;
+    }
+  }
+  return @states;
+}
+
+# Pure: at least $want sections (and at least one), each Completed / Success.
+sub _fabric_complete {
+  my ( $self, $want, @states ) = @_;
+  return 0 unless @states && @states >= $want;
+  for my $s (@states) {
+    return 0 unless ( $s->{state} // '' ) eq 'Completed' && ( $s->{status} // '' ) eq 'Success';
+  }
+  return 1;
 }
 
 =method prepare_host

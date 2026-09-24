@@ -124,11 +124,15 @@ only when the host's own package sources offer it at exactly the loaded
 driver's version; otherwise it warns and changes nothing. See the
 C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>. Hosts without
 NVSwitch are unchanged.
-HGX B200/B300 are B<not> covered: their NVSwitches are not PCI devices on
-the host, so C<nvswitch> is empty there. C<gpu_setup> installs their driver
-as for any Blackwell and then warns once that CUDA needs NVIDIA Fabric
-Manager, the NVLink Subnet Manager (C<nvlsm>), OFED/MOFED and kernel 5.17
-or newer -- install and start those yourself. GB200/GB300 NVL72 compute
+HGX B200/B300 have no NVSwitch on the host PCI bus (C<nvswitch> is empty
+there); they are recognised by the GPU device IDs, and C<gpu_setup>
+installs Fabric Manager with their driver the same way, then the NVLink
+Subnet Manager C<nvlsm>, C<infiniband-diags> and C<libibumad> (unversioned,
+from NVIDIA's CUDA repository -- on Ubuntu added for this, pinned to
+C<nvlsm> alone), loads C<ib_umad>, warns on a kernel older than 5.17
+(except on the RHEL family), and after the start checks that every GPU
+reports C<Fabric State: Completed> -- a loud warning if not, never a die.
+Where no C<nvlsm> source is known it dies before the host is changed. GB200/GB300 NVL72 compute
 trays need no Fabric Manager (it runs on the NVLink switch trays); an info
 line notes that multi-node NVLink needs C<nvidia-imex>, which is not set
 up either. See the C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>.

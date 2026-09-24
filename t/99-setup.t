@@ -256,7 +256,15 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
   use Moo;
   extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
   has answer => ( is => 'ro', default => '' );
-  sub run_cmd { my ( $self, $cmd ) = @_; $? = 0; return $cmd =~ /^apt-cache search / ? $self->answer : '' }
+  # apt-cache policy: a B300 is an HGX B200/B300 host since karr #56, so
+  # resolve_plan also asks for its Fabric Manager's candidate
+  sub run_cmd {
+    my ( $self, $cmd ) = @_;
+    $? = 0;
+    return $cmd =~ /^apt-cache search / ? $self->answer
+      : $cmd =~ /apt-cache policy (\S+)/ ? "$1:\n  Installed: (none)\n  Candidate: 1.0-1\n"
+      : '';
+  }
 
   # the shape an `ubuntu-drivers list` based setup (karr #42) would take:
   # only the package choice is replaced, the requirement check stays
