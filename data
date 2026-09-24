@@ -1,0 +1,18 @@
+---
+claimed_at: 2026-09-24T04:22:53Z
+claimed_by: claude-main
+class: standard
+completed: 2026-09-24T04:22:53Z
+created: 2026-09-24T04:11:41Z
+id: 62
+priority: low
+started: 2026-09-24T04:15:01Z
+status: done
+title: 'POD-Link L</configure_containerd> matcht nach PodWeaver nicht mehr: einzige
+  ''=method name(args)''-Zeile im gesamten dist'
+updated: 2026-09-24T04:22:53Z
+---
+
+lib/Rex/GPU/NVIDIA.pm:625 ist '=method configure_containerd($runtime)' -- als einzige von allen '=method'/'=attr'-Zeilen im ganzen lib/-Baum traegt sie die Argumentliste im Namen (grep -rn '^=method .*(' lib/ liefert genau diese eine Zeile). Pod::Weaver macht daraus '=head2 configure_containerd($runtime)'. Der interne Link 'L</configure_containerd>' in Zeile 565 derselben Datei zeigt aber auf den Anker ohne Klammern und matcht die tatsaechliche Ueberschrift nach dem Weaving nicht mehr exakt -- der einzige aus podchecker's ~200 'unresolved internal link'-Meldungen, der NICHT ein reines Pre-Weave-Artefakt von '=method' ist (Cross-Check: comm -23 gegen alle per '=method|=attr|=func' dokumentierten Namen liefert nur 'configure_containerd', wegen der Klammern im Namen). Fix: Klammern aus der '=method'-Zeile entfernen (Konsistenz mit install_driver, install_container_toolkit etc. im selben File, die auch Argumente haben aber keine Klammern in der Ueberschrift tragen), oder den Link auf 'L<configure_containerd($runtime)|/configure_containerd($runtime)>' aendern. Rein kosmetisch/POD, kein Verhaltenscode -- kann direkt oder ueber rex-gpu-worker erledigt werden.
+
+Erledigt in 3953362.
