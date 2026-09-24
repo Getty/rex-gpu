@@ -3,6 +3,7 @@
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 run: nvidia-smi -L 2>&1
 run(auto_die=default): uname -r
+run: cat /etc/os-release 2>/dev/null
 pkg: epel-release ensure=present
 run: dnf config-manager --set-enabled crb 2>/dev/null || true
 run: uname -m

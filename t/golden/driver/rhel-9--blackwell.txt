@@ -1,15 +1,17 @@
-# golden: driver/rocky-10--none
+# golden: driver/rhel-9--blackwell
 # Host interactions Rex::GPU emits, in order. Regenerate with
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 run: nvidia-smi -L 2>&1
 run(auto_die=default): uname -r
 run: cat /etc/os-release 2>/dev/null
-pkg: epel-release ensure=present
-run: dnf config-manager --set-enabled crb 2>/dev/null || true
+run: dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm
+run: rpm -q epel-release 2>&1
 run: uname -m
-run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel10/x86_64/cuda-rhel10.repo 2>/dev/null
+run: subscription-manager repos --enable codeready-builder-for-rhel-9-x86_64-rpms
+run: dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo 2>/dev/null
 run: dnf clean expire-cache
-run: dnf install -y kernel-devel-matched kernel-headers kmod-nvidia-open-dkms nvidia-driver nvidia-driver-cuda
+run: dnf module enable nvidia-driver:open-dkms -y 2>/dev/null || true
+run: dnf install -y kernel-devel-matched kernel-headers nvidia-open
 run: rpm -q nvidia-driver 2>&1
 file: /etc/modprobe.d/blacklist-nouveau.conf
   | blacklist nouveau

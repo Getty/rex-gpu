@@ -243,6 +243,12 @@ L<Rex::GPU::NVIDIA::Setup::SUSE> on openSUSE, and C<undef> elsewhere
 (L</install_driver> then dies). Asked only when neither the C<setup> option
 nor C<set gpu_nvidia_setup> chose a class (see L</setup_for>).
 
+The RHEL family is what L<Rex::Commands::Gather/is_redhat> accepts, plus the
+names Rex reports for Rocky Linux, AlmaLinux and CentOS Stream when
+C<lsb_release> is installed and C<is_redhat> does not know them: C<Rocky>,
+C<RockyLinux>, C<AlmaLinux>, C<CentOSStream>. L</install_container_toolkit>
+recognises the same names. Reads nothing from the host.
+
 =cut
 
 # Ubuntu is recognised by its OS name exactly as the old $os eq 'Ubuntu'
@@ -259,7 +265,23 @@ sub setup_class_for_os {
   }
   return 'Rex::GPU::NVIDIA::Setup::RHEL' if is_redhat();
   return 'Rex::GPU::NVIDIA::Setup::SUSE' if is_suse();
+  return 'Rex::GPU::NVIDIA::Setup::RHEL' if _rhel_family_name(operating_system());
   return;
+}
+
+# karr #39: with lsb_release installed, Rex 1.16 names the OS by
+# `lsb_release -s -i`, and its is_redhat list misses the RHEL rebuilds'
+# distributor IDs. Checked against the lsb_release scripts themselves
+# (2026-09-24): redhat-lsb-core 4.1 (EL8, EL9 devel repos) prints Rocky,
+# AlmaLinux, CentOSStream, RedHatEnterprise; EPEL 9's lsb_release 3.2 (reads
+# /etc/os-release) prints RockyLinux, AlmaLinux, CentOS, RedHatEnterprise.
+# Without lsb_release Rex reports Redhat (RHEL, Rocky, Alma) or CentOS, which
+# is_redhat knows, as it knows RedHatEnterprise. Only the missing ones are
+# listed, as exact names: an OS we cannot name is still refused, and nothing
+# is read from the host to decide (the class is chosen before any probe).
+sub _rhel_family_name {
+  my ($os) = @_;
+  return ($os // '') =~ /^(?:Rocky|RockyLinux|AlmaLinux|CentOSStream)$/ ? 1 : 0;
 }
 
 =method setup_for
@@ -428,7 +450,11 @@ downloaded and dearmored to a temporary file that replaces
 C</usr/share/keyrings/nvidia-container-toolkit-keyring.gpg> only when it is
 non-empty, so a re-run refreshes a rotated key, and a failed download or
 dearmor dies. Then the signed APT source list is written. On RHEL the
-C<.repo> file is fetched via C<curl>; on openSUSE Leap the base repository
+C<.repo> file is downloaded with C<curl -f> to a temporary file that
+replaces C</etc/yum.repos.d/nvidia-container-toolkit.repo> only when it
+contains the C<[nvidia-container-toolkit]> section; a failed download (e.g.
+an HTTP error) or a file without that section dies and leaves an existing
+C<.repo> as it was. On openSUSE Leap the base repository
 URL is added directly (zypper cannot parse RPM C<.repo> files directly).
 
 The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
@@ -445,6 +471,7 @@ sub install_container_toolkit {
   my $family = is_debian() ? 'debian'
     : is_redhat() ? 'redhat'
     : is_suse() ? 'suse'
+    : _rhel_family_name($os) ? 'redhat'
     : undef;
   die "Unsupported OS for NVIDIA Container Toolkit: $os\n" unless $family;
 
@@ -788,9 +815,32 @@ sub _install_toolkit_keyring {
   die "NVIDIA Container Toolkit keyring $keyring is missing or empty\n" if $? != 0;
 }
 
-sub _install_toolkit_redhat {
-  run "curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo | tee /etc/yum.repos.d/nvidia-container-toolkit.repo",
+# karr #44, the k38 pattern for the dnf .repo: `curl -s -L | tee` wrote an
+# HTTP error page into /etc/yum.repos.d and dnf failed later with a parse
+# error. curl -f fails on an HTTP error; the download lands in a .repo.tmp
+# next to the target (dnf reads only *.repo) and replaces it only when it has
+# the [nvidia-container-toolkit] section. Every failure dies, leaving an
+# existing .repo as it was.
+sub _install_toolkit_repo_file {
+  my ($repo) = @_;
+  my $url = 'https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo';
+  my $tmp = "$repo.tmp";
+
+  run "curl -fsSL $url -o $tmp", auto_die => 0;
+  if ($? != 0) {
+    run "rm -f $tmp", auto_die => 0;
+    die "Could not download the NVIDIA Container Toolkit repository file ($url)\n";
+  }
+  run "grep -q '^\\[nvidia-container-toolkit\\]' $tmp && chmod 0644 $tmp && mv -f $tmp $repo",
     auto_die => 0;
+  my $failed = $? != 0;
+  run "rm -f $tmp", auto_die => 0;
+  die "The NVIDIA Container Toolkit repository file from $url has no [nvidia-container-toolkit] section or could not be moved into place; $repo was not changed\n"
+    if $failed;
+}
+
+sub _install_toolkit_redhat {
+  _install_toolkit_repo_file('/etc/yum.repos.d/nvidia-container-toolkit.repo');
   run "dnf clean expire-cache", auto_die => 0;
   run "dnf install -y nvidia-container-toolkit", auto_die => 0;
   my $check = run "rpm -q nvidia-container-toolkit 2>&1", auto_die => 0;

@@ -1,6 +1,19 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - install_driver and install_container_toolkit accept Rocky Linux,
+    AlmaLinux and CentOS Stream under the names Rex reports when
+    lsb_release is installed (Rocky, RockyLinux, AlmaLinux, CentOSStream),
+    which Rex's is_redhat does not know; they died "Unsupported OS" there.
+    On such a host epel-release (and the RHEL 10 versionlock plugin) is
+    installed with dnf and checked with rpm -q, since Rex::Pkg cannot run
+    there. gpu_detect still installs pciutils through Rex::Pkg and can die
+    on such a host. On RHEL itself (/etc/os-release ID=rhel, read by the
+    RHEL setup) EPEL comes from its release RPM (epel-release-latest-N) and
+    must be installed or the call dies before the driver, and CodeReady
+    Builder is enabled with subscription-manager (a failure only warns);
+    `pkg epel-release` had no candidate there. Rocky and Alma without
+    lsb_release are unchanged. Not hardware-verified (karr #39)
   - install_driver counts a driver as installed only if nvidia-smi -L lists
     a GPU and libcuda.so.1 is in the linker cache (ldconfig -p). A host with
     a working nvidia-smi but no CUDA library now gets a warning and the
@@ -28,9 +41,12 @@ Revision history for Rex-GPU
     dpkg lock timeout instead of Rex::Pkg, so the dpkg lock held after the
     first-deploy reboot no longer fails the install. The repository key is
     replaced on every install (a rotated key is picked up), and a failed
-    download or dearmor dies instead of being ignored. openSUSE now checks
-    the install with rpm -q and dies if the package is missing. Not
-    hardware-verified (karr #37, #38, #42, #27)
+    download or dearmor dies instead of being ignored. On RHEL/Rocky/Alma
+    the .repo file is fetched with curl -f and put in place only if it has
+    the [nvidia-container-toolkit] section, so an HTTP error page no longer
+    lands in /etc/yum.repos.d: the call dies and an existing .repo is kept.
+    openSUSE now checks the install with rpm -q and dies if the package is
+    missing. Not hardware-verified (karr #37, #38, #42, #27, #44)
   - install_driver on openSUSE Leap verifies every driver install: the kmp
     meta package and the kernel module package it requires must be
     installed (rpm -q --whatprovides), or it dies with "... not installed

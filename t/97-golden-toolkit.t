@@ -48,6 +48,27 @@ golden_is(
   'toolkit/rocky-9--not-installed'
 );
 
+# karr #44: the .repo download fails (HTTP error: curl -f exits 22) or the
+# file has no [nvidia-container-toolkit] section (e.g. a captive portal page
+# served with 200): dies before dnf, the temp file removed, the .repo left.
+golden_is(
+  toolkit_on(host_profile('rocky-9', responses => [
+    [ qr{^curl -fsSL https://nvidia\.github\.io/libnvidia-container/stable/rpm/nvidia-container-toolkit\.repo } => 'curl: (22) The requested URL returned error: 404', 22 ]
+  ])),
+  'toolkit/rocky-9--repo-download-failed'
+);
+golden_is(
+  toolkit_on(host_profile('rocky-9', responses => [
+    [ qr{^grep -q '\^\\\[nvidia-container-toolkit\\\]' } => '', 1 ]
+  ])),
+  'toolkit/rocky-9--repo-without-section'
+);
+for my $os (qw( rocky-9 rhel-9 rocky-9-lsb alma-9-lsb )) {
+  my @lines = @{ toolkit_on(host_profile($os))->{lines} };
+  is((grep { /curl / && !/curl -fsSL / } @lines), 0, $os.': the .repo is fetched with curl -f');
+  is((grep { /\| tee / } @lines), 0, $os.': nothing is piped into /etc/yum.repos.d');
+}
+
 # openSUSE (karr #27): a failed zypper install dies on rpm -q, as on RHEL.
 golden_is(
   toolkit_on(host_profile('leap-15.6', responses => [

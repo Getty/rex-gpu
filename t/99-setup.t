@@ -157,7 +157,8 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
   is($plan->{source}{module_stream}, '580-dkms', '... stream 580-dkms decided in plan');
 
   my $rec = record_host(host => host_profile('rocky-9'), code => sub {
-    $plan = $RHEL->new(os => 'Redhat', release => '8.10', kernel => '4.18.0-553.el8_10.x86_64')->plan;
+    $plan = $RHEL->new(os => 'Redhat', release => '8.10', kernel => '4.18.0-553.el8_10.x86_64',
+      os_release => { ID => 'rocky' })->plan;
   });
   is_deeply($rec->{lines}, [], 'RHEL 8, facts given to new(): plan reads nothing from the host');
   is_deeply($plan->{packages},
@@ -494,6 +495,93 @@ is($SUSE->repo_url('15.6'), 'https://download.nvidia.com/opensuse/leap/15.6/',
     'Leap 16, open up to 580: no source fits');
   like($@, qr/nvidia-gfx-G07-open: installs the newest branch it carries, which can be newer than 580; nvidia-gfx-G06: proprietary kernel module, the open one is needed/,
     '... the newest-branch source never passes a max bound');
+}
+
+#### karr #39: the RHEL family under the names Rex reports with lsb_release
+
+{
+  # redhat-lsb-core 4.1: Rocky, AlmaLinux, CentOSStream, RedHatEnterprise;
+  # EPEL 9 lsb_release: RockyLinux, AlmaLinux, CentOS, RedHatEnterprise.
+  for my $name (qw( Rocky RockyLinux AlmaLinux CentOSStream CentOS RedHatEnterprise Redhat )) {
+    my $class;
+    my $rec = record_host(host => host_profile('rocky-9', os => $name),
+      code => sub { $class = Rex::GPU::NVIDIA->setup_class_for_os });
+    is($class, $RHEL, "$name => $RHEL");
+    is_deeply($rec->{lines}, [], "$name: resolving the class runs nothing");
+  }
+  # exact names only: an OS we cannot name is still refused
+  for my $name (qw( OracleLinux Rockylinux2 NotRocky )) {
+    my $class;
+    record_host(host => host_profile('rocky-9', os => $name),
+      code => sub { $class = Rex::GPU::NVIDIA->setup_class_for_os });
+    is($class, undef, "$name => no Setup class");
+  }
+}
+
+{
+  my $kv = $RHEL->_parse_os_release(qq{NAME="Red Hat Enterprise Linux"\nID="rhel"\nID_LIKE='fedora'\nVERSION_ID=9.6\n# comment\n\nPLATFORM_ID="platform:el9"});
+  is_deeply($kv, { NAME => 'Red Hat Enterprise Linux', ID => 'rhel', ID_LIKE => 'fedora',
+    VERSION_ID => '9.6', PLATFORM_ID => 'platform:el9' }, 'os-release parsed, quotes removed');
+  is($RHEL->new(os => 'Redhat', os_release => { ID => 'rhel' })->is_rhel, 1, 'ID=rhel is RHEL');
+  is($RHEL->new(os => 'Redhat', os_release => { ID => 'rocky', ID_LIKE => 'rhel centos fedora' })->is_rhel, 0,
+    'ID_LIKE=rhel is not RHEL itself');
+  is($RHEL->new(os => 'Redhat', os_release => {})->is_rhel, 0, 'no os-release: not RHEL (the clone path)');
+
+  my $rec = record_host(host => host_profile('rocky-9', responses => [
+      [ 'cat /etc/os-release 2>/dev/null' => '', 1 ]
+    ]),
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
+  is($rec->{error}, undef, 'unreadable /etc/os-release: installs as before');
+  ok((grep { $_ eq 'pkg: epel-release ensure=present' } @{ $rec->{lines} }), '... with epel-release via pkg');
+}
+
+{
+  # Rex::Pkg dies ("OS/Provider not supported") on a name is_redhat does not
+  # know: no helper may go through pkg there.
+  my $rec = record_host(host => host_profile('rocky-9-lsb', release => '10.0'),
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('volta')) });
+  is($rec->{error}, undef, 'Rocky (lsb) 10 + V100: lives');
+  is((grep { /^pkg: / } @{ $rec->{lines} }), 0, '... no Rex::Pkg call');
+  ok((grep { $_ eq 'run: dnf install -y python3-dnf-plugin-versionlock' } @{ $rec->{lines} }),
+    '... versionlock plugin installed with dnf directly');
+  ok((grep { $_ eq 'run: rpm -q python3-dnf-plugin-versionlock 2>&1' } @{ $rec->{lines} }),
+    '... and verified with rpm -q');
+
+  $rec = record_host(host => host_profile('rocky-9-lsb', responses => [
+      [ 'rpm -q epel-release 2>&1' => 'package epel-release is not installed', 1 ]
+    ]),
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
+  like($rec->{error}, qr/^epel-release not installed after dnf install/, 'Rocky (lsb), EPEL missing: dies');
+  is((grep { /cuda-rhel9\.repo|kernel-devel/ } @{ $rec->{lines} }), 0, '... before the CUDA repo and any driver package');
+}
+
+{
+  # RHEL itself: EPEL from its release RPM, CRB via subscription-manager.
+  my $rec = record_host(host => host_profile('rhel-9', responses => [
+      [ 'rpm -q epel-release 2>&1' => 'package epel-release is not installed', 1 ]
+    ]),
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
+  like($rec->{error}, qr/^epel-release not installed after dnf install/, 'RHEL 9, EPEL RPM did not install: dies');
+  is((grep { /cuda-rhel9\.repo|kernel-devel/ } @{ $rec->{lines} }), 0, '... before the CUDA repo and any driver package');
+
+  $rec = record_host(host => host_profile('rhel-9', responses => [
+      [ qr{^subscription-manager repos } => 'This system has no repositories available through subscriptions.', 1 ]
+    ]),
+    code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
+  is($rec->{error}, undef, 'RHEL 9, CRB cannot be enabled: no die');
+  ok((grep { $_->[0] eq 'warn' && $_->[1] =~ /codeready-builder-for-rhel-9-x86_64-rpms/ } @{ $rec->{logs} }),
+    '... but a warning naming the repository');
+
+  for my $release (qw( 8.10 10.0 )) {
+    my ($major) = $release =~ /^(\d+)/;
+    $rec = record_host(host => host_profile('rhel-9', release => $release),
+      code => sub { Rex::GPU::NVIDIA::install_driver(gpu => gpu_fixture('ada')) });
+    ok((grep { $_ eq "run: dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-$major.noarch.rpm" } @{ $rec->{lines} }),
+      "RHEL $release: epel-release-latest-$major");
+    ok((grep { $_ eq "run: subscription-manager repos --enable codeready-builder-for-rhel-$major-x86_64-rpms" } @{ $rec->{lines} }),
+      "RHEL $release: codeready-builder-for-rhel-$major");
+    is((grep { /powertools|--set-enabled crb/ } @{ $rec->{lines} }), 0, "RHEL $release: no crb/powertools");
+  }
 }
 
 done_testing;

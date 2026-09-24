@@ -148,11 +148,45 @@ my %HOST = (
   },
   'rocky-9' => {
     os => 'Redhat', release => '9.6',
-    responses => [ [ 'uname -r' => '5.14.0-570.17.1.el9_6.x86_64', 0 ] ]
+    responses => [
+      [ 'uname -r' => '5.14.0-570.17.1.el9_6.x86_64', 0 ],
+      [ 'cat /etc/os-release 2>/dev/null' => _os_release('Rocky Linux', 'rocky', 'rhel centos fedora', '9.6'), 0 ]
+    ]
   },
   'rocky-10' => {
     os => 'Redhat', release => '10.0',
-    responses => [ [ 'uname -r' => '6.12.0-55.12.1.el10_0.x86_64', 0 ] ]
+    responses => [
+      [ 'uname -r' => '6.12.0-55.12.1.el10_0.x86_64', 0 ],
+      [ 'cat /etc/os-release 2>/dev/null' => _os_release('Rocky Linux', 'rocky', 'rhel centos fedora', '10.0'), 0 ]
+    ]
+  },
+  # karr #39: the same kind of hosts with lsb_release installed. Rex then
+  # takes the name from `lsb_release -s -i`: redhat-lsb-core 4.1 prints
+  # "Rocky" for Rocky Linux, EPEL 9's lsb_release "RockyLinux"; both print
+  # "AlmaLinux" for AlmaLinux. Rex 1.16's is_redhat knows none of them.
+  'rocky-9-lsb' => {
+    os => 'Rocky', release => '9.6',
+    responses => [
+      [ 'uname -r' => '5.14.0-570.17.1.el9_6.x86_64', 0 ],
+      [ 'cat /etc/os-release 2>/dev/null' => _os_release('Rocky Linux', 'rocky', 'rhel centos fedora', '9.6'), 0 ]
+    ]
+  },
+  'alma-9-lsb' => {
+    os => 'AlmaLinux', release => '9.6',
+    responses => [
+      [ 'uname -r' => '5.14.0-570.17.1.el9_6.x86_64', 0 ],
+      [ 'cat /etc/os-release 2>/dev/null' => _os_release('AlmaLinux', 'almalinux', 'rhel centos fedora', '9.6'), 0 ]
+    ]
+  },
+  # RHEL itself, no lsb_release (RHEL 9 ships none): Rex reads
+  # /etc/redhat-release and reports "Redhat", as for Rocky/Alma. Only
+  # /etc/os-release (ID=rhel) tells them apart.
+  'rhel-9' => {
+    os => 'Redhat', release => '9.6',
+    responses => [
+      [ 'uname -r' => '5.14.0-570.12.1.el9_6.x86_64', 0 ],
+      [ 'cat /etc/os-release 2>/dev/null' => _os_release('Red Hat Enterprise Linux', 'rhel', 'fedora', '9.6'), 0 ]
+    ]
   },
   'leap-15.6' => {
     os => 'SuSE', release => '15.6',
@@ -163,6 +197,17 @@ my %HOST = (
     responses => [ [ 'uname -r' => '6.12.0-160000.26-default', 0 ] ]
   }
 );
+
+# The os-release(5) lines Setup::RHEL reads (cat output: last newline chomped).
+sub _os_release {
+  my ( $name, $id, $id_like, $version_id ) = @_;
+  return join("\n",
+    'NAME="'.$name.'"',
+    'VERSION="'.$version_id.'"',
+    'ID="'.$id.'"',
+    'ID_LIKE="'.$id_like.'"',
+    'VERSION_ID="'.$version_id.'"');
+}
 
 sub host_names { sort keys %HOST }
 
