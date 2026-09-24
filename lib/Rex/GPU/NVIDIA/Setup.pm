@@ -1,7 +1,7 @@
 # ABSTRACT: Base class of the per-distro NVIDIA driver setups (experimental)
 
 package Rex::GPU::NVIDIA::Setup;
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 use Moo;
 use Carp qw( croak );
 use Rex::Commands::File ();

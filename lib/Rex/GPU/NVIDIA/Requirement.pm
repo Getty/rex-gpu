@@ -1,7 +1,7 @@
 # ABSTRACT: What NVIDIA driver a GPU generation needs (experimental)
 
 package Rex::GPU::NVIDIA::Requirement;
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 use Moo;
 use Carp qw( croak );
 use Scalar::Util qw( blessed );

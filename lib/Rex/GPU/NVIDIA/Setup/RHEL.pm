@@ -1,7 +1,7 @@
 # ABSTRACT: NVIDIA driver setup for RHEL, Rocky, AlmaLinux and CentOS Stream (experimental)
 
 package Rex::GPU::NVIDIA::Setup::RHEL;
-our $VERSION = '0.002';
+our $VERSION = '0.003';
 use Moo;
 use Rex::Commands::Gather ();
 use Rex::Logger ();
