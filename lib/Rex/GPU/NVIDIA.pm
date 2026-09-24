@@ -159,9 +159,32 @@ checks C<systemctl is-active> and only warns if the unit is not running
 
 The package: Ubuntu C<nvidia-fabricmanager-NNN> of the chosen C<-server>
 branch; Debian 12/13 and RHEL/Rocky/Alma C<nvidia-fabricmanager> from
-NVIDIA's CUDA repository. If a working driver is already installed, no
-Fabric Manager is installed (the driver's package source is unknown);
-C<install_driver> only warns when the unit is not active. Omitted or empty
+NVIDIA's CUDA repository.
+
+If a working driver is already installed (e.g. an HGX host provisioned
+before Rex::GPU installed Fabric Manager), the driver is left alone and
+L<Rex::GPU::NVIDIA::Setup/retrofit_fabric_manager> decides, host-read-only
+first:
+
+=over
+
+=item * a Fabric Manager package is already installed: nothing is changed;
+if its version is not the loaded driver's (C<nvidia-smi
+--query-gpu=driver_version>) it warns;
+
+=item * none is: after C<apt-get update> (apt; dnf refreshes expired
+metadata itself) it asks the host's B<current> package sources -- C<apt-cache
+madison> / C<dnf list --showduplicates> -- for the same package name a fresh
+install would use, at exactly the loaded driver's version (on apt a
+simulated install must also remove nothing). Offered: installed, checked
+with C<dpkg-query> / C<rpm -q>, the unit enabled and started; a failure
+there dies, the driver untouched. Not offered, the version unreadable, or
+no package name known (openSUSE): it warns with the reason and the version
+needed, and installs nothing. No package source is ever added for this.
+
+=back
+
+Then, as after an install, it warns if the unit is not active. Omitted or empty
 (the default, and every caller that finds its GPUs without C<lspci>): no
 Fabric Manager, nothing changes. HGX B200/B300 are not detected as NVSwitch
 hosts -- their NVSwitches are not PCI devices on the host -- and need
@@ -257,10 +280,15 @@ sub install_driver {
     die "Unsupported OS for NVIDIA driver installation: ".$probe->os."\n";
   }
   unless ($setup->install) {
-    # Already installed: the driver's package source is unknown, so no Fabric
-    # Manager is installed over it -- but an NVSwitch host without one cannot
-    # run CUDA, so say so (karr #23).
-    _check_fabric_manager($setup) if $setup->fabric_manager_needed;
+    # Already installed (karr #50): Fabric Manager only if the host's own
+    # package sources offer it at the loaded driver's exact version -- no
+    # source is added, the driver is not touched; otherwise it only warns.
+    # The driver runs, so a Fabric Manager installed now can start now.
+    if ($setup->fabric_manager_needed) {
+      run "systemctl start ".$setup->fabric_manager_service, auto_die => 0
+        if $setup->retrofit_fabric_manager;
+      _check_fabric_manager($setup);
+    }
     return;
   }
 
@@ -767,8 +795,8 @@ sub _check_fabric_manager {
   Rex::Logger::info("NVSwitch present but $unit is not active: CUDA fails with "
     ."cudaErrorSystemNotReady until NVIDIA Fabric Manager of the driver's exact version runs. "
     ."After the reboot that loads the NVIDIA driver: systemctl start $unit; if it is not "
-    ."installed (install_driver installs it only together with the driver), install it "
-    ."yourself", "warn");
+    ."installed (install_driver installs it with the driver, or for an existing driver only "
+    ."from the host's own package sources), install it yourself", "warn");
   return 0;
 }
 

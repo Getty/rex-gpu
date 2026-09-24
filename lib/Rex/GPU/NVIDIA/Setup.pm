@@ -100,8 +100,10 @@ read. Empty (the default): no Fabric Manager, nothing changes. Non-empty: the
 driver source must name a Fabric Manager package (C<fabric_manager>, see
 L</sources>) -- a source without one is rejected with that reason by
 L</select_source> -- and L</install_fabric_manager> runs after the driver
-packages are verified. A caller that finds its GPUs without C<lspci> and
-passes none gets no Fabric Manager.
+packages are verified. On a host whose driver is already installed,
+L<Rex::GPU::NVIDIA/install_driver> runs L</retrofit_fabric_manager>
+instead. A caller that finds its GPUs without C<lspci> and passes none gets
+no Fabric Manager.
 
 =method fabric_manager_needed
 
@@ -768,6 +770,162 @@ sub install_fabric_manager {
   die 'systemctl enable '.$unit.' failed after installing '.$fm.' '.$version."\n"
     if $? != 0;
   return;
+}
+
+=method retrofit_fabric_manager
+
+  my $installed = $setup->retrofit_fabric_manager;
+
+For a host whose driver was B<already installed> (L</already_installed>)
+and that has NVSwitches (L</fabric_manager_needed>) -- e.g. an HGX host
+provisioned before Rex::GPU installed Fabric Manager. Returns C<1> after
+installing Fabric Manager, C<0> otherwise; it never changes the driver or
+the host's package sources. In this order:
+
+=over
+
+=item * L</loaded_driver_version>: the version of the driver that runs.
+
+=item * L</installed_fabric_managers>: a Fabric Manager package is already
+on the host -- nothing is installed or changed. If its version is not the
+loaded driver's, it warns (the version change is the maintainer's).
+
+=item * the loaded driver version is unreadable: warn, nothing installed.
+
+=item * the Fabric Manager package names of L</sources> -- the same names a
+fresh install uses (L</fabric_manager_package>), C<%s> filled with the
+loaded driver's branch. None (openSUSE, Debian C<non-free> only): warn.
+
+=item * L</refresh_package_index>, then per name
+L</fabric_manager_version_unavailable>: whether the host's B<current>
+package sources offer it at exactly the loaded driver's version. No
+repository is added. The first one that does is installed with
+L</install_versioned_package>, checked with L</verify_versioned_package>,
+and L</fabric_manager_service> is enabled; a failure there dies (the driver
+is untouched). None does: warn with each reason and the version needed.
+
+=back
+
+L<Rex::GPU::NVIDIA/install_driver> runs it and starts the unit after an
+install.
+
+=method installed_fabric_managers
+
+  my @fm = $self->installed_fabric_managers;   # ([ 'nvidia-fabricmanager-580', '580.95.05' ])
+
+The Fabric Manager packages on the host, whatever their version or branch,
+each C<[ name, upstream version ]>. Empty in the base class.
+
+=method loaded_driver_version
+
+  my $version = $self->loaded_driver_version;   # "580.95.05"
+
+The version of the driver that runs, from C<nvidia-smi
+--query-gpu=driver_version>: what Fabric Manager must match. C<undef>
+unless every GPU reports the same driver version.
+
+=method refresh_package_index
+
+Refreshes the package index before L</fabric_manager_version_unavailable>
+is asked. Nothing in the base class and on the rpm layer (dnf refreshes
+expired metadata itself, as for a fresh install); C<apt-get update> on the
+apt layer.
+
+=method fabric_manager_version_unavailable
+
+  my $why = $self->fabric_manager_version_unavailable($pkg, $version);
+
+C<undef> when the host's configured package sources offer C<$pkg> at
+upstream version C<$version> and installing it removes nothing; a reason
+otherwise. Host-read-only. The base class cannot tell and returns a reason.
+
+=cut
+
+sub retrofit_fabric_manager {
+  my ( $self ) = @_;
+  return 0 unless $self->fabric_manager_needed;
+  my $unit    = $self->fabric_manager_service;
+  my $version = $self->loaded_driver_version;
+  my @present = $self->installed_fabric_managers;
+  if (@present) {
+    my @other = grep { !defined $version || !defined $_->[1] || $_->[1] ne $version } @present;
+    Rex::Logger::info('NVSwitch: Fabric Manager '.join(', ', map { $_->[0].' '.( $_->[1] // 'unknown' ) } @other)
+      .' is installed, but the loaded NVIDIA driver is '.( $version // 'unknown' )
+      .'. Fabric Manager must match the driver exactly or '.$unit.' refuses to start; '
+      .'it is left as it is -- install the matching version yourself', 'warn')
+      if @other;
+    return 0;
+  }
+  my $fix = 'install NVIDIA Fabric Manager of exactly the loaded driver version yourself';
+  unless ($self->_is_driver_version($version)) {
+    Rex::Logger::info('NVSwitch present and no Fabric Manager installed, but the loaded '
+      .'driver version cannot be read (nvidia-smi --query-gpu=driver_version); nothing '
+      .'was installed -- '.$fix, 'warn');
+    return 0;
+  }
+  my ($branch) = $version =~ /^(\d+)\./;
+  my ( %seen, @packages );
+  for my $source ($self->sources) {
+    my $fm = $self->fabric_manager_package({ %$source, branch => $branch });
+    push @packages, $fm if defined $fm && !$seen{$fm}++;
+  }
+  unless (@packages) {
+    Rex::Logger::info('NVSwitch present and no Fabric Manager installed: no driver source '
+      .'Rex::GPU knows on this '.$self->os.' host has a Fabric Manager package, so none is '
+      .'installed for the loaded driver '.$version.' -- '.$fix, 'warn');
+    return 0;
+  }
+  $self->refresh_package_index;
+  my @why;
+  for my $fm (@packages) {
+    my $why = $self->fabric_manager_version_unavailable($fm, $version);
+    if (defined $why) {
+      push @why, $why;
+      next;
+    }
+    Rex::Logger::info('  Installing NVIDIA Fabric Manager '.$fm.' '.$version
+      .' for the already-installed driver (NVSwitch)');
+    $self->install_versioned_package($fm, $version);
+    $self->verify_versioned_package($fm, $version);
+    $self->run_cmd('systemctl enable '.$unit, auto_die => 0);
+    die 'systemctl enable '.$unit.' failed after installing '.$fm.' '.$version
+      ."; the driver is unchanged\n" if $? != 0;
+    return 1;
+  }
+  Rex::Logger::info('NVSwitch present and no Fabric Manager installed: the package sources '
+    .'configured on this host offer none for the loaded driver '.$version.' ('
+    .join('; ', @why).'). No package source was added and nothing was installed -- '
+    .$fix, 'warn');
+  return 0;
+}
+
+sub installed_fabric_managers { () }
+
+sub loaded_driver_version {
+  my ( $self ) = @_;
+  my $out = $self->run_cmd('nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>&1',
+    auto_die => 0);
+  return if $? != 0 || !defined $out;
+  my %v;
+  $v{ s/^\s+|\s+$//gr } = 1 for grep { /\S/ } split /\n/, $out;
+  return unless keys %v == 1;
+  my ($version) = keys %v;
+  return $self->_is_driver_version($version) ? $version : undef;
+}
+
+sub refresh_package_index { }
+
+sub fabric_manager_version_unavailable {
+  my ( $self, $pkg ) = @_;
+  return ref($self).' cannot list the versions of '.$pkg.' its package sources offer';
+}
+
+# Pure: is this package name a Fabric Manager (nvidia-fabricmanager,
+# nvidia-fabricmanager-580, the older nvidia-fabric-manager)? Not -dev or
+# libnvidia-nscq.
+sub _is_fabric_manager_name {
+  my ( $self, $name ) = @_;
+  return defined $name && $name =~ /\Anvidia-fabric-?manager(?:-\d+)?\z/ ? 1 : 0;
 }
 
 sub installed_driver_version {

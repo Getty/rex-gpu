@@ -462,6 +462,11 @@ my @READ_ONLY = (
   qr{${RUN}dpkg-query -W },
   qr{${RUN}apt-cache madison },
   qr{${RUN}systemctl is-active },
+  # karr #50: the Fabric Manager retrofit's probes
+  qr{${RUN}nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>&1$},
+  qr{${RUN}rpm -qa },
+  qr{${RUN}LC_ALL=C apt-get -o DPkg::Lock::Timeout=\d+ -s install },
+  qr{${RUN}dnf -q list --showduplicates --available },
   qr{^can_run: }
 );
 

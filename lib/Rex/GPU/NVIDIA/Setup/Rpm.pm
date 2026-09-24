@@ -123,6 +123,25 @@ sub verify_versioned_package {
     unless defined $installed && $installed eq $version;
 }
 
+=method installed_fabric_managers
+
+C<rpm -qa> of C<nvidia-fabric*manager*>: every installed Fabric Manager
+package with its version.
+
+=cut
+
+sub installed_fabric_managers {
+  my ( $self ) = @_;
+  my $out = $self->run_cmd(q{rpm -qa --qf '%{NAME} %{VERSION}\n' 'nvidia-fabric*manager*' 2>/dev/null},
+    auto_die => 0);
+  my @present;
+  for my $line (split /\n/, $out // '') {
+    my ( $name, $version ) = split ' ', $line;
+    push @present, [ $name, $version ] if $self->_is_fabric_manager_name($name);
+  }
+  return @present;
+}
+
 sub _rpm_version {
   my ( $self, $pkg ) = @_;
   my $v = $self->run_cmd("rpm -q --qf '%{VERSION}' $pkg 2>&1", auto_die => 0);

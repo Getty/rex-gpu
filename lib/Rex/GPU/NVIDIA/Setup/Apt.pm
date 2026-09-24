@@ -79,7 +79,67 @@ a driver source that reads the index finds nothing and dies there.
 
 sub prepare_source {
   my ( $self, $plan ) = @_;
+  $self->refresh_package_index;
+}
+
+=method refresh_package_index
+
+C<apt-get update -q> with the lock timeout and C<auto_die =E<gt> 0>, as in
+L</prepare_source>. L<Rex::GPU::NVIDIA::Setup/retrofit_fabric_manager> runs
+it before C<apt-cache madison>: on a host provisioned long ago the index may
+list a Fabric Manager version the archive no longer serves (Ubuntu keeps
+only the newest in C<-updates>), or miss one published since.
+
+=cut
+
+sub refresh_package_index {
+  my ( $self ) = @_;
   $self->run_cmd($self->apt_get.' update -q', auto_die => 0);
+}
+
+=method installed_fabric_managers
+
+C<dpkg-query -W> of C<nvidia-fabric*manager*>: every Fabric Manager package
+dpkg knows in a state other than not-installed or config-files-only
+(half-installed counts: it is not touched either), with its upstream
+version.
+
+=method fabric_manager_version_unavailable
+
+Host-read-only: C<apt-cache madison PKG> must list a version whose upstream
+part is C<$version> (L</install_versioned_package> installs that one), and
+a simulated C<apt-get -s install PKG=VERSION> must succeed without removing
+any package -- Ubuntu's C<nvidia-fabricmanager-NNN> depends on the
+C<-server> driver's kernel-common package, so next to another driver
+flavour the real install could replace the running driver's packages.
+
+=cut
+
+sub installed_fabric_managers {
+  my ( $self ) = @_;
+  my $out = $self->run_cmd(q{dpkg-query -W -f='${Package} ${db:Status-Abbrev} ${Version}\n' 'nvidia-fabric*manager*' 2>/dev/null},
+    auto_die => 0);
+  my @present;
+  for my $line (split /\n/, $out // '') {
+    my ( $name, $status, $version ) = split ' ', $line;
+    next unless $self->_is_fabric_manager_name($name);
+    next unless defined $status && $status =~ /\A[a-z]([a-zA-Z])/ && $1 ne 'n' && $1 ne 'c';
+    push @present, [ $name, $self->_dpkg_upstream_version($version) ];
+  }
+  return @present;
+}
+
+sub fabric_manager_version_unavailable {
+  my ( $self, $pkg, $version ) = @_;
+  my $madison = $self->run_cmd("apt-cache madison $pkg 2>/dev/null", auto_die => 0);
+  my $full = $self->_madison_version_for($madison, $version);
+  return 'apt-cache madison '.$pkg.' lists no version '.$version unless defined $full;
+  my $sim = $self->run_cmd('LC_ALL=C '.$self->apt_get.' -s install '.$pkg.'='.$full.' 2>&1',
+    auto_die => 0);
+  return 'apt-get -s install '.$pkg.'='.$full.' fails' if $? != 0;
+  my @removed = map { /^Remv (\S+)/ ? $1 : () } split /\n/, $sim // '';
+  return 'installing '.$pkg.'='.$full.' would remove '.join(', ', @removed) if @removed;
+  return;
 }
 
 =method install_packages

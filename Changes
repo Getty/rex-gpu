@@ -6,6 +6,16 @@ Revision history for Rex-GPU
     DPkg::Lock::Timeout) on every zypper call, so a fresh boot where
     cloud-init still holds it no longer fails at once with exit 7.
     Not hardware-verified (karr #53)
+  - install_driver (and so gpu_setup) on an HGX host with NVSwitch whose
+    driver is already installed, e.g. one provisioned before Fabric Manager
+    support: if no Fabric Manager is installed and the host's own package
+    sources offer it at exactly the loaded driver's version (apt-get update,
+    then apt-cache madison plus a simulated install that removes nothing;
+    dnf list --showduplicates), it is installed, verified with dpkg/rpm, and
+    its service enabled and started. The driver and the package sources are
+    never changed; not offered, it only warns with the reason and the
+    version needed. An installed Fabric Manager of another version is left
+    alone with a warning. Not hardware-verified (karr #50)
   - install_driver and install_container_toolkit on openSUSE Leap die when
     zypper cannot add or refresh NVIDIA's GFX / container toolkit
     repository (e.g. an HTTP error, an unresolvable host, the zypp lock),

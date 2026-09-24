@@ -95,8 +95,11 @@ driver at exactly its version and C<nvidia-fabricmanager.service> enabled --
 without it CUDA does not initialise on those hosts. A distro source that has
 no Fabric Manager is not used (Debian's C<non-free>; Debian 12/13 takes
 NVIDIA's CUDA repository instead, Debian 11 and openSUSE die before the host
-is changed). See the C<nvswitches> option of
-L<Rex::GPU::NVIDIA/install_driver>. Hosts without NVSwitch are unchanged.
+is changed). If the driver is already installed, Fabric Manager is added
+only when the host's own package sources offer it at exactly the loaded
+driver's version; otherwise it warns and changes nothing. See the
+C<nvswitches> option of L<Rex::GPU::NVIDIA/install_driver>. Hosts without
+NVSwitch are unchanged.
 HGX B200/B300 are B<not> covered: their NVSwitches are not PCI devices on
 the host, so they are not detected, and they also need NVIDIA's NVLink
 Subnet Manager -- install Fabric Manager there yourself. GB200/GB300 NVL72

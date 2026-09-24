@@ -351,6 +351,40 @@ sub verify_packages {
     unless $self->_rpm_version_in_branch($version, $branch);
 }
 
+=method fabric_manager_version_unavailable
+
+Host-read-only: C<dnf list --showduplicates --available PKG> must list a
+version whose upstream part (no epoch, no release) is C<$version>. dnf
+refreshes expired metadata on its own, as for a fresh install; no
+repository is added or enabled. C<dnf install> never removes a package
+without C<--allowerasing>, so no simulation is needed before
+L<Rex::GPU::NVIDIA::Setup::Rpm/install_versioned_package>.
+
+=cut
+
+sub fabric_manager_version_unavailable {
+  my ( $self, $pkg, $version ) = @_;
+  my $out = $self->run_cmd("dnf -q list --showduplicates --available $pkg 2>/dev/null", auto_die => 0);
+  return 'dnf list --showduplicates '.$pkg.' lists no version '.$version
+    unless grep { $_ eq $version } $self->_dnf_list_versions($out, $pkg);
+  return;
+}
+
+# Pure: the upstream versions of $pkg in `dnf list` output
+# ("nvidia-fabricmanager.x86_64  3:580.95.05-1  cuda-rhel9-x86_64").
+sub _dnf_list_versions {
+  my ( $self, $out, $pkg ) = @_;
+  my @versions;
+  for my $line (split /\n/, $out // '') {
+    my ( $na, $evr ) = split ' ', $line;
+    next unless defined $evr && $na =~ /\A\Q$pkg\E\.[^.]+\z/;
+    ( my $v = $evr ) =~ s/^\d+://;
+    $v =~ s/-[^-]*$//;
+    push @versions, $v;
+  }
+  return @versions;
+}
+
 1;
 
 =head1 DESCRIPTION

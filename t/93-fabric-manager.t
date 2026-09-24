@@ -27,7 +27,8 @@ use lib "$Bin/lib";
 #     modprobe and checks is-active (warns only);
 #   * no version match / a mismatched result dies, naming both versions,
 #     with no install of another version;
-#   * an already-installed driver gets no Fabric Manager install, only the
+#   * an already-installed driver (karr #50) gets Fabric Manager only from the
+#     host's own sources at the loaded version, else a warning; then the
 #     is-active check (warn).
 #
 # NOT covered -- none of it runs without a real HGX host: that the package
@@ -43,6 +44,7 @@ use Test::RexGPU::Golden qw(
 use Rex::GPU;
 use Rex::GPU::Detect;
 use Rex::GPU::NVIDIA;
+use Rex::GPU::NVIDIA::Setup::RHEL;
 
 my $H100_LINE = '18:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)';
 my @NVSWITCH_LINES = map {
@@ -279,14 +281,203 @@ for my $case ([ 'debian-12', release => '11.11' ], [ 'leap-15.6' ], [ 'leap-16.0
     '... warns');
 }
 
-# Already-installed driver: no Fabric Manager install, only the check.
-{
-  my $rec = hgx_on(host_profile('ubuntu-24.04', responses => [
-    working_driver(), [ 'systemctl is-active --quiet nvidia-fabricmanager.service' => '', 3 ] ]));
-  is($rec->{error}, undef, 'already installed + NVSwitch: no die');
-  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing installed');
-  ok((grep { $_->[0] eq 'warn' && $_->[1] =~ /is not active/ } @{ $rec->{logs} }), '... warns');
+#### Already-installed driver (karr #50)
+#
+# CLAIM: the driver is never touched and no package source is added. Fabric
+# Manager is installed only when none is on the host and the host's current
+# sources offer the package name a fresh install uses at exactly the loaded
+# driver's version (nvidia-smi --query-gpu); apt refreshes its index first
+# and simulates the install (no removals). An FM already there is left
+# alone (warn on a version mismatch); not offered => warn, no install, no die.
+
+my $DRIVER_VERSION_Q = 'nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>&1';
+my $DPKG_FM_Q = q{dpkg-query -W -f='${Package} ${db:Status-Abbrev} ${Version}\n' 'nvidia-fabric*manager*' 2>/dev/null};
+my $RPM_FM_Q  = q{rpm -qa --qf '%{NAME} %{VERSION}\n' 'nvidia-fabric*manager*' 2>/dev/null};
+my $DNF_FM_Q  = 'dnf -q list --showduplicates --available nvidia-fabricmanager 2>/dev/null';
+
+sub installed_hgx_on {
+  my ( $os, $version, @responses ) = @_;
+  return hgx_on(host_profile($os, responses => [
+    working_driver(), [ $DRIVER_VERSION_Q => join("\n", ($version) x 8), 0 ], @responses ]));
 }
+
+sub warned {
+  my ( $rec, $re ) = @_;
+  return scalar grep { $_->[0] eq 'warn' && $_->[1] =~ $re } @{ $rec->{logs} };
+}
+
+sub installs { grep { / install -y / } @{ $_[0]{lines} } }
+
+my %RETROFIT = (
+  'ubuntu-24.04' => {
+    available => [
+      [ $DPKG_FM_Q => '', 1 ],
+      [ 'apt-cache madison nvidia-fabricmanager-580 2>/dev/null' =>
+          " nvidia-fabricmanager-580 | 580.126.09-0ubuntu0.24.04.1 | http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages\n"
+        . " nvidia-fabricmanager-580 | 580.95.05-0ubuntu0.24.04.1 | http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages", 0 ],
+      [ q{dpkg-query -W -f='${Version}' nvidia-fabricmanager-580 2>/dev/null} => '580.95.05-0ubuntu0.24.04.1', 0 ]
+    ],
+    unavailable => [
+      [ $DPKG_FM_Q => '', 1 ],
+      [ 'apt-cache madison nvidia-fabricmanager-580 2>/dev/null' =>
+          " nvidia-fabricmanager-580 | 580.126.09-0ubuntu0.24.04.1 | http://archive.ubuntu.com/ubuntu noble-updates/multiverse amd64 Packages", 0 ]
+    ],
+    present => [
+      [ $DPKG_FM_Q => "nvidia-fabricmanager-580 ii  580.95.05-0ubuntu0.24.04.1\n"
+        . "nvidia-fabricmanager-dev-580 ii  580.95.05-0ubuntu0.24.04.1", 0 ]
+    ],
+    install => qr/install -y nvidia-fabricmanager-580=580\.95\.05-0ubuntu0\.24\.04\.1$/
+  },
+  'rocky-9' => {
+    available => [
+      [ $RPM_FM_Q => '', 0 ],
+      [ $DNF_FM_Q => "Available Packages\n"
+        . "nvidia-fabricmanager.x86_64              580.82.07-1              cuda-rhel9-x86_64\n"
+        . "nvidia-fabricmanager.x86_64              580.95.05-1              cuda-rhel9-x86_64", 0 ],
+      [ q{rpm -q --qf '%{VERSION}' nvidia-fabricmanager 2>&1} => '580.95.05', 0 ]
+    ],
+    unavailable => [
+      [ $RPM_FM_Q => '', 0 ],
+      [ $DNF_FM_Q => '', 1 ]
+    ],
+    present => [
+      [ $RPM_FM_Q => 'nvidia-fabricmanager 580.95.05', 0 ]
+    ],
+    install => qr/dnf install -y nvidia-fabricmanager-580\.95\.05$/
+  },
+  # available: a host whose driver came from NVIDIA's CUDA repo (k18);
+  # unavailable: the pre-k23 non-free 535 driver, no CUDA repo configured
+  'debian-12' => {
+    available => [
+      [ $DPKG_FM_Q => '', 1 ],
+      [ 'apt-cache madison nvidia-fabricmanager 2>/dev/null' =>
+          " nvidia-fabricmanager | 580.95.05-1 | https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64  Packages", 0 ],
+      [ q{dpkg-query -W -f='${Version}' nvidia-fabricmanager 2>/dev/null} => '580.95.05-1', 0 ]
+    ],
+    unavailable => [
+      [ $DPKG_FM_Q => '', 1 ],
+      [ 'apt-cache madison nvidia-fabricmanager 2>/dev/null' => '', 0 ]
+    ],
+    present => [
+      [ $DPKG_FM_Q => 'nvidia-fabricmanager ii  580.95.05-1', 0 ]
+    ],
+    install => qr/install -y nvidia-fabricmanager=580\.95\.05-1$/
+  }
+);
+my %LOADED = ( 'debian-12' => { unavailable => '535.247.01' } );
+
+for my $os (sort keys %RETROFIT) {
+  my $case = $RETROFIT{$os};
+  for my $state (qw( available unavailable present )) {
+    my $version = $LOADED{$os}{$state} // '580.95.05';
+    my $rec = installed_hgx_on($os, $version, @{ $case->{$state} });
+    is($rec->{error}, undef, "$os installed driver, FM $state: no die");
+    golden_is($rec, "driver/$os--hgx-h100--installed--fm-$state");
+    ok(!(grep { /nvidia-driver|linux-headers|kmod|blacklist-nouveau|cuda-keyring|config-manager/ } installs($rec)),
+      '... the driver is not touched');
+    ok(!(grep { /cuda-keyring|config-manager|addrepo|sources\.list/ } @{ $rec->{lines} }),
+      '... no package source added');
+    if ($state eq 'available') {
+      my @l = @{ $rec->{lines} };
+      my ( $inst )  = grep { $l[$_] =~ $case->{install} } 0 .. $#l;
+      my ( $start ) = grep { $l[$_] eq 'run: systemctl start nvidia-fabricmanager.service' } 0 .. $#l;
+      my ( $en )    = grep { $l[$_] eq 'run: systemctl enable nvidia-fabricmanager.service' } 0 .. $#l;
+      ok(defined $inst && defined $en && defined $start && $inst < $en && $en < $start,
+        '... Fabric Manager at the loaded version, then enabled, then started');
+      is(scalar(installs($rec)), 1, '... one install, nothing else');
+    }
+    elsif ($state eq 'unavailable') {
+      is_deeply([ installs($rec) ], [], '... nothing installed');
+      ok(warned($rec, qr/offer none for the loaded driver $version.*No package source was added/),
+        '... warns naming the version');
+    }
+    else {
+      is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
+      ok(!warned($rec, qr/Fabric Manager .* is installed, but/), '... no mismatch warning');
+    }
+  }
+}
+
+# apt: the index is refreshed before madison is asked.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05', @{ $RETROFIT{'ubuntu-24.04'}{available} });
+  my @l = @{ $rec->{lines} };
+  my ( $upd ) = grep { $l[$_] =~ /apt-get .* update -q$/ } 0 .. $#l;
+  my ( $mad ) = grep { $l[$_] =~ /apt-cache madison/ } 0 .. $#l;
+  ok(defined $upd && $upd < $mad, 'ubuntu: apt-get update before apt-cache madison');
+}
+
+# Fabric Manager of another branch installed: warn, leave it alone.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05',
+    [ $DPKG_FM_Q => 'nvidia-fabricmanager-570 ii  570.172.08-0ubuntu0.24.04.1', 0 ]);
+  is($rec->{error}, undef, 'ubuntu FM 570 next to driver 580: no die');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing changed');
+  ok(warned($rec, qr/nvidia-fabricmanager-570 570\.172\.08 is installed, but the loaded NVIDIA driver is 580\.95\.05/),
+    '... warns naming both versions');
+}
+
+# Only config files left (rc): not installed -- the retrofit proceeds.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05',
+    [ $DPKG_FM_Q => 'nvidia-fabricmanager-580 rc  580.82.07-0ubuntu0.24.04.1', 0 ],
+    @{ $RETROFIT{'ubuntu-24.04'}{available} });
+  ok((grep { $_ =~ $RETROFIT{"ubuntu-24.04"}{install} } installs($rec)), 'ubuntu: an rc Fabric Manager counts as absent');
+}
+
+# apt: installing it would remove packages (another driver flavour) -> no install.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05',
+    [ qr{^LC_ALL=C apt-get .* -s install nvidia-fabricmanager-580=} =>
+        "Remv nvidia-kernel-common-580 [580.95.05-0ubuntu0.24.04.1]\nInst nvidia-kernel-common-580-server", 0 ],
+    @{ $RETROFIT{'ubuntu-24.04'}{available} });
+  is($rec->{error}, undef, 'ubuntu: simulated removal: no die');
+  is_deeply([ installs($rec) ], [], '... nothing installed');
+  ok(warned($rec, qr/would remove nvidia-kernel-common-580/), '... warns naming the removal');
+}
+
+# Loaded driver version unreadable / inconsistent: warn, nothing touched.
+for my $out ('', "580.95.05\n570.172.08") {
+  my $rec = hgx_on(host_profile('rocky-9', responses => [
+    working_driver(), [ $DRIVER_VERSION_Q => $out, 0 ], @{ $RETROFIT{'rocky-9'}{available} } ]));
+  is($rec->{error}, undef, 'rocky-9, driver version '.( $out =~ s/\n/,/r || 'empty' ).': no die');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing changed');
+  ok(warned($rec, qr/loaded driver version cannot be read/), '... warns');
+}
+
+# openSUSE: no source names a Fabric Manager -- warn, no query, no install.
+{
+  my $rec = installed_hgx_on('leap-15.6', '580.95.05', [ $RPM_FM_Q => '', 0 ]);
+  is($rec->{error}, undef, 'leap-15.6 installed driver + NVSwitch: no die');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... nothing changed');
+  ok(warned($rec, qr/no driver source Rex::GPU knows .* has a Fabric Manager package/), '... warns');
+}
+
+# Offered, but the install does not verify -> dies (the host was changed);
+# the driver stays untouched.
+{
+  my $rec = installed_hgx_on('rocky-9', '580.95.05',
+    [ 'rpm -q nvidia-fabricmanager 2>&1' => 'package nvidia-fabricmanager is not installed', 1 ],
+    @{ $RETROFIT{'rocky-9'}{available} });
+  like($rec->{error}, qr/nvidia-fabricmanager not installed after dnf install/, 'rocky-9: failed retrofit dies');
+  ok(!(grep { /systemctl (?:enable|start)/ } @{ $rec->{lines} }), '... unit neither enabled nor started');
+}
+
+# Not active afterwards: warns, as before.
+{
+  my $rec = installed_hgx_on('ubuntu-24.04', '580.95.05', @{ $RETROFIT{'ubuntu-24.04'}{unavailable} },
+    [ 'systemctl is-active --quiet nvidia-fabricmanager.service' => '', 3 ]);
+  ok(warned($rec, qr/is not active/), 'installed driver, no FM: is-active warning');
+}
+
+is_deeply([ Rex::GPU::NVIDIA::Setup::RHEL->_dnf_list_versions(
+  "Available Packages\nnvidia-fabricmanager.x86_64  3:580.95.05-1.el9  cuda\n"
+  ."nvidia-fabricmanager-devel.x86_64  580.95.05-1  cuda\n", 'nvidia-fabricmanager') ],
+  [ '580.95.05' ], 'dnf list: epoch and release stripped, other packages ignored');
+ok(Rex::GPU::NVIDIA::Setup->_is_fabric_manager_name($_), "$_ is a Fabric Manager")
+  for qw( nvidia-fabricmanager nvidia-fabricmanager-580 nvidia-fabric-manager );
+ok(!Rex::GPU::NVIDIA::Setup->_is_fabric_manager_name($_), "$_ is not")
+  for qw( nvidia-fabricmanager-dev-580 libnvidia-nscq-580 nvidia-fabricmanager-devel );
 
 #### Setup unit bits
 
