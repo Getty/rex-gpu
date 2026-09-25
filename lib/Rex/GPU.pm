@@ -48,7 +48,7 @@ NVSwitch chips under C<nvswitch>:
   #   ],
   #   amd => [
   #     {
-  #       name      => "Radeon RX 7900 XTX",
+  #       name      => "Navi 31 [Radeon RX 7900 XTX]",
   #       vendor    => "amd",
   #       pci_class => "0300",
   #       compute   => 0,        # always 0 (AMD not yet supported)

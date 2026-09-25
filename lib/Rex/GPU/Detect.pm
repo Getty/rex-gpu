@@ -491,7 +491,10 @@ sub _parse_amd_line {
   my ($line) = @_;
 
   my ($pci_class) = $line =~ /\[(03\d{2})\]/;
-  my ($name) = $line =~ /:\s+(?:Advanced Micro Devices|AMD\/ATI)\s+.*?\s+(.+?)\s*\[1002:/;
+  # Same form as _parse_nvidia_line: vendor stripped, the rest up to the
+  # [1002:xxxx] id as lspci prints it. Vendor 1002 spellings across pci.ids
+  # versions: current, the 2010-era "nee ATI" one, and the pre-2010 one.
+  my ($name) = $line =~ /:\s+(?:Advanced\s+Micro\s+Devices,\s+Inc\.\s+\[AMD\/ATI\]|Advanced\s+Micro\s+Devices\s+\[AMD\]\s+nee\s+ATI|ATI\s+Technologies\s+Inc\.?)\s+(.+?)\s*\[1002:/;
   $name //= 'Unknown AMD GPU';
   $pci_class //= '0300';
 

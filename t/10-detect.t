@@ -168,16 +168,58 @@ subtest '_parse_amd_line — standard lspci format' => sub {
   is($gpu->{vendor},    'amd',  'vendor amd');
   is($gpu->{pci_class}, '0300', 'pci_class 0300');
   is($gpu->{compute},   0,      'compute 0 (AMD never compute by decision)');
-  # XXX characterization BUG: the name regex
-  #   /:\s+(?:Advanced Micro Devices|AMD\/ATI)\s+.*?\s+(.+?)\s*\[1002:/
-  # never matches the real lspci format, because "Advanced Micro Devices" is
-  # followed by ", Inc." (comma, not whitespace), so the required \s+ after the
-  # vendor literal fails; the "AMD/ATI" alternative is inside brackets and has
-  # no ":\s+" immediately before it. Result: name falls back to the default
-  # 'Unknown AMD GPU' for a perfectly ordinary AMD card. Detect-only today, so
-  # it changes no install decision — but it is a real parse bug. Reported.
-  is($gpu->{name}, 'Unknown AMD GPU',
-    'name => "Unknown AMD GPU" (regex fails on standard format — XXX, see report)');
+  # karr #5: same form as _parse_nvidia_line -- vendor prefix stripped,
+  # codename + bracketed marketing name kept verbatim, up to the [1002:xxxx]
+  # id. Was 'Unknown AMD GPU' on every real card before this fix (the old
+  # regex never matched "Advanced Micro Devices, Inc.", comma before the
+  # required \s+). The POD SYNOPSIS in Detect.pm/GPU.pm documents this exact
+  # form.
+  is($gpu->{name}, 'Navi 31 [Radeon RX 7900 XTX]',
+    'name = codename + bracketed marketing string (matches POD SYNOPSIS)');
+  unlike($gpu->{name}, qr/\[1002:/, 'the [1002:xxxx] id does not leak into the name');
+  unlike($gpu->{name}, qr/\(rev/,   'the (rev ..) suffix does not leak into the name');
+};
+
+subtest '_parse_amd_line — "Advanced Micro Devices [AMD] nee ATI" spelling' => sub {
+  # 2010-era pci.ids vendor string for 1002 -- one of the two other spellings
+  # karr #5's regex accepts. Same card/id as the standard-format test above,
+  # only the vendor prefix text differs, to isolate the vendor-spelling
+  # alternation (the "Navi 31" name is not period-accurate for this vendor
+  # string's era; that mismatch is irrelevant to what this regex checks).
+  my $gpu = Rex::GPU::Detect::_parse_amd_line(
+    '0a:00.0 VGA compatible controller [0300]: Advanced Micro Devices [AMD] nee ATI Navi 31 [Radeon RX 7900 XTX] [1002:744c] (rev c8)'
+  );
+  is($gpu->{name}, 'Navi 31 [Radeon RX 7900 XTX]', 'name parsed with the "nee ATI" vendor spelling');
+};
+
+subtest '_parse_amd_line — "ATI Technologies Inc" spelling' => sub {
+  # Pre-2010 pci.ids vendor string for 1002 -- the third spelling karr #5's
+  # regex accepts (trailing period optional). Same card/id as above, only the
+  # vendor prefix differs.
+  my $gpu = Rex::GPU::Detect::_parse_amd_line(
+    '0a:00.0 VGA compatible controller [0300]: ATI Technologies Inc Navi 31 [Radeon RX 7900 XTX] [1002:744c] (rev c8)'
+  );
+  is($gpu->{name}, 'Navi 31 [Radeon RX 7900 XTX]', 'name parsed with the "ATI Technologies Inc" vendor spelling');
+};
+
+subtest '_parse_amd_line — unresolved name (pci.ids lacks the device id)' => sub {
+  # Same shape as the NVIDIA GB10 "Device" case above: when pci.ids has no
+  # entry for the device id, lspci renders the name as the literal "Device".
+  my $gpu = Rex::GPU::Detect::_parse_amd_line(
+    '0a:00.0 VGA compatible controller [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Device [1002:7550] (rev c1)'
+  );
+  is($gpu->{name}, 'Device', 'name = "Device" (pci.ids cannot resolve 1002:7550)');
+};
+
+subtest '_parse_amd_line — unrecognised vendor text => fallback' => sub {
+  # A vendor string that is none of the three accepted 1002 spellings (e.g. a
+  # board-partner name lspci prints instead of the reference vendor, or a
+  # future pci.ids wording) -- falls back to the default, same as every card
+  # did before this fix.
+  my $gpu = Rex::GPU::Detect::_parse_amd_line(
+    '0a:00.0 VGA compatible controller [0300]: XFX Pine Group Navi 31 [Radeon RX 7900 XTX] [1002:744c] (rev c8)'
+  );
+  is($gpu->{name}, 'Unknown AMD GPU', 'unrecognised vendor text => "Unknown AMD GPU" fallback');
 };
 
 #### detect() end-to-end with run()/is_installed() mocked
@@ -491,6 +533,7 @@ subtest 'detect — AMD only' => sub {
   is(scalar @{$r->{amd}},    1,     'one amd gpu');
   is($r->{amd}[0]{vendor},  'amd',  'element vendor amd');
   is($r->{amd}[0]{compute}, 0,      'element compute 0');
+  is($r->{amd}[0]{name}, 'Navi 31 [Radeon RX 7900 XTX]', 'element name (karr #5)');
 };
 
 subtest 'detect — virtual-only output => empty (unchanged)' => sub {
@@ -566,6 +609,7 @@ subtest 'detect — mixed NVIDIA + AMD' => sub {
   );
   is(scalar @{$r->{nvidia}}, 1, 'one nvidia gpu');
   is(scalar @{$r->{amd}},    1, 'one amd gpu');
+  is($r->{amd}[0]{name}, 'Navi 31 [Radeon RX 7900 XTX]', 'amd element name (karr #5)');
 };
 
 subtest 'detect — empty run output' => sub {

@@ -14,6 +14,11 @@ Revision history for Rex-GPU
     package, installed by apt-get and verified with dpkg; nothing named
     dies before any driver install. The default stays apt-cache search.
 
+  [Detection]
+  - An AMD GPU's name is read from lspci as for NVIDIA, e.g.
+    "Navi 31 [Radeon RX 7900 XTX]", instead of "Unknown AMD GPU" for
+    every card. Detect-only as before: AMD stays compute => 0.
+
 0.002     2026-09-24 21:34:32Z
   - None of the changes below has run on GPU hardware yet; they are
     checked against the commands they send to the host.
