@@ -445,7 +445,7 @@ for my $os (qw( rocky-9 rocky-10 leap-15.6 leap-16.0 )) {
 
 is(Rex::GPU::NVIDIA::Setup->_cuda_repo_arch('arm64'), 'sbsa', '_cuda_repo_arch on the class');
 is(Rex::GPU::NVIDIA::Setup->_major_version('10.1'), 10, '_major_version keeps the dots in mind');
-is(Rex::GPU::NVIDIA::_os_major_version('15.6'), 15, 'old wrapper _os_major_version still answers');
+is(Rex::GPU::NVIDIA::Setup->_major_version('15.6'), 15, '_major_version on the class (was _os_major_version)');
 is($RPM->_rpm_version_in_branch('580.95.05', 580), 1, '_rpm_version_in_branch on the class');
 is($SUSE->repo_url('15.6'), 'https://download.nvidia.com/opensuse/leap/15.6/',
   'repo_url on the class');

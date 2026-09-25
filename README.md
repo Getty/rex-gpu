@@ -93,6 +93,8 @@ sub sources { my ( $self ) = @_; return ( { name => 'pinned-580-open', kernel_mo
 
 Choose it per call with `gpu_setup(setup => 'My::GPU::Setup')` (a class name or an object), or for the whole Rexfile with `set gpu_nvidia_setup => 'My::GPU::Setup'`, which also applies to Rex::Rancher's `gpu => 1`. Without either, Rex::GPU chooses the class by OS. The detected GPUs' requirements still apply: a source the GPUs cannot use is skipped. `gpu_setup(requirement => { kernel_module => 'open', min_branch => 580 })` narrows the choice further, but cannot override what the GPUs need. See `eg/custom-setup/` and the `WRITING YOUR OWN SETUP` section of `Rex::GPU::NVIDIA::Setup`.
 
+The pipeline around the driver install can be replaced the same way (experimental): every function of `Rex::GPU::NVIDIA` (toolkit, CDI, containerd, verification, the reboot) and of `Rex::GPU::Detect` is a class method, so a subclass overrides just the step it needs. Choose it with `gpu_setup(nvidia => 'My::GPU::NVIDIA', detect => 'My::GPU::Detect')`, or Rexfile-wide with `set gpu_nvidia_class => ...` / `set gpu_detect_class => ...`, which also reaches Rex::Rancher's `gpu => 1` and a plain `install_driver(...)` call. A class that cannot be loaded or does not extend the built-in one dies before anything touches the host.
+
 On Ubuntu, the built-in `Rex::GPU::NVIDIA::Setup::UbuntuDrivers` (opt-in, same two ways to choose it) lets `ubuntu-drivers list --gpgpu` name the driver package instead of `apt-cache search`; it is still installed with `apt-get` and verified with `dpkg -l`, and dies before any driver install when `ubuntu-drivers` names nothing.
 
 ## Examples

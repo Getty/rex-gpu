@@ -19,6 +19,15 @@ Revision history for Rex-GPU
     "Navi 31 [Radeon RX 7900 XTX]", instead of "Unknown AMD GPU" for
     every card. Detect-only as before: AMD stays compute => 0.
 
+  [API]
+  - Every function of Rex::GPU, Rex::GPU::Detect and Rex::GPU::NVIDIA
+    also works as a class method, and a subclass of Rex::GPU::NVIDIA or
+    Rex::GPU::Detect can replace any step (experimental): chosen with
+    gpu_setup(nvidia => ..., detect => ...) or set gpu_nvidia_class /
+    set gpu_detect_class; one that cannot be loaded dies before the host
+    is touched. Function calls, their arguments and the defaults are
+    unchanged.
+
 0.002     2026-09-24 21:34:32Z
   - None of the changes below has run on GPU hardware yet; they are
     checked against the commands they send to the host.

@@ -9,7 +9,9 @@ use Carp qw( croak );
 use Rex::Commands::Gather ();
 use Rex::Commands::Pkg;
 use Rex::Commands::Run;
+use Rex::Config ();
 use Rex::Logger;
+use Scalar::Util qw( blessed );
 use Rex::GPU::NVIDIA ();
 use Rex::GPU::NVIDIA::Requirement;
 use Rex::GPU::NVIDIA::VGPU;
@@ -65,6 +67,14 @@ my %NVSWITCH_DEVICE_IDS = (
 # return values for Rex::GPU::NVIDIA's install paths (epic karr #25).
 
 =head1 FUNCTIONS
+
+Each function is also a class method (B<experimental>):
+C<Rex::GPU::Detect-E<gt>detect> or C<My::GPU::Detect-E<gt>detect> for a
+subclass, with the same arguments. A function call runs as the class
+L</configured_class> names (C<set gpu_detect_class>, or
+C<Rex::GPU::Detect>); inside, every parsing and probing helper is called
+through that class, so a subclass overrides any one of them. See
+L<Rex::GPU/CLASSES OF YOUR OWN>.
 
 =cut
 
@@ -150,7 +160,8 @@ and the real card is still reported.
 =cut
 
 sub detect {
-  _ensure_lspci();
+  my $class = _invocant(@_) // return __PACKAGE__->configured_class->detect(@_);
+  $class->_ensure_lspci;
 
   my $pci_output = run "lspci -nn 2>&1 | grep -E '\\[03(00|02)\\]'",
     auto_die => 0;
@@ -168,13 +179,13 @@ sub detect {
   my @nvidia_slots;
   for my $line (split /\n/, $pci_output) {
     if ($line =~ $NVIDIA_VENDOR_RE) {
-      my $gpu = _parse_nvidia_line($line);
+      my $gpu = $class->_parse_nvidia_line($line);
       next unless $gpu;
       push @{$result->{nvidia}}, $gpu;
-      push @nvidia_slots, _pci_slot($line);
+      push @nvidia_slots, $class->_pci_slot($line);
     }
     elsif ($line =~ $AMD_VENDOR_RE) {
-      my $gpu = _parse_amd_line($line);
+      my $gpu = $class->_parse_amd_line($line);
       push @{$result->{amd}}, $gpu if $gpu;
     }
     elsif ($line =~ $VIRTUAL_GPU_RE) {
@@ -188,10 +199,10 @@ sub detect {
 
   # NVSwitch (karr #23): only where there is an NVIDIA GPU for it to connect,
   # so a host without one runs no extra command.
-  $result->{nvswitch} = _detect_nvswitch() if @{$result->{nvidia}};
+  $result->{nvswitch} = $class->_detect_nvswitch if @{$result->{nvidia}};
 
   # vGPU guest (karr #24): likewise only with an NVIDIA GPU, read-only.
-  _detect_vgpu($result->{nvidia}, \@nvidia_slots) if @{$result->{nvidia}};
+  $class->_detect_vgpu($result->{nvidia}, \@nvidia_slots) if @{$result->{nvidia}};
 
   return $result;
 }
@@ -202,11 +213,12 @@ sub detect {
 # answers under the same PATH the `lspci -nn` below runs with. Rex::Pkg dies
 # "OS/Provider not supported" on the RHEL-family names lsb_release gives
 # (karr #39), so those get dnf + rpm -q, as Setup::RHEL's install_helpers
-# does; the name list is Rex::GPU::NVIDIA's, not a copy.
+# does; the name list is Rex::GPU::NVIDIA's (nvidia_class), not a copy.
 sub _ensure_lspci {
-  return if _has_lspci();
+  my ( $class ) = @_;
+  return if $class->_has_lspci;
 
-  if (Rex::GPU::NVIDIA::_rhel_family_name(Rex::Commands::Gather::operating_system())) {
+  if ($class->nvidia_class->_rhel_family_name(Rex::Commands::Gather::operating_system())) {
     Rex::Logger::info('lspci not found -- installing pciutils with dnf');
     run 'dnf install -y pciutils', auto_die => 0;
     run 'rpm -q pciutils 2>&1', auto_die => 0;
@@ -218,10 +230,11 @@ sub _ensure_lspci {
   }
 
   croak 'lspci not found on the host after installing pciutils -- '
-    .'GPU detection needs lspci on the PATH' unless _has_lspci();
+    .'GPU detection needs lspci on the PATH' unless $class->_has_lspci;
 }
 
 sub _has_lspci {
+  my ( $class ) = @_;
   run 'command -v lspci >/dev/null 2>&1', auto_die => 0;
   return $? == 0 ? 1 : 0;
 }
@@ -229,10 +242,11 @@ sub _has_lspci {
 # Read-only: `lspci -nn -d 10de:` filtered to class [0680]; one hashref per
 # recognised NVSwitch.
 sub _detect_nvswitch {
+  my ( $class ) = @_;
   my $out = run "lspci -nn -d 10de: 2>/dev/null | grep -F '[0680]'", auto_die => 0;
   my @switches;
   for my $line (split /\n/, $out // '') {
-    my $switch = _parse_nvswitch_line($line);
+    my $switch = $class->_parse_nvswitch_line($line);
     push @switches, $switch if $switch;
   }
   Rex::Logger::info('  [ok] NVSwitch: '.scalar(@switches).' ('.$switches[0]{name}.')')
@@ -247,9 +261,9 @@ sub _detect_nvswitch {
 # slot is not in that output), vgpu 0|1 and, for 1, vgpu_type. compute is
 # not touched: whether a driver can be installed is install_driver's call.
 sub _detect_vgpu {
-  my ( $gpus, $slots ) = @_;
+  my ( $class, $gpus, $slots ) = @_;
   my $out = run 'lspci -vmmnn -d 10de: 2>/dev/null', auto_die => 0;
-  my $sub = _parse_lspci_vmm($out);
+  my $sub = $class->_parse_lspci_vmm($out);
   for my $i (0 .. $#$gpus) {
     my $gpu = $gpus->[$i];
     my $rec = defined $slots->[$i] ? $sub->{ $slots->[$i] } : undef;
@@ -258,7 +272,7 @@ sub _detect_vgpu {
       && ( $rec->{device_id} // '' ) ne lc $gpu->{device_id};
     $gpu->{subsystem_vendor_id} = $rec ? $rec->{subsystem_vendor_id} : undef;
     $gpu->{subsystem_id}        = $rec ? $rec->{subsystem_id} : undef;
-    my $type = Rex::GPU::NVIDIA::VGPU->type_for(
+    my $type = $class->vgpu_class->type_for(
       $gpu->{device_id}, $gpu->{subsystem_id}, $gpu->{subsystem_vendor_id});
     $gpu->{vgpu} = defined $type ? 1 : 0;
     next unless defined $type;
@@ -274,7 +288,7 @@ sub _detect_vgpu {
 # { slot => { device_id, subsystem_vendor_id, subsystem_id } }, IDs
 # lowercase, undef where lspci printed none. Anything else is ignored.
 sub _parse_lspci_vmm {
-  my ( $out ) = @_;
+  my ( $class, $out ) = @_;
   my %by_slot;
   for my $record (split /\n\s*\n/, $out // '') {
     my %f;
@@ -282,7 +296,7 @@ sub _parse_lspci_vmm {
       $f{$1} = $2 if $line =~ /\A(Slot|Device|SVendor|SDevice):\s*(.*?)\s*\z/;
     }
     next unless defined $f{Slot};
-    my $slot = _normalize_slot($f{Slot});
+    my $slot = $class->_normalize_slot($f{Slot});
     next unless defined $slot;
     my %id = map {
       my ( $id ) = ( $f{$_} // '' ) =~ /\[([0-9a-f]{4})\]\z/i;
@@ -299,16 +313,16 @@ sub _parse_lspci_vmm {
 
 # The PCI address an `lspci -nn` line starts with, normalized.
 sub _pci_slot {
-  my ( $line ) = @_;
+  my ( $class, $line ) = @_;
   my ( $slot ) = $line =~ /\A(\S+)\s/;
-  return _normalize_slot($slot);
+  return $class->_normalize_slot($slot);
 }
 
 # lspci -nn prints every slot with its domain once any device has a non-zero
 # one; -vmm prints it only for a device whose domain is non-zero. The
 # domain 0000 is dropped so both forms of the same device compare equal.
 sub _normalize_slot {
-  my ( $slot ) = @_;
+  my ( $class, $slot ) = @_;
   return unless defined $slot
     && $slot =~ /\A(?:([0-9a-f]{4,}):)?([0-9a-f]{2}:[0-9a-f]{2}\.[0-7])\z/i;
   my ( $domain, $bdf ) = ( $1, lc $2 );
@@ -316,7 +330,7 @@ sub _normalize_slot {
 }
 
 sub _parse_nvswitch_line {
-  my ($line) = @_;
+  my ( $class, $line ) = @_;
   return unless defined $line && $line =~ $NVSWITCH_CLASS_RE && $line =~ $NVIDIA_VENDOR_RE;
   my ($device_id) = $line =~ /\[10de:([0-9a-f]{4})\]/i;
   my ($name) = $line =~ /:\s+NVIDIA\s+Corporation\s+(.+?)\s*\[10de:/;
@@ -334,7 +348,7 @@ sub _parse_nvswitch_line {
 }
 
 sub _parse_nvidia_line {
-  my ($line) = @_;
+  my ( $class, $line ) = @_;
 
   my ($pci_class) = $line =~ /\[(03\d{2})\]/;
   my ($device_id) = $line =~ /\[10de:([0-9a-f]{4})\]/i;
@@ -342,7 +356,7 @@ sub _parse_nvidia_line {
   $name //= 'Unknown NVIDIA GPU';
   $pci_class //= '0300';
 
-  my $compute = _is_nvidia_compute($pci_class, $name, $device_id);
+  my $compute = $class->_is_nvidia_compute($pci_class, $name, $device_id);
 
   my $status = $compute ? 'ok' : 'skip';
   Rex::Logger::info("  [$status] NVIDIA: $name (PCI class $pci_class)");
@@ -357,14 +371,14 @@ sub _parse_nvidia_line {
 }
 
 sub _is_nvidia_compute {
-  my ($pci_class, $name, $device_id) = @_;
+  my ( $class, $pci_class, $name, $device_id ) = @_;
 
   # The generation decides, not the marketing name (karr #45, #54; maintainer
   # decision: every GPU usable for AI counts, MX/GT/GTX 9xx included). The
   # rows of Rex::GPU::NVIDIA::Requirement cover every ID 0000-2FFF plus
   # Blackwell Ultra: Maxwell .. Blackwell Ultra => 1, Kepler or older => 0.
   # lspci prints the ID even when a stale pci.ids leaves the name as "Device".
-  my $req = Rex::GPU::NVIDIA::Requirement->for_device_id($device_id);
+  my $req = $class->requirement_class->for_device_id($device_id);
 
   # A Kepler-or-older row wins over the PCI class (karr #55): a class-0302
   # Tesla K80/K40/K20 is skipped like a Kepler display card, instead of
@@ -413,6 +427,7 @@ sub _is_nvidia_compute {
 =method open_kernel_module_required
 
   Rex::GPU::Detect::open_kernel_module_required($device_id);
+  Rex::GPU::Detect->open_kernel_module_required($device_id);
 
 Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, lowercase or
 uppercase), returns true if that device is known to have B<no> proprietary
@@ -439,14 +454,16 @@ Rexfile-facing command.
 =cut
 
 sub open_kernel_module_required {
-  my ($device_id) = @_;
-  return Rex::GPU::NVIDIA::Requirement->for_device_id($device_id)->kernel_module eq 'open'
+  my $class = _invocant(@_) // return __PACKAGE__->configured_class->open_kernel_module_required(@_);
+  my ( undef, $device_id ) = @_;
+  return $class->requirement_class->for_device_id($device_id)->kernel_module eq 'open'
     ? 1 : 0;
 }
 
 =method legacy_driver_requirement
 
   my $legacy = Rex::GPU::Detect::legacy_driver_requirement($device_id);
+  my $legacy = Rex::GPU::Detect->legacy_driver_requirement($device_id);
   # { generation => 'Maxwell/Pascal/Volta', max_branch => 580 } or undef
 
 Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, any case),
@@ -481,14 +498,15 @@ Not in C<@EXPORT> — a C<Rex::GPU::NVIDIA>-internal lookup.
 =cut
 
 sub legacy_driver_requirement {
-  my ($device_id) = @_;
-  my $req = Rex::GPU::NVIDIA::Requirement->for_device_id($device_id);
+  my $class = _invocant(@_) // return __PACKAGE__->configured_class->legacy_driver_requirement(@_);
+  my ( undef, $device_id ) = @_;
+  my $req = $class->requirement_class->for_device_id($device_id);
   return unless defined $req->max_branch;
   return { generation => $req->generation, max_branch => $req->max_branch };
 }
 
 sub _parse_amd_line {
-  my ($line) = @_;
+  my ( $class, $line ) = @_;
 
   my ($pci_class) = $line =~ /\[(03\d{2})\]/;
   # Same form as _parse_nvidia_line: vendor stripped, the rest up to the
@@ -506,6 +524,67 @@ sub _parse_amd_line {
     pci_class => $pci_class,
     compute   => 0,  # AMD compute support not yet implemented
   };
+}
+
+=method configured_class
+
+  my $class = Rex::GPU::Detect->configured_class($detect_option);
+
+B<Experimental.> The class a function call of L</detect>,
+L</open_kernel_module_required> or L</legacy_driver_requirement> is passed on
+to as a method: C<$detect_option> (L<Rex::GPU/gpu_setup>'s and
+L<Rex::GPU/gpu_detect>'s C<detect> option) if defined, else C<set
+gpu_detect_class =E<gt> 'My::GPU::Detect'> in the Rexfile, else
+C<Rex::GPU::Detect>. A class name only; it is loaded like a setup class (see
+L<Rex::GPU::NVIDIA/custom_setup>: from C<@INC>, unless the package is already
+defined) and croaks, before anything touches the host, if it is not a
+package name, cannot be loaded or is not a subclass of C<Rex::GPU::Detect>.
+
+=method requirement_class
+
+=method vgpu_class
+
+=method nvidia_class
+
+B<Experimental.> The classes detection asks: L<Rex::GPU::NVIDIA::Requirement>
+(the generation of a device ID, for C<compute>),
+L<Rex::GPU::NVIDIA::VGPU> (the vGPU type of a subsystem ID) and
+L<Rex::GPU::NVIDIA> (the RHEL-family OS names, for the C<pciutils>
+bootstrap). Override one in a subclass to use another.
+
+=cut
+
+sub configured_class {
+  my ( $class, $detect ) = @_;
+  my $origin = 'detect =>';
+  unless (defined $detect && $detect ne '') {
+    $detect = Rex::Config->get('gpu_detect_class');
+    $origin = 'set gpu_detect_class';
+    return __PACKAGE__ unless defined $detect && $detect ne '';
+  }
+  croak 'GPU detection class from '.$origin.' must be a class name, not '.$detect
+    .'. Nothing was changed on the host'
+    if ref $detect;
+  return $class->nvidia_class->load_user_class($detect,
+    base => __PACKAGE__, what => 'GPU detection class', origin => $origin);
+}
+
+sub requirement_class { 'Rex::GPU::NVIDIA::Requirement' }
+
+sub vgpu_class { 'Rex::GPU::NVIDIA::VGPU' }
+
+sub nvidia_class { 'Rex::GPU::NVIDIA' }
+
+# Called as a method (Rex::GPU::Detect->detect, My::GPU::Detect->detect):
+# the invocant, a class name or object that isa Rex::GPU::Detect. Called as a
+# function (detect() from a Rexfile, Rex::GPU::Detect::detect(),
+# open_kernel_module_required('2b85')): undef -- a device ID is no package of
+# ours, and nothing is loaded to find out.
+sub _invocant {
+  my ( $first ) = @_;
+  return unless defined $first && ( !ref $first || blessed $first );
+  return $first if eval { $first->isa(__PACKAGE__) };
+  return;
 }
 
 1;

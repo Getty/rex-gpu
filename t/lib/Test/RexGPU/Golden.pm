@@ -270,7 +270,7 @@ sub gpu_fixture {
   my $line = $GPU_LINE{$name} or croak __PACKAGE__.': unknown GPU fixture '.$name;
   my $gpu;
   _with_subs({ 'Rex::Logger::info' => sub { } }, [],
-    sub { $gpu = Rex::GPU::Detect::_parse_nvidia_line($line) });
+    sub { $gpu = Rex::GPU::Detect->_parse_nvidia_line($line) });
   return $gpu;
 }
 

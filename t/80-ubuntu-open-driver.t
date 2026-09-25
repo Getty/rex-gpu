@@ -139,20 +139,20 @@ subtest 'GB10 (aarch64 Spark) => still open' => sub {
 };
 
 subtest 'Blackwell on x86_64, via the real lspci parser => open (karr #16)' => sub {
-  my $rtx5090 = Rex::GPU::Detect::_parse_nvidia_line(
+  my $rtx5090 = Rex::GPU::Detect->_parse_nvidia_line(
     '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GB202 [GeForce RTX 5090] [10de:2b85] (rev a1)'
   );
   is($rtx5090->{compute},   1,      'RTX 5090 is compute (RTX name match)');
   is($rtx5090->{device_id}, '2b85', 'device id parsed');
   is(needs_open($rtx5090),  1,      'RTX 5090 => open');
 
-  my $b200 = Rex::GPU::Detect::_parse_nvidia_line(
+  my $b200 = Rex::GPU::Detect->_parse_nvidia_line(
     '18:00.0 3D controller [0302]: NVIDIA Corporation GB100 [B200] [10de:2901] (rev a1)'
   );
   is($b200->{compute},  1, 'B200 is compute (class 0302)');
   is(needs_open($b200), 1, 'B200 => open');
 
-  my $pro6000 = Rex::GPU::Detect::_parse_nvidia_line(
+  my $pro6000 = Rex::GPU::Detect->_parse_nvidia_line(
     '41:00.0 3D controller [0302]: NVIDIA Corporation GB202GL [RTX PRO 6000 Blackwell Server Edition] [10de:2bb5] (rev a1)'
   );
   is(needs_open($pro6000), 1, 'RTX PRO 6000 Blackwell Server Edition => open');
@@ -160,11 +160,11 @@ subtest 'Blackwell on x86_64, via the real lspci parser => open (karr #16)' => s
 
 subtest 'non-Blackwell GPUs stay on -server (the non-regression point)' => sub {
   is(needs_open($rtx4000), 0, 'RTX 4000 SFF Ada (27b0) => not open');
-  my $h100 = Rex::GPU::Detect::_parse_nvidia_line(
+  my $h100 = Rex::GPU::Detect->_parse_nvidia_line(
     '17:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)'
   );
   is(needs_open($h100), 0, 'H100 (Hopper, 2330) => not open');
-  my $rtx4090 = Rex::GPU::Detect::_parse_nvidia_line(
+  my $rtx4090 = Rex::GPU::Detect->_parse_nvidia_line(
     '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation AD102 [GeForce RTX 4090] [10de:2684] (rev a1)'
   );
   is(needs_open($rtx4090), 0, 'RTX 4090 (Ada, 2684) => not open');

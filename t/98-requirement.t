@@ -266,14 +266,14 @@ subtest 'compute by generation: Maxwell and later 1, Kepler or older 0' => sub {
   for my $id (qw( 1340 1380 13c0 174d 1d01 1db4 1df6 1df7 1e02 1f97 2330 28ff
                   2900 2901 2c18 2c77 2bb9 2e12 2fff 3182 31c2 31c3 )) {
     is( $R->for_device_id($id)->compute, 1, $id.' => table compute 1' );
-    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 1,
+    is( Rex::GPU::Detect->_is_nvidia_compute( '0300', 'Device', $id ), 1,
       $id.' as VGA "Device" => compute' );
   }
   for my $id (qw( 0000 0fc5 1004 102d 128b 133f )) {
     is( $R->for_device_id($id)->compute, 0, $id.' => table compute 0 (Kepler or older)' );
     no warnings 'redefine';
     local *Rex::Logger::info = sub { };
-    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
+    is( Rex::GPU::Detect->_is_nvidia_compute( '0300', 'Device', $id ), 0,
       $id.' as VGA "Device" => not compute' );
   }
   for my $id ( qw( 3000 3181 3183 31c1 31c4 ffff ), undef ) {
@@ -281,7 +281,7 @@ subtest 'compute by generation: Maxwell and later 1, Kepler or older 0' => sub {
     is( $R->for_device_id($id)->compute, undef, $label.' => no row, no verdict (undef)' );
     no warnings 'redefine';
     local *Rex::Logger::info = sub { };
-    is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', $id ), 0,
+    is( Rex::GPU::Detect->_is_nvidia_compute( '0300', 'Device', $id ), 0,
       $label.' as VGA "Device" => not compute (unknown default)' );
   }
   my $b200 = $R->for_device_id('2901');
@@ -290,7 +290,7 @@ subtest 'compute by generation: Maxwell and later 1, Kepler or older 0' => sub {
   # A subclass row changes the driver choice only: Detect reads the base table.
   is( My::Test::Requirement->for_device_id('2330')->compute, undef,
     'subclass row without compute => no verdict' );
-  is( Rex::GPU::Detect::_is_nvidia_compute( '0300', 'Device', '2330' ), 1,
+  is( Rex::GPU::Detect->_is_nvidia_compute( '0300', 'Device', '2330' ), 1,
     '... Detect still reads the base table (2330 compute)' );
 };
 

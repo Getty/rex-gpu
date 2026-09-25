@@ -295,7 +295,7 @@ my %REQUIREMENT_KEY = map { $_ => 1 } qw( kernel_module min_branch max_branch na
 # (BUILDARGS) and on an object (adopt).
 sub _coerce_requirement {
   my ( $self, $req ) = @_;
-  my $base = 'Rex::GPU::NVIDIA::Requirement';
+  my $base = $self->requirement_class;
   return $req if blessed($req) && $req->isa($base);
   croak __PACKAGE__.': a requirement is a hashref or a '.$base.' object, not '
     .( defined $req ? "'".$req."'" : 'undef' )
