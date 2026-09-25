@@ -667,8 +667,9 @@ package and records its branch. Returns a new hashref with C<packages>,
 C<verify> and, if known, the exact C<branch> -- or with C<unavailable> set
 to the reason when the repository has nothing to install. May read the
 host, must not change it. Override it to pick the package some other way (a
-site index, C<ubuntu-drivers list>); L</resolve_plan> checks whatever it
-returns against the requirement.
+site index; L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers> asks C<ubuntu-drivers
+list --gpgpu>); L</resolve_plan> checks whatever it returns against the
+requirement.
 
 =cut
 
@@ -1483,7 +1484,8 @@ L</requirement> against the ordered L</sources>, the first that fits wins
 (L</select_source>). The per-distro
 classes are L<Rex::GPU::NVIDIA::Setup::Debian> and
 L<Rex::GPU::NVIDIA::Setup::Ubuntu> on the apt packaging layer
-L<Rex::GPU::NVIDIA::Setup::Apt>, and L<Rex::GPU::NVIDIA::Setup::RHEL> and
+L<Rex::GPU::NVIDIA::Setup::Apt> (plus the opt-in
+L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers>, a subclass of the Ubuntu one), and L<Rex::GPU::NVIDIA::Setup::RHEL> and
 L<Rex::GPU::NVIDIA::Setup::SUSE> on the rpm packaging layer
 L<Rex::GPU::NVIDIA::Setup::Rpm>.
 
@@ -1560,10 +1562,11 @@ can return. L</plan> and everything it calls must only read the host.
 
 Override L</resolve_source>: it runs after C<apt-get update>, may read the
 host but not change it, and whatever it returns is checked against the
-requirement again. C<eg/ubuntu-drivers/> in the distribution asks
-C<ubuntu-drivers list --gpgpu> (read-only) for the Ubuntu package instead
-of C<apt-cache search>; the package it names is installed and verified by
-the inherited steps, not by C<ubuntu-drivers install>:
+requirement again. The built-in L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers>
+is such a class: it asks C<ubuntu-drivers list --gpgpu> (read-only) for the
+Ubuntu package instead of C<apt-cache search>; the package it names is
+installed and verified by the inherited steps, not by C<ubuntu-drivers
+install>. In outline:
 
   package My::GPU::UbuntuDrivers;
   use Moo;

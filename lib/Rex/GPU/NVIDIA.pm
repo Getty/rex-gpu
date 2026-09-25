@@ -22,6 +22,7 @@ use Rex::GPU::NVIDIA::Setup::Debian;
 use Rex::GPU::NVIDIA::Setup::RHEL;
 use Rex::GPU::NVIDIA::Setup::SUSE;
 use Rex::GPU::NVIDIA::Setup::Ubuntu;
+use Rex::GPU::NVIDIA::Setup::UbuntuDrivers;
 
 require Rex::Exporter;
 use base qw(Rex::Exporter);
@@ -410,6 +411,9 @@ L<Rex::GPU::NVIDIA::Setup::RHEL> on the RHEL family,
 L<Rex::GPU::NVIDIA::Setup::SUSE> on openSUSE, and C<undef> elsewhere
 (L</install_driver> then dies). Asked only when neither the C<setup> option
 nor C<set gpu_nvidia_setup> chose a class (see L</setup_for>).
+L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers> (the package named by
+C<ubuntu-drivers list --gpgpu>) is never chosen here; it is opt-in through
+those two.
 
 The RHEL family is what L<Rex::Commands::Gather/is_redhat> accepts, plus the
 names Rex reports for Rocky Linux, AlmaLinux and CentOS Stream when
@@ -1539,7 +1543,9 @@ The install is done by L<Rex::GPU::NVIDIA::Setup::Debian>,
 L<Rex::GPU::NVIDIA::Setup::Ubuntu>, L<Rex::GPU::NVIDIA::Setup::RHEL> and
 L<Rex::GPU::NVIDIA::Setup::SUSE> (experimental classes, see
 L<Rex::GPU::NVIDIA::Setup>); the steps and commands are the ones described
-here. A subclass of your own replaces them through the C<setup> option of
+here. On Ubuntu, C<setup =E<gt> 'Rex::GPU::NVIDIA::Setup::UbuntuDrivers'>
+lets C<ubuntu-drivers list --gpgpu> name the driver package instead of
+C<apt-cache search>. A subclass of your own replaces them through the C<setup> option of
 L</install_driver> or C<set gpu_nvidia_setup> -- see
 L<Rex::GPU::NVIDIA::Setup/WRITING YOUR OWN SETUP>.
 

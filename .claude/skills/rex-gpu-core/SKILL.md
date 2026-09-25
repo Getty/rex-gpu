@@ -63,7 +63,7 @@ its *declared* keys (no package index read) — else dies listing every candidat
 The concrete package comes later (k35): `resolve_plan`, after `prepare_source`'s
 `apt-get update`, runs `resolve_source` (Ubuntu's `apt-cache search` / `apt-cache policy`)
 and re-checks it; `unavailable` or no fit dies before any install, no other candidate is
-tried. Override `resolve_source` to choose packages another way (k42 `ubuntu-drivers`). `branch_at_least N` = "repo's newest, known ≥ N": passes
+tried. Override `resolve_source` to choose packages another way (built-in opt-in `Setup::UbuntuDrivers`, k69). `branch_at_least N` = "repo's newest, known ≥ N": passes
 a min bound up to N, **never** a max bound; no branch at all passes only an unbounded
 requirement. Don't invent a branch number for a "latest" source; give the floor the repo
 provably carries.

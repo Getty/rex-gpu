@@ -100,6 +100,13 @@ not handled until they exist.
   candidate checked after `apt-get update`); empty search ⇒ die (no 570 fallback: the
   search matches 570 too). **No `nvidia-smi` in the package list**: on 24.04 it is a
   virtual package with no candidate and the metapackage pulls it anyway.
+  Headers: the *running* kernel's `linux-headers-$kernel` only (inherited from Setup::Apt,
+  k69) — **never `linux-headers-generic`**: it follows the GA kernel and brings the wrong
+  tree on HWE and vendor kernels (DGX Spark `6.17.0-1029-nvidia`). Accepted cost: a later
+  kernel's headers are not pulled. Opt-in `Setup::UbuntuDrivers` (k69, not the
+  `setup_class_for_os` default) resolves the `search` sources via read-only
+  `ubuntu-drivers list --gpgpu` (no apt-cache fallback; missing command, non-zero exit or
+  nothing named ⇒ unavailable ⇒ die before install); pinned-580 keeps its candidate check.
   B200/B300 only: the CUDA repo is added **after** driver + FM are verified (so the
   driver search never sees it), key extracted from the `cuda-keyring` deb — **never
   install `cuda-keyring`** here: its `Package: *` pin 600 would outrank Ubuntu's driver.

@@ -1,6 +1,18 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - None of the changes below has run on GPU hardware yet; they are
+    checked against the commands they send to the host.
+
+  [Driver]
+  - Ubuntu: only the running kernel's linux-headers-$(uname -r) are
+    installed, no longer linux-headers-generic, which brought headers for
+    another kernel on HWE and vendor kernels (DGX Spark). A kernel
+    installed later needs its own headers for DKMS.
+  - Ubuntu: new opt-in setup Rex::GPU::NVIDIA::Setup::UbuntuDrivers
+    (experimental): `ubuntu-drivers list --gpgpu` names the driver
+    package, installed by apt-get and verified with dpkg; nothing named
+    dies before any driver install. The default stays apt-cache search.
 
 0.002     2026-09-24 21:34:32Z
   - None of the changes below has run on GPU hardware yet; they are

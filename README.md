@@ -93,12 +93,14 @@ sub sources { my ( $self ) = @_; return ( { name => 'pinned-580-open', kernel_mo
 
 Choose it per call with `gpu_setup(setup => 'My::GPU::Setup')` (a class name or an object), or for the whole Rexfile with `set gpu_nvidia_setup => 'My::GPU::Setup'`, which also applies to Rex::Rancher's `gpu => 1`. Without either, Rex::GPU chooses the class by OS. The detected GPUs' requirements still apply: a source the GPUs cannot use is skipped. `gpu_setup(requirement => { kernel_module => 'open', min_branch => 580 })` narrows the choice further, but cannot override what the GPUs need. See `eg/custom-setup/` and the `WRITING YOUR OWN SETUP` section of `Rex::GPU::NVIDIA::Setup`.
 
+On Ubuntu, the built-in `Rex::GPU::NVIDIA::Setup::UbuntuDrivers` (opt-in, same two ways to choose it) lets `ubuntu-drivers list --gpgpu` name the driver package instead of `apt-cache search`; it is still installed with `apt-get` and verified with `dpkg -l`, and dies before any driver install when `ubuntu-drivers` names nothing.
+
 ## Examples
 
 - `eg/Rexfile` — `detect`, `setup` and Rex::Rancher node/server/agent tasks
 - `eg/hetzner-gpu.pl` — full Hetzner deploy through Rex::Rancher
 - `eg/custom-setup/` — a setup class of your own (`My::GPU::Setup`), and `My::GPU::DebianMirror` for a Debian mirror
-- `eg/ubuntu-drivers/` — the Ubuntu package chosen by `ubuntu-drivers list --gpgpu`; `install_driver` alone with a GPU found without `lspci`
+- `eg/ubuntu-drivers/` — the Ubuntu package chosen by `ubuntu-drivers list --gpgpu` (`Rex::GPU::NVIDIA::Setup::UbuntuDrivers`); `install_driver` alone with a GPU found without `lspci`
 
 ## Requirements
 

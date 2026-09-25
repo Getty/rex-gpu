@@ -8,17 +8,6 @@ use namespace::autoclean;
 
 extends 'Rex::GPU::NVIDIA::Setup::Apt';
 
-=method kernel_packages
-
-The apt layer's running-kernel headers, plus C<linux-headers-generic>.
-
-=cut
-
-sub kernel_packages {
-  my ( $self ) = @_;
-  return ( $self->SUPER::kernel_packages, 'linux-headers-generic' );
-}
-
 =method sources
 
 Ubuntu's own C<-server> driver packages, in this order; each installs one
@@ -313,8 +302,24 @@ Ubuntu's C<nvidia-fabricmanager-NNN>, and C<nvlsm> from NVIDIA's CUDA
 repository, pinned so that nothing else comes from it
 (L</prepare_nvlink_fabric_source>).
 
+The kernel headers are the apt layer's
+(L<Rex::GPU::NVIDIA::Setup::Apt/kernel_packages>): C<linux-headers-$kernel>
+of the B<running> kernel only, never the C<linux-headers-generic>
+metapackage. That package follows the GA C<-generic> kernel, so on an HWE
+kernel or a vendor kernel (such as C<6.17.0-1029-nvidia> on a DGX Spark) it
+brings headers for a different kernel than the one DKMS builds for. The
+consequence: a kernel installed later does not get its headers from
+Rex::GPU; unless the host's kernel metapackage pulls them, DKMS cannot
+build the NVIDIA module for it, and after the reboot into that kernel no
+NVIDIA module loads. Install that kernel's C<linux-headers-*> with it, or run
+L<Rex::GPU::NVIDIA/install_driver> again after the upgrade.
+
+To let C<ubuntu-drivers list --gpgpu> name the driver package instead of
+C<apt-cache search>, use L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers>.
+
 =head1 SEE ALSO
 
-L<Rex::GPU::NVIDIA::Setup>, L<Rex::GPU::NVIDIA/install_driver>
+L<Rex::GPU::NVIDIA::Setup>, L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers>,
+L<Rex::GPU::NVIDIA/install_driver>
 
 =cut
