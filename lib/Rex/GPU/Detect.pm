@@ -542,15 +542,20 @@ package name, cannot be loaded or is not a subclass of C<Rex::GPU::Detect>.
 
 =method requirement_class
 
+B<Experimental.> The class detection asks for the generation of a device ID,
+for C<compute>: L<Rex::GPU::NVIDIA::Requirement>. Override it in a subclass
+to use another.
+
 =method vgpu_class
+
+B<Experimental.> The class detection asks for the vGPU type of a subsystem
+ID: L<Rex::GPU::NVIDIA::VGPU>. Override it in a subclass to use another.
 
 =method nvidia_class
 
-B<Experimental.> The classes detection asks: L<Rex::GPU::NVIDIA::Requirement>
-(the generation of a device ID, for C<compute>),
-L<Rex::GPU::NVIDIA::VGPU> (the vGPU type of a subsystem ID) and
-L<Rex::GPU::NVIDIA> (the RHEL-family OS names, for the C<pciutils>
-bootstrap). Override one in a subclass to use another.
+B<Experimental.> The class detection asks for the RHEL-family OS names, for
+the C<pciutils> bootstrap: L<Rex::GPU::NVIDIA>. Override it in a subclass to
+use another.
 
 =cut
 

@@ -1282,7 +1282,8 @@ sub _write_nvidia_v3_dropin {
 # that is not the bare clobber) => 0. When in doubt, 0.
 #
 # Pure (regex/string only, no run/file) so it is unit-testable offline, like
-# _containerd_nvidia_action / _nvidia_driver_present / _cdi_managed_source_present.
+# _containerd_nvidia_action / _cdi_managed_source_present /
+# Rex::GPU::NVIDIA::Setup->_driver_present.
 sub _is_rke2_clobber_tmpl {
   my ( $class, $content ) = @_;
   return 0 unless defined $content && length $content;
@@ -1495,7 +1496,7 @@ sub generate_cdi_specs {
 # (opted out, or no such unit) do NOT count as managed.
 #
 # Pure (regex/string/boolean only, no run/systemctl/test) so it is unit-testable
-# offline, like _nvidia_driver_present / _containerd_nvidia_action.
+# offline, like _containerd_nvidia_action / Rex::GPU::NVIDIA::Setup->_driver_present.
 sub _cdi_managed_source_present {
   my ( $class, %s ) = @_;
   my $enabled = $s{enabled_state} // '';

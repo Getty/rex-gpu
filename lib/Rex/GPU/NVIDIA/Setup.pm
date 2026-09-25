@@ -1566,21 +1566,24 @@ requirement again. The built-in L<Rex::GPU::NVIDIA::Setup::UbuntuDrivers>
 is such a class: it asks C<ubuntu-drivers list --gpgpu> (read-only) for the
 Ubuntu package instead of C<apt-cache search>; the package it names is
 installed and verified by the inherited steps, not by C<ubuntu-drivers
-install>. In outline:
+install>. The outline of another such class, which installs the package an
+operator names in a file on the host instead of the newest one the repository
+offers:
 
-  package My::GPU::UbuntuDrivers;
+  package My::GPU::PinnedPackage;
   use Moo;
   extends 'Rex::GPU::NVIDIA::Setup::Ubuntu';
 
   sub resolve_source {
     my ( $self, $source ) = @_;
-    return $self->SUPER::resolve_source($source) unless defined $source->{search};
-    my $list = $self->run_cmd('ubuntu-drivers list --gpgpu 2>/dev/null', auto_die => 0);
-    # ... pick the newest nvidia-driver-NNN-server(-open) line of the
-    # source's kernel module flavour, then:
+    my $pin = $self->run_cmd('cat /etc/nvidia-driver-pin 2>/dev/null', auto_die => 0) // '';
+    my ( $pkg, $branch ) = $pin =~ /^(nvidia-driver-(\d+)-server(?:-open)?)\s*$/
+      or return $self->SUPER::resolve_source($source);
+    # ... return { %$source, unavailable => 'why' } unless the pinned
+    # package's flavour (-open or not) is the source's kernel_module, then:
     my %resolved = ( %$source, packages => [ $pkg ], verify => [ $pkg ], branch => $branch );
     delete $resolved{branch_at_least};
-    return \%resolved;   # or { %$source, unavailable => 'why' }
+    return \%resolved;
   }
 
 =head2 Choosing it
