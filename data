@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-09-25T03:56:48Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T03:56:48Z
+created: 2026-09-24T21:49:49Z
+id: 69
+priority: medium
+started: 2026-09-25T03:24:53Z
+status: done
+tags:
+- ocp
+- ubuntu
+- driver
+- escalated-from:kubernetes-ocp#155
+title: 'Ubuntu: linux-headers-generic und Treiberwahl hindern OCP an install_driver'
+updated: 2026-09-25T03:56:48Z
+---
+
+kubernetes-ocp k155 stellt den Treiberzweig auf Rex::GPU::NVIDIA::install_driver um (Debian, RHEL, ...), behaelt fuer Ubuntu aber seinen eigenen Weg, weil Setup::Ubuntu 0.002 zwei OCP-Regeln verletzt:
+
+1. kernel_packages installiert zusaetzlich linux-headers-generic. Auf einem Vendor-Kernel (DGX Spark: 6.17.0-1029-nvidia) zieht das Header fuer einen ANDEREN Kernel, DKMS baut gegen den falschen Baum. OCP installiert ausschliesslich linux-headers-$(uname -r) (so wie Setup::Apt es fuer Debian richtig macht).
+2. Treiberwahl: OCP laesst `ubuntu-drivers install` den Treiber waehlen (Zweig, open/proprietaer und Architektur aus dem PCI-Modalias) und stirbt ohne Fallback auf einen geratenen Paketnamen. Rex::GPU nimmt das neueste nvidia-driver-NNN-server per apt-cache search; ubuntu-drivers gibt es nur als eg/-Beispiel ueber die experimentelle Setup-API (eg/ubuntu-drivers, list --gpgpu).
+
+Wunsch: Setup::Ubuntu ohne linux-headers-generic (oder abschaltbar), und ubuntu-drivers als eingebaute, nicht-experimentelle Quelle/Option. Dann kann OCP auch auf Ubuntu install_driver nutzen. Weiter bei OCP: Toolkit-Check nur ueber Binaries (nvidia-container-runtime + nvidia-ctk), nicht ueber das dpkg-Paket -- bewusst OCP-Politik, keine Luecke.
+
+Umgesetzt (uncommitted): Setup::Ubuntu ohne linux-headers-generic, nur linux-headers-$(uname -r). Neu: Rex::GPU::NVIDIA::Setup::UbuntuDrivers (opt-in via setup => / set gpu_nvidia_setup, experimental; ubuntu-drivers list --gpgpu nennt das Paket, Installation per apt-get + dpkg -l, kein apt-cache-Fallback, Requirement-Check bleibt). Default bleibt Setup::Ubuntu. Hinweis OCP: ubuntu-drivers waehlt das Paket innerhalb des von Rex::GPU gewaehlten Flavours (open/proprietaer), nicht den Flavour selbst. prove gruen, nicht auf Hardware.
