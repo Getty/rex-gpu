@@ -261,7 +261,11 @@ my %GPU_LINE = (
   pascal    => '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GP108 [GeForce GT 1030] [10de:1d01] (rev a1)',
   maxwell   => '01:00.0 VGA compatible controller [0300]: NVIDIA Corporation GM204 [GeForce GTX 980] [10de:13c0] (rev a1)',
   # HGX H100 GPU (karr #23), name as pci.ids 2025 resolves 10de:2330
-  h100      => '18:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)'
+  h100      => '18:00.0 3D controller [0302]: NVIDIA Corporation GH100 [H100 SXM5 80GB] [10de:2330] (rev a1)',
+  # Grace Hopper GH200 (karr #72): open kernel module only, by maintainer
+  # decision; name as pci.ids 2026-09-26 resolves 10de:2342 ("GH100 [GH200
+  # 120GB / 480GB]", the die shared with H100)
+  gh200     => '18:00.0 3D controller [0302]: NVIDIA Corporation GH100 [GH200 120GB / 480GB] [10de:2342] (rev a1)'
 );
 
 sub gpu_fixture {

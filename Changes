@@ -5,6 +5,9 @@ Revision history for Rex-GPU
     checked against the commands they send to the host.
 
   [Driver]
+  - Grace Hopper GH200 (10de:2342, 10de:2348) gets the open kernel module
+    only, as Blackwell: Ubuntu -server-open, Debian 12/13 NVIDIA's CUDA
+    repository, RHEL cuda-open-dkms, openSUSE its open driver.
   - Ubuntu: only the running kernel's linux-headers-$(uname -r) are
     installed, no longer linux-headers-generic, which brought headers for
     another kernel on HWE and vendor kernels (DGX Spark). A kernel

@@ -21,6 +21,13 @@ use Test::More;
 # supportedchips README first list 2E12 in driver 580.119.02. The T1 claim
 # "GB10 => Blackwell, 570" is REPLACED by that, deliberately.
 #
+# GH200 (2342, 2348) are narrow rows ahead of the Turing-to-Hopper block they
+# sit inside (karr #72, maintainer decision -- NVIDIA's own driver README
+# still lists Hopper as proprietary-supported, with no Grace exception):
+# open kernel module, min_branch 535 (2342) / 565 (2348), compute 1. The
+# neighbours 2341/2343/2347/2349 stay on the block's unbound $TAH row, so the
+# boundary of each narrow row is pinned on both sides.
+#
 # NOT covered: which driver a real host gets. The Setup classes pick their
 # sources with this object (t/99, t/96), but none of it runs a package
 # manager or a GPU.
@@ -43,6 +50,8 @@ my $GB10    = [ 'Blackwell', 'open', 580, undef ];
 my $MPV     = [ 'Maxwell/Pascal/Volta', 'proprietary', undef, 580 ];
 my $TAH     = [ 'Turing/Ampere/Ada/Hopper', 'either', undef, undef ];
 my $KEP     = [ 'Kepler or older', 'proprietary', undef, 470 ];
+my $GH200A  = [ 'Grace Hopper', 'open', 535, undef ];   # 2342, 120GB/480GB
+my $GH200B  = [ 'Grace Hopper', 'open', 565, undef ];   # 2348, 144G HBM3e
 
 subtest 'generation table at the range boundaries' => sub {
   my %want = (
@@ -50,6 +59,10 @@ subtest 'generation table at the range boundaries' => sub {
     '1340' => $MPV, '1db4' => $MPV, '1DB4' => $MPV, '1df6' => $MPV,
     '1df7' => $TAH, '1e02' => $TAH, '1f97' => $TAH, '2330' => $TAH, '28f8' => $TAH,
     '28ff' => $TAH,
+    # GH200 (karr #72): narrow rows ahead of the Turing-to-Hopper block they
+    # sit inside; the neighbours just outside them stay $TAH.
+    '2341' => $TAH, '2342' => $GH200A, '2343' => $TAH,
+    '2347' => $TAH, '2348' => $GH200B, '2349' => $TAH,
     '2900' => $BW, '2901' => $BW, '2e11' => $BW, '2e13' => $BW, '2fff' => $BW,
     '2e12' => $GB10, '2E12' => $GB10,
     '3000' => $UNKNOWN, '3181' => $UNKNOWN,
@@ -263,7 +276,7 @@ subtest 'compute by generation: Maxwell and later 1, Kepler or older 0' => sub {
   # supports it -- the generation decides, not the name). The flag is now
   # three-valued: 1 (Maxwell .. Blackwell Ultra), 0 (Kepler or older, skipped
   # with a warning), undef (no row: the name rules and the unknown default).
-  for my $id (qw( 1340 1380 13c0 174d 1d01 1db4 1df6 1df7 1e02 1f97 2330 28ff
+  for my $id (qw( 1340 1380 13c0 174d 1d01 1db4 1df6 1df7 1e02 1f97 2330 2342 2348 28ff
                   2900 2901 2c18 2c77 2bb9 2e12 2fff 3182 31c2 31c3 )) {
     is( $R->for_device_id($id)->compute, 1, $id.' => table compute 1' );
     is( Rex::GPU::Detect->_is_nvidia_compute( '0300', 'Device', $id ), 1,

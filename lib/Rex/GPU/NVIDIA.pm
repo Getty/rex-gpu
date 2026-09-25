@@ -278,13 +278,14 @@ source and why it was rejected. What the requirement picks:
 
 =over
 
-=item * B<No constraint> (Turing, Ampere, Ada, Hopper and every GPU the
-table does not know; no GPU): the first source -- Ubuntu the newest
+=item * B<No constraint> (Turing, Ampere, Ada, Hopper except GH200, and
+every GPU the table does not know; no GPU): the first source -- Ubuntu the newest
 C<-server>, Debian C<non-free> C<nvidia-driver>, RHEL C<open-dkms>,
 openSUSE open C<G06>/C<G07>.
 
-=item * B<Blackwell> (open kernel module only, branch 570 or newer; GB10 and
-Blackwell Ultra 580 or newer): Ubuntu the newest C<-server-open>. On Debian
+=item * B<Blackwell> and B<Grace Hopper GH200> (open kernel module only;
+Blackwell branch 570 or newer, GB10 and Blackwell Ultra 580 or newer, GH200
+C<2342> 535 or newer and C<2348> 565 or newer): Ubuntu the newest C<-server-open>. On Debian
 no Debian-packaged driver fits (bookworm ships 535, trixie 550), so the
 driver comes from NVIDIA's CUDA apt repository instead of C<non-free>: the
 C<cuda-keyring> package for C<debian12> or C<debian13> (C<x86_64> for amd64,
@@ -1627,13 +1628,19 @@ below.
 
 =over
 
-=item * B<Turing, Ampere, Ada, Hopper> and unknown IDs: the default per-distro
-selection.
+=item * B<Turing, Ampere, Ada, Hopper> (GH200 excepted) and unknown IDs: the
+default per-distro selection.
 
 =item * B<Blackwell> (B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell,
 GB10), on any CPU architecture: it has no proprietary kernel module. Ubuntu
 selects the C<-server-open> variant. Debian 12/13 installs the open-module set
 from NVIDIA's CUDA repository instead of C<non-free>.
+
+=item * B<Grace Hopper GH200> (C<10de:2342>, C<10de:2348>): the same open
+kernel module selection as Blackwell. NVIDIA's driver README still lists
+Hopper as supported by the proprietary module; the open-only rule follows
+NVIDIA's statement that Grace Hopper platforms need the open modules (see
+L<Rex::GPU::NVIDIA::Requirement/generations>).
 
 =item * B<Maxwell, Pascal, Volta> (e.g. V100, P100, GeForce GT 1030, GTX
 980): only the proprietary

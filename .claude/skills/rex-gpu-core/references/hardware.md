@@ -6,13 +6,15 @@ do not "simplify" one away without a ticket.
 ## GPU generations — `Rex::GPU::NVIDIA::Requirement`
 
 `generations` (overridable) maps the PCI device ID to `{kernel_module open|proprietary|either,
-min_branch, max_branch, compute}`. Rows cover 0000–2FFF gap-free plus 3182 / 31C2–31C3.
+min_branch, max_branch, compute}`. Rows cover 0000–2FFF gap-free plus 3182 / 31C2–31C3; narrower rows (2E12, 2342, 2348) sit ahead of the block they are in.
 
 | Device IDs | Generation | Module | Branch | `compute` |
 |---|---|---|---|---|
 | < 1340 | Kepler or older | — | ≤ 470 (rejected) | 0 |
 | 1340–1DF6 | Maxwell / Pascal / Volta | proprietary | ≤ 580 | 1 |
 | 1DF7–28FF | Turing .. Hopper | either | unbounded | 1 |
+| 2342 | GH200 120GB/480GB (maintainer decision k72; driver README still lists Hopper as proprietary-supported) | open | ≥ 535 | 1 |
+| 2348 | GH200 144G HBM3e (same) | open | ≥ 565 | 1 |
 | 2900–2FFF | Blackwell (B200 2901/2909, GB200 2941, RTX 50xx, RTX PRO) | open | ≥ 570 | 1 |
 | 2E12 | GB10 (DGX Spark) | open | ≥ 580 | 1 |
 | 3182, 31C2–31C3 | B300 / GB300 | open | ≥ 580 | 1 |

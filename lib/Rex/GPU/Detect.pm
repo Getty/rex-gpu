@@ -432,13 +432,14 @@ sub _is_nvidia_compute {
 Given an NVIDIA PCI device ID (the C<XXXX> in C<[10de:XXXX]>, lowercase or
 uppercase), returns true if that device is known to have B<no> proprietary
 kernel module at all — NVIDIA's I<open> GPU kernel modules are the only
-option: every Blackwell-architecture part, on any CPU architecture. True for
-an ID in the Blackwell device-ID ranges taken from NVIDIA's
-open-gpu-kernel-modules supported-GPU table (C<2900>-C<2FFF>: B200, GB200,
-GeForce RTX 50xx, RTX PRO Blackwell, GB10; plus B300 C<3182> and GB300
-C<31C2>/C<31C3>). Returns false for C<undef>, a malformed ID, and every ID
-outside those ranges — Turing/Ampere/Ada/Hopper parts and any future
-generation keep the default proprietary C<-server> selection. This function
+option: every Blackwell-architecture part, on any CPU architecture, and
+Grace Hopper GH200. True for an ID in the Blackwell device-ID ranges taken
+from NVIDIA's open-gpu-kernel-modules supported-GPU table (C<2900>-C<2FFF>:
+B200, GB200, GeForce RTX 50xx, RTX PRO Blackwell, GB10; plus B300 C<3182>
+and GB300 C<31C2>/C<31C3>) and for GH200 C<2342>/C<2348> (open-only by
+maintainer decision, see L<Rex::GPU::NVIDIA::Requirement/generations>).
+Returns false for C<undef>, a malformed ID, and every other ID — the other
+Turing/Ampere/Ada/Hopper parts and any future generation keep the default proprietary C<-server> selection. This function
 only answers the driver-variant question; which GPUs are compute-capable is
 L</NVIDIA compute classification>.
 

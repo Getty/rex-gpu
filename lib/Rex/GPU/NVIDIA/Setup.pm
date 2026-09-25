@@ -34,8 +34,8 @@ another way (e.g. sysfs, without C<lspci>) passes just these:
 =item * C<device_id> -- the PCI device ID as four hex digits, without
 C<0x> and without a trailing newline (C<2b85>; sysfs C<device> reads
 C<0x2b85>). It is what the driver is chosen by
-(L<Rex::GPU::NVIDIA::Requirement>): Kepler is refused, Blackwell gets the
-open kernel module, Maxwell/Pascal/Volta the 580 branch. Any other defined
+(L<Rex::GPU::NVIDIA::Requirement>): Kepler is refused, Blackwell and GH200
+get the open kernel module, Maxwell/Pascal/Volta the 580 branch. Any other defined
 value croaks in C<new> (and in L</adopt>), before anything touches the
 host -- it would otherwise silently count as an unknown GPU and lose those
 guards. Leaving it out (or C<undef>, as detection does for an C<lspci> line

@@ -58,8 +58,8 @@ Decided by generation (PCI device ID), whatever the marketing name or PCI class:
 
 | Generation | Compute | Driver |
 |---|---|---|
-| Turing, Ampere, Ada, Hopper | yes | the distro's default (Ubuntu newest `-server`, Debian `non-free`, RHEL CUDA-repo open DKMS, openSUSE open `G06`/`G07`) |
-| Blackwell, Blackwell Ultra (B200/GB200/B300, RTX 50xx, RTX PRO Blackwell, GB10) | yes | open kernel module only: Ubuntu `-server-open`, Debian 12/13 NVIDIA's CUDA repository (other Debian releases die before any driver package is installed) |
+| Turing, Ampere, Ada, Hopper (except GH200) | yes | the distro's default (Ubuntu newest `-server`, Debian `non-free`, RHEL CUDA-repo open DKMS, openSUSE open `G06`/`G07`) |
+| Blackwell, Blackwell Ultra (B200/GB200/B300, RTX 50xx, RTX PRO Blackwell, GB10), Grace Hopper GH200 | yes | open kernel module only: Ubuntu `-server-open`, Debian 12/13 NVIDIA's CUDA repository (other Debian releases die before any driver package is installed) |
 | Maxwell, Pascal, Volta (V100, P100, GTX 9xx/10xx, GT 1030, MX1xx–MX3xx) | yes | proprietary 580 branch, their last: Ubuntu `nvidia-driver-580-server`, RHEL pinned 580 kmod, openSUSE `G06` proprietary, Debian `non-free` |
 | Kepler and older (K80/K40/K20, GT 710, GTX 7xx) | no | none — last branch 470 is no longer packaged; skipped with a warning at any PCI class, a newer GPU on the same host still gets its driver |
 

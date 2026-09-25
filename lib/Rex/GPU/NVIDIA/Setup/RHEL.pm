@@ -122,7 +122,7 @@ C<nvidia-driver> must be a 580 (L</verify_packages>).
 C<nvidia-driver> is verified on both, plus the proprietary kmod on the
 second. On a host with NVSwitches both install C<nvidia-fabricmanager> of
 the installed C<nvidia-driver>'s exact version
-(C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without constraints and Blackwell get C<cuda-open-dkms>,
+(C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without constraints, Blackwell and GH200 get C<cuda-open-dkms>,
 Maxwell/Pascal/Volta C<cuda-580-dkms>.
 
 On an HGX B200/B300 (L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_needed>)
