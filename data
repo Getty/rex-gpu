@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-09-25T13:36:42Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T13:36:42Z
+created: 2026-09-25T04:25:51Z
+id: 71
+priority: medium
+started: 2026-09-25T04:26:02Z
+status: done
+tags:
+- refactor
+- api
+- extensibility
+title: 'GPU/Detect/NVIDIA.pm: alles ueber $class-> dispatchen, eigene Klassen einsetzbar'
+updated: 2026-09-25T13:36:42Z
+---
+
+Ziel: jede Funktion in GPU.pm, Detect.pm, NVIDIA.pm per Unterklasse ueberschreibbar (Setup-Klassen sind es schon).
+
+Design (vom Maintainer entschieden 2026-09-25):
+1. Oeffentliche Funktionen nehmen beide Aufrufarten: foo(%opts) / Pkg::foo(...) wie heute UND Class->foo(...). Erkennung: erstes Argument ist Klassenname/Objekt, das ->isa(__PACKAGE__). Funktionsaufruf -> konfigurierte Klasse; ist die nicht __PACKAGE__, wird als Methode an sie weitergereicht. Signaturen unveraendert (Rancher: Rex::GPU::gpu_setup(...), OCP: Rex::GPU::NVIDIA::install_driver/install_container_toolkit/verify_nvidia, Glob-Stubs in deren Tests).
+2. Intern alles ueber $class->: private Helfer werden Klassenmethoden; setup_for/custom_setup/setup_class_for_os ueber $class; Detect bekommt requirement_class/vgpu_class; _rhel_family_name wird Methode statt Cross-Modul-Funktionsaufruf; Toolkit-Schritte ohne hartes Setup::Apt->new / Setup::SUSE->; verify_nvidia_driver libcuda_command ueber gewaehlte Setup-Klasse; Setup.pm _coerce_requirement isa gegen requirement_class.
+3. Injection: set gpu_nvidia_class / set gpu_detect_class, plus gpu_setup(nvidia => ..., detect => ...) (Klassenname, validiert wie custom_setup). Additiv, Default unveraendert.
+4. Test-Shims in NVIDIA.pm (_nvidia_driver_present, _reject_unsupported_legacy_gpu, _apt_candidate_present, _rpm_version_in_branch, _sources_list_enable_nonfree, _deb822_enable_nonfree, _cuda_repo_arch, _os_major_version) entfallen; Tests rufen die Setup-Methode direkt.
+5. Rex-DSL (run/file/pkg/...) bleibt bare -- Golden-Harness patcht diese Globs.
+
+Nachweis: t/golden/ byte-gleich, keine Regeneration. Tests mechanisch auf Methodenaufrufe umstellen.
+
+Commit 01eaf3c. prove 33/1685 gruen, goldens byte-gleich, rex-rancher t/ und kubernetes-ocp t/155* gegen dieses lib gruen. Offen zur Abnahme: (1) kein set fuer Rex::GPU selbst, (2) Detect nutzt fuer _rhel_family_name fest Rex::GPU::NVIDIA, (3) Override, der die Basis per Funktionsname statt SUPER:: ruft, loopt unter set gpu_nvidia_class (POD). Caveat: configure_containerd('Rex::GPU::NVIDIA') wird als Methodenaufruf gelesen.
