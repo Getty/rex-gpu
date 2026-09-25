@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-09-25T04:25:25Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T04:25:25Z
+created: 2026-09-11T02:43:09Z
+id: 5
+priority: low
+started: 2026-09-25T04:03:49Z
+status: done
+title: Detection name extraction inaccurate (AMD regex broken, NVIDIA/AMD POD examples
+  wrong)
+updated: 2026-09-25T04:25:25Z
+---
+
+Aufgedeckt durch die neuen Characterization-Tests t/10-detect.t (commit 42f10d3). Reine Detektions-NAMENS-Ungenauigkeit -- betrifft HEUTE keine Install-Entscheidung (AMD compute hart 0; NVIDIA-compute haengt an Klasse/Familie, nicht am Namen). Capture, nicht gefixt -- braucht eine Contract-Entscheidung.
+
+1) AMD-Namens-Regex in _parse_amd_line ist kaputt fuer das Standard-lspci-nn-Format:
+     /:\s+(?:Advanced Micro Devices|AMD\/ATI)\s+.*?\s+(.+?)\s*\[1002:/
+   Bei "... [0300]: Advanced Micro Devices, Inc. [AMD/ATI] Navi 31 [Radeon RX 7900 XTX] [1002:744c]" matcht nichts:
+   - nach "Advanced Micro Devices" folgt ", Inc." (Komma, kein Whitespace) -> das geforderte \s+ scheitert
+   - die Alternative "AMD/ATI" steht in Klammern [AMD/ATI], ohne ":\s+" unmittelbar davor
+   Folge: name faellt auf den Default "Unknown AMD GPU" zurueck. Detect-only, daher low -- wird relevant, falls AMD-Support (Karte #1) landet.
+
+2) NVIDIA-Name != POD: _parse_nvidia_line liefert z.B. "AD104GL [RTX 4000 SFF Ada Generation]" (Codename + Klammer-Marketing, ohne "NVIDIA "-Praefix). Die POD-SYNOPSIS in Detect.pm UND GPU.pm bewerben name => "NVIDIA RTX 4000 SFF Ada Generation". Code != POD. Kosmetisch (Name steuert keinen Branch).
+
+Entscheidung noetig: entweder Regex/Namen auf die beworbene (bereinigte) Form bringen, ODER die POD-Beispiele ans IST-Verhalten anpassen. Behavior-relevant -> nicht geraten.
+
+2026-09-12 02:47 NVIDIA-Name/POD-Haelfte erledigt in commit a283587: SYNOPSIS-Beispiele in Detect.pm/GPU.pm auf das Ist-Verhalten 'AD104GL [RTX 4000 SFF Ada Generation]' korrigiert. VERBLEIBEND: AMD-Regex-Bug (_parse_amd_line) -- bewusst zurueckgestellt zusammen mit AMD-Treiber-Support #1. Bleibt bis dahin im Backlog.
+
+2026-09-20 19:51 Claim gelöst: NVIDIA-/POD-Haelfte ist erledigt (a283587), verbleibender AMD-Regex-Bug in _parse_amd_line ist bewusst hinter #1 (AMD-Support) zurueckgestellt. Kein aktiver Arbeitsanteil -- bleibt bis #1 im Backlog.
