@@ -1,0 +1,14 @@
+---
+class: standard
+created: 2026-09-26T23:12:02Z
+id: 75
+priority: low
+status: backlog
+tags:
+- detect
+- amd
+title: 'Detect: AMD Instinct (PCI-Klasse 0380) wird nicht erkannt'
+updated: 2026-09-26T23:12:02Z
+---
+
+Beim Bau des sysfs-Backends (k73) aufgefallen: AMD Instinct MI100/MI200/MI300 melden sich mit PCI-Klasse 0380 (Display controller), beide Erkennungspfade sehen nur 0300/0302. AMD ist ohnehin nur detect-only (compute 0, kein Treiber) -- Folge ist nur, dass detect die Karte nicht auflistet und gpu_setup keine AMD-Warnung loggt. Vor einer Aenderung pruefen: welche NVIDIA-Geraete sich mit 0380 melden (keine bekannt), und ob 0380 in die Klassenliste soll oder nur fuer 1002. Nicht vor 0.003 noetig.
