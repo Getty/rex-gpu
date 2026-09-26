@@ -1,0 +1,18 @@
+---
+class: standard
+completed: 2026-09-26T02:01:47Z
+created: 2026-09-25T04:25:30Z
+id: 70
+priority: low
+started: 2026-09-26T02:01:47Z
+status: archived
+tags:
+- detection
+- amd
+title: 'detect(): AMD Instinct (PCI-Klasse 0380) wird nicht erkannt'
+updated: 2026-09-26T02:01:47Z
+---
+
+detect() greppt nur [0300]/[0302]. AMD Instinct (MI300X u.a.) meldet sich als Display controller [0380] und erreicht _parse_amd_line nie. Aufgefallen bei k5. Detect-only (AMD compute=0), relevant fuer k1. Vorher klaeren, ob auch NVIDIA-Geraete mit 0380 auftauchen und was dann mit ihnen passieren soll (Installentscheidung!).
+
+2026-09-26 Maintainer: keine AMD-GPUs im Einsatz, nicht verfolgt. Archiviert.
