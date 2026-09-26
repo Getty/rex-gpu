@@ -40,6 +40,15 @@ class `[0300]`/`[0302]`, vendor `10de` NVIDIA / `1002` AMD. `compute` is decided
 warning — keep it 0. `detect()` first ensures `lspci` (`command -v`, else pciutils via
 dnf + `rpm -q` on RHEL names Rex::Pkg can't handle; k46).
 
+`Rex::GPU::Detect::Sysfs` (k73, opt-in via the k71 class mechanism — `lspci` stays the
+default, never auto-switched) reads `/sys/bus/pci/devices` in one builtin-only `run`,
+installs nothing, same result shape. No names ⇒ synthetic `NVIDIA GPU [10de:XXXX]`, and
+where lspci would reach the name rules `compute` is **`undef`** (the Sysfs override of
+`_nvidia_compute_by_name`), not 0 — `gpu_setup`'s grep still skips it. NVSwitch by listed
+ID only. Missing/unreadable sysfs, a failed read, an unreadable `class`/`vendor` ⇒ croak,
+never "no GPU". Shared with the lspci path, one list each: `requirement_class`,
+`vgpu_class` (`_mark_vgpu`), `nvswitch_device_ids`, `virtual_display_vendor_ids`.
+
 **Hardware and distro combinations live in [references/hardware.md](references/hardware.md)**
 (`.claude/skills/rex-gpu-core/references/hardware.md` from the repo root; not preloaded — Read it)
 — generation/ID table, virtual displays, vGPU guests, NVSwitch / HGX B200/B300 NVLink
@@ -52,7 +61,7 @@ it in the same change.
 min_branch, max_branch}` via its overridable `generations` table (ranges in the reference).
 Unknown ID ⇒ `either`, no bounds. `intersect` combines several GPUs and croaks on
 conflict (`conflicts` lists without dying). The `compute` flag lives in these rows (one
-table, no second list); Detect reads the base table, not a subclass.
+table, no second list); Detect reads it through its overridable `requirement_class` (k71).
 `Detect::open_kernel_module_required` / `legacy_driver_requirement` are thin wrappers.
 
 **Selection is data, not branches** (k33): each Setup class has ordered `sources`
@@ -140,7 +149,7 @@ nouveau; without it the NVIDIA module can't bind. `verify_nvidia` (module loaded
 
 ## Housekeeping
 
-`$VERSION` is repeated in every module under `lib/` (`GPU.pm`, `Detect.pm`, `NVIDIA.pm`,
+`$VERSION` is repeated in every module under `lib/` (`GPU.pm`, `Detect.pm`, `Detect/Sysfs.pm`, `NVIDIA.pm`,
 `NVIDIA/Requirement.pm`, `NVIDIA/VGPU.pm`, `NVIDIA/Setup.pm` and every `NVIDIA/Setup/*.pm`) — bump them together
 (`grep -rn 'our \$VERSION' lib/`). A change to what a Rexfile author sees (a new option, a
 detection outcome, a package choice) wants a `Changes` `{{$NEXT}}` entry naming the effect

@@ -43,6 +43,10 @@ directly.
   `maint/gen-vgpu-types.pl`) sets `vgpu 0|1` (+`vgpu_type`). Unknown pair ⇒ 0, `compute`
   untouched. `plan` dies for any `vgpu` GPU after `already_installed`, so a working GRID
   driver passes.
+- **`Detect::Sysfs`** (k73): the same list (`virtual_display_vendor_ids`) per device, and
+  the subsystem IDs straight from sysfs `subsystem_vendor`/`subsystem_device` (no slot
+  matching) into the same `_mark_vgpu`. NVSwitch: class `0680` + an ID in
+  `nvswitch_device_ids` only — no name to accept by.
 
 ## Multi-GPU fabrics
 

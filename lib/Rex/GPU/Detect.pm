@@ -29,8 +29,10 @@ use vars qw(@EXPORT);
 # [0300] = VGA controller, [0302] = 3D controller (datacenter GPUs)
 my $PCI_DISPLAY_RE = qr/\[03(?:00|02)\]/;
 
-# Virtual GPU vendor IDs — skip these (no host driver needed)
-my $VIRTUAL_GPU_RE = qr/\[(?:1af4|1b36|15ad|80ee):[0-9a-f]{4}\]/i;
+# Virtual GPU vendor IDs — skip these (no host driver needed): virtio,
+# QEMU/QXL, VMware, VirtualBox. Read through virtual_display_vendor_ids, by
+# this lspci path and by Rex::GPU::Detect::Sysfs alike (karr #73).
+my @VIRTUAL_DISPLAY_VENDOR_IDS = qw( 1af4 1b36 15ad 80ee );
 
 # NVIDIA vendor ID
 my $NVIDIA_VENDOR_RE = qr/\[10de:[0-9a-f]{4}\]/i;
@@ -54,7 +56,8 @@ my $AMD_VENDOR_RE = qr/\[1002:[0-9a-f]{4}\]/i;
 # their NVSwitches "are not recognized as PCIe devices on the host system";
 # the host sees ConnectX-7 bridge functions instead, so lspci cannot find them.
 # GB200/GB300 NVL72 compute trays run no Fabric Manager at all (it runs on
-# the NVLink switch trays).
+# the NVLink switch trays). Read through nvswitch_device_ids, by this lspci
+# path and by Rex::GPU::Detect::Sysfs alike (karr #73).
 my $NVSWITCH_CLASS_RE = qr/\[0680\]/;
 my %NVSWITCH_DEVICE_IDS = (
   '1ac2' => { generation => 1 },
@@ -82,6 +85,13 @@ L<Rex::GPU/CLASSES OF YOUR OWN>.
 
 Detect GPU hardware on the remote host: parses C<lspci -nn> output filtered
 to PCI display-class devices (class codes C<03xx>).
+
+To detect without C<lspci> and without installing anything, choose
+L<Rex::GPU::Detect::Sysfs> (experimental, opt-in; e.g. C<set
+gpu_detect_class =E<gt> 'Rex::GPU::Detect::Sysfs'>): the same result shape,
+read from C</sys/bus/pci/devices>, but with no product names, so C<compute>
+is C<undef> where only a name could decide, and it dies where sysfs cannot
+be read.
 
 If C<lspci> is on the remote C<PATH> (C<command -v lspci>), nothing is
 installed. Otherwise C<pciutils> is installed first: through
@@ -133,7 +143,8 @@ C<nvswitch> lists the NVSwitch chips of an HGX baseboard (NVIDIA C<10de>
 devices of PCI class C<0680>, "Bridge"), found by a second, read-only
 C<lspci -nn -d 10de:> that runs only when an NVIDIA GPU was found; it is
 C<[]> otherwise. A device counts only if its ID is a known NVSwitch
-(C<1ac2> HGX-2, C<1af1> HGX A100, C<22a3> HGX H100/H200) or C<lspci> names
+(C<1ac2> HGX-2, C<1af1> HGX A100, C<22a3> HGX H100/H200; see
+L</nvswitch_device_ids>) or C<lspci> names
 it C<... NVSwitch>; another NVIDIA bridge device is logged and skipped. An
 NVSwitch host needs NVIDIA Fabric Manager, which L<Rex::GPU/gpu_setup>
 installs with the driver. HGX B200/B300 NVSwitches are B<not> detected:
@@ -175,6 +186,8 @@ sub detect {
   # (QXL, virtio-vga, ...) next to the real card, and a blob match hid the
   # real card (karr #17). Vendor checks run first, so a [10de:]/[1002:] line
   # is never classified virtual — only a line that is not NVIDIA/AMD can be.
+  my $virtual_ids = join '|', map { quotemeta } $class->virtual_display_vendor_ids;
+  my $virtual_re  = qr/\[(?:$virtual_ids):[0-9a-f]{4}\]/i;
   my $virtual = 0;
   my @nvidia_slots;
   for my $line (split /\n/, $pci_output) {
@@ -188,7 +201,7 @@ sub detect {
       my $gpu = $class->_parse_amd_line($line);
       push @{$result->{amd}}, $gpu if $gpu;
     }
-    elsif ($line =~ $VIRTUAL_GPU_RE) {
+    elsif ($line =~ $virtual_re) {
       $virtual++;
       Rex::Logger::info("  [skip] virtual display: $line");
     }
@@ -272,15 +285,25 @@ sub _detect_vgpu {
       && ( $rec->{device_id} // '' ) ne lc $gpu->{device_id};
     $gpu->{subsystem_vendor_id} = $rec ? $rec->{subsystem_vendor_id} : undef;
     $gpu->{subsystem_id}        = $rec ? $rec->{subsystem_id} : undef;
-    my $type = $class->vgpu_class->type_for(
-      $gpu->{device_id}, $gpu->{subsystem_id}, $gpu->{subsystem_vendor_id});
-    $gpu->{vgpu} = defined $type ? 1 : 0;
-    next unless defined $type;
-    $gpu->{vgpu_type} = $type;
-    Rex::Logger::info('  [vgpu] NVIDIA: '.$gpu->{name}.' is an NVIDIA vGPU guest device (type '
-      .$type.', 10de:'.$gpu->{device_id}.' subsystem '.$gpu->{subsystem_id}
-      .') -- it needs the licensed NVIDIA vGPU guest driver');
+    $class->_mark_vgpu($gpu);
   }
+  return;
+}
+
+# vgpu 0|1 and, for 1, vgpu_type on a GPU hash whose device_id,
+# subsystem_vendor_id and subsystem_id are set (four lowercase hex digits or
+# undef). Shared with Rex::GPU::Detect::Sysfs, which reads the subsystem IDs
+# from sysfs instead of lspci -vmmnn.
+sub _mark_vgpu {
+  my ( $class, $gpu ) = @_;
+  my $type = $class->vgpu_class->type_for(
+    $gpu->{device_id}, $gpu->{subsystem_id}, $gpu->{subsystem_vendor_id});
+  $gpu->{vgpu} = defined $type ? 1 : 0;
+  return unless defined $type;
+  $gpu->{vgpu_type} = $type;
+  Rex::Logger::info('  [vgpu] NVIDIA: '.$gpu->{name}.' is an NVIDIA vGPU guest device (type '
+    .$type.', 10de:'.$gpu->{device_id}.' subsystem '.$gpu->{subsystem_id}
+    .') -- it needs the licensed NVIDIA vGPU guest driver');
   return;
 }
 
@@ -335,7 +358,8 @@ sub _parse_nvswitch_line {
   my ($device_id) = $line =~ /\[10de:([0-9a-f]{4})\]/i;
   my ($name) = $line =~ /:\s+NVIDIA\s+Corporation\s+(.+?)\s*\[10de:/;
   $name //= 'Unknown NVIDIA bridge';
-  unless ($NVSWITCH_DEVICE_IDS{lc $device_id} || $name =~ /\bNVSwitch\b/i) {
+  unless (( grep { $_ eq lc $device_id } $class->nvswitch_device_ids )
+    || $name =~ /\bNVSwitch\b/i) {
     Rex::Logger::info("  [skip] NVIDIA bridge device not known as an NVSwitch: $name [10de:$device_id]");
     return;
   }
@@ -370,7 +394,20 @@ sub _parse_nvidia_line {
   };
 }
 
+# 1 (compute) or 0: the generation row or the PCI class decides; only where
+# neither does, the name (karr #73: Rex::GPU::Detect::Sysfs has no name and
+# overrides that half to return undef, "undecided"). Always exactly one
+# value, also in list context.
 sub _is_nvidia_compute {
+  my ( $class, $pci_class, $name, $device_id ) = @_;
+  my $compute = $class->_nvidia_compute_by_generation($pci_class, $name, $device_id);
+  return $compute if defined $compute;
+  return scalar $class->_nvidia_compute_by_name($pci_class, $name, $device_id);
+}
+
+# 0 or 1 where the device ID's generation row or the PCI class decides; undef
+# (bare return) where neither does.
+sub _nvidia_compute_by_generation {
   my ( $class, $pci_class, $name, $device_id ) = @_;
 
   # The generation decides, not the marketing name (karr #45, #54; maintainer
@@ -400,6 +437,13 @@ sub _is_nvidia_compute {
   # (or no ID) the class alone decides.
   return 1 if $pci_class eq '0302';
   return 1 if $req->compute;
+  return;
+}
+
+# The name rules, for a GPU the generation and the class left undecided: 1
+# for a name of Maxwell or later, else 0 with the unknown-model warning.
+sub _nvidia_compute_by_name {
+  my ( $class, $pci_class, $name, $device_id ) = @_;
 
   # Name rules: reached only for an ID no generation row covers (0x3000 and
   # up, bar Blackwell Ultra: silicon newer than the table) or no ID at all.
@@ -558,6 +602,26 @@ B<Experimental.> The class detection asks for the RHEL-family OS names, for
 the C<pciutils> bootstrap: L<Rex::GPU::NVIDIA>. Override it in a subclass to
 use another.
 
+=method nvswitch_device_ids
+
+  my @ids = Rex::GPU::Detect->nvswitch_device_ids;   # ( '1ac2', '1af1', '22a3' )
+
+B<Experimental.> The NVIDIA (C<10de>) PCI device IDs, four lowercase hex
+digits, that count as an NVSwitch in L</detect>'s C<nvswitch>: HGX-2
+C<1ac2>, HGX A100 C<1af1>, HGX H100/H200 C<22a3>. The one list for both
+detections -- the C<lspci> one here and L<Rex::GPU::Detect::Sysfs> --
+so an override in a subclass changes both.
+
+=method virtual_display_vendor_ids
+
+  my @ids = Rex::GPU::Detect->virtual_display_vendor_ids;
+  # ( '1af4', '1b36', '15ad', '80ee' )
+
+B<Experimental.> The PCI vendor IDs, four lowercase hex digits, of display
+devices skipped as virtual (virtio, QEMU/QXL, VMware, VirtualBox; see
+L</Virtual GPU filtering>). The one list for both detections; override it
+in a subclass to change both.
+
 =cut
 
 sub configured_class {
@@ -580,6 +644,10 @@ sub requirement_class { 'Rex::GPU::NVIDIA::Requirement' }
 sub vgpu_class { 'Rex::GPU::NVIDIA::VGPU' }
 
 sub nvidia_class { 'Rex::GPU::NVIDIA' }
+
+sub nvswitch_device_ids { sort keys %NVSWITCH_DEVICE_IDS }
+
+sub virtual_display_vendor_ids { @VIRTUAL_DISPLAY_VENDOR_IDS }
 
 # Called as a method (Rex::GPU::Detect->detect, My::GPU::Detect->detect):
 # the invocant, a class name or object that isa Rex::GPU::Detect. Called as a
@@ -610,7 +678,9 @@ sub _invocant {
 =head1 DESCRIPTION
 
 L<Rex::GPU::Detect> detects GPU hardware on a remote host by parsing
-C<lspci -nn> output and matching PCI vendor and class codes.
+C<lspci -nn> output and matching PCI vendor and class codes. Its subclass
+L<Rex::GPU::Detect::Sysfs> reads the same codes from
+C</sys/bus/pci/devices> instead, without C<lspci> (opt-in).
 
 =head2 Detection approach
 
@@ -736,7 +806,8 @@ Each names only Maxwell-or-later products.
 =back
 
 Unrecognised NVIDIA GPU models default to C<compute =E<gt> 0> and emit a
-warning. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
+warning. L<Rex::GPU::Detect::Sysfs>, which has no names, stops before the
+name rules: C<compute =E<gt> undef> there, also with a warning. AMD GPU C<compute> is always C<0>; AMD driver support is not yet
 implemented.
 
 Each detected NVIDIA GPU also carries its raw C<device_id> (the C<[10de:XXXX]>

@@ -21,6 +21,12 @@ Revision history for Rex-GPU
   - An AMD GPU's name is read from lspci as for NVIDIA, e.g.
     "Navi 31 [Radeon RX 7900 XTX]", instead of "Unknown AMD GPU" for
     every card. Detect-only as before: AMD stays compute => 0.
+  - New opt-in Rex::GPU::Detect::Sysfs (experimental): detection from
+    /sys/bus/pci/devices, without lspci and without installing pciutils;
+    same result shape including vgpu and nvswitch. No product names, so a
+    GPU the generation table does not cover is compute => undef, not 0.
+    Dies where sysfs cannot be read. Chosen with detect => or set
+    gpu_detect_class; lspci stays the default.
 
   [API]
   - Every function of Rex::GPU, Rex::GPU::Detect and Rex::GPU::NVIDIA

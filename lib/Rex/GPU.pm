@@ -77,7 +77,10 @@ L<Rex::GPU::Detect> for details on the classification logic.
 
 B<Experimental.> The one option, C<detect>, names the L<Rex::GPU::Detect>
 subclass that detects instead (see L</detect_class>); without it
-C<set gpu_detect_class> or C<Rex::GPU::Detect> does.
+C<set gpu_detect_class> or C<Rex::GPU::Detect> does. The built-in
+L<Rex::GPU::Detect::Sysfs> is one: it reads C</sys/bus/pci/devices>
+instead of C<lspci>, installs nothing, and returns the same shape without
+product names (C<compute> is C<undef> where only a name could decide).
 
 =cut
 
@@ -253,7 +256,10 @@ this option wins over it. See L</nvidia_class>.
 
 B<Experimental.> A subclass of L<Rex::GPU::Detect> (a class name) that
 detects the GPUs instead, passed to L</gpu_detect>; without it C<set
-gpu_detect_class>. See L</detect_class>.
+gpu_detect_class>. See L</detect_class>. C<detect =E<gt>
+'Rex::GPU::Detect::Sysfs'> detects from sysfs, without C<lspci> and
+without installing C<pciutils>; a GPU it leaves at C<compute =E<gt> undef>
+(no generation row, no name to judge) gets no driver here.
 
 =back
 

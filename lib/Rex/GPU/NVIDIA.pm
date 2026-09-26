@@ -88,6 +88,9 @@ just the first two; a GPU without C<vgpu> is not a vGPU:
 
   install_driver(gpu => { device_id => '2b85', name => 'NVIDIA GeForce RTX 5090' });
 
+L<Rex::GPU::Detect::Sysfs> finds them without C<lspci> in the full shape,
+vGPU keys and C<nvswitch> included.
+
 B<NVIDIA vGPU guest> (karr #24; C<vgpu =E<gt> 1>, see
 L<Rex::GPU::Detect/NVIDIA vGPU guests>): such a device needs NVIDIA's
 licensed vGPU guest (GRID) driver, which none of the package sources
@@ -269,7 +272,10 @@ needs C<nvidia-imex> and its configuration, which Rex::GPU does not set up.
 =back
 
 Omit C<gpus> and C<gpu> (or pass C<undef>) to keep the GPU-agnostic
-package selection.
+package selection. An empty C<gpus =E<gt> []> is the same: a driver is
+still installed, not skipped. A caller that filters its GPU list (e.g.
+drops C<compute> 0) and is left with none must not call C<install_driver>
+at all, as L<Rex::GPU/gpu_setup> does.
 
 Each distro's L<Rex::GPU::NVIDIA::Setup> class has an ordered list of
 driver sources; the first that fits the requirement is installed, and if
