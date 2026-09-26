@@ -472,6 +472,9 @@ my @READ_ONLY = (
   qr{${RUN}(?:LC_ALL=C )?apt-cache (?:search|policy) },
   qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^(?:ii|\[hi\]i)'$},
   qr{${RUN}nvidia-ctk --version 2>&1$},
+  # karr #74: install_container_toolkit(binaries_suffice => 1)'s `command -v`
+  # probes -- read-only on every OS, run before the package manager is asked
+  qr{${RUN}command -v \S+ 2>/dev/null$},
   qr{${RUN}test -s \S+$},
   qr{${RUN}rpm -q },
   qr{${RUN}lsmod },

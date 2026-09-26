@@ -671,6 +671,9 @@ sub _invocant {
 
 =method install_container_toolkit
 
+  install_container_toolkit();
+  install_container_toolkit(binaries_suffice => 1);
+
 Install the NVIDIA Container Toolkit (C<nvidia-container-toolkit> package)
 from the official NVIDIA package repository at
 L<https://nvidia.github.io/libnvidia-container/>.
@@ -687,7 +690,8 @@ nvidia-container-toolkit>, C<zypper update nvidia-container-toolkit>). An
 C<nvidia-ctk> that the package manager does not know about (e.g. unpacked by
 the GPU Operator) does not count: the package is installed, because
 L</configure_containerd> relies on the packaged
-C</usr/bin/nvidia-container-runtime>.
+C</usr/bin/nvidia-container-runtime> -- unless C<binaries_suffice> (below)
+is passed.
 
 Otherwise the repository GPG key is imported and the package repository is
 registered before installing. On Debian/Ubuntu the apt timers
@@ -715,12 +719,62 @@ The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
 through L<Rex::Commands::Pkg/pkg>, and the result is checked with C<dpkg -l>
 (C<ii>) or C<rpm -q> on every distro, openSUSE included.
 
-Dies if the OS is not supported or if installation fails.
+Dies if the OS is not supported or if installation fails, and, before
+anything is asked of the host, on an option other than C<binaries_suffice>
+or an odd-length option list.
+
+Options:
+
+=over 4
+
+=item C<binaries_suffice>
+
+A true value counts the toolkit as present when C<nvidia-container-runtime>
+and C<nvidia-ctk> are both found by C<command -v> on the C<PATH> Rex runs
+commands with and C<nvidia-ctk --version> runs; the package manager is not
+asked. C<install_container_toolkit> then logs both paths and the version
+and returns without touching the repository, the key or the package, on
+any OS -- the check runs before the OS family is decided, so an OS without
+an install path returns instead of dying when both binaries are there.
+
+It is for hosts whose binaries come from somewhere other than the package
+manager, such as vendor images like NVIDIA DGX Spark, where adding NVIDIA's
+package repository would change where the host's packages come from, and
+for callers that leave the containerd wiring to RKE2/K3s, which find
+C<nvidia-container-runtime> on the C<PATH> themselves.
+
+If either binary is missing or C<nvidia-ctk --version> fails, it logs why
+and goes on exactly as without the option (the package check above, then
+the install). A copy that is not on that C<PATH>, such as the GPU
+Operator's C</usr/local/nvidia/toolkit>, does not count.
+
+Not for use with L</configure_containerd>: its C<rke2>/C<k3s> configuration
+registers C</usr/bin/nvidia-container-runtime>. With the runtime elsewhere
+on the C<PATH> it either changes nothing (already wired) or registers a
+binary that does not exist, and every pod of runtime class C<nvidia> fails
+to start. L<Rex::GPU/gpu_setup> runs L</configure_containerd> and so never
+passes this option.
+
+=back
 
 =cut
 
 sub install_container_toolkit {
   my $class = _invocant(@_) // return __PACKAGE__->configured_class->install_container_toolkit(@_);
+  my ( undef, @args ) = @_;
+
+  # karr #74: the one option, checked before the host is asked anything. A
+  # misspelt binaries_suffice would otherwise fall through to the repository
+  # setup it exists to avoid.
+  die "install_container_toolkit: options are key => value pairs\n" if @args % 2;
+  my %opts = @args;
+  my @unknown = grep { $_ ne 'binaries_suffice' } sort keys %opts;
+  die 'install_container_toolkit: unknown option '.join(', ', @unknown)." (valid: binaries_suffice)\n"
+    if @unknown;
+
+  # No package manager is asked, so no OS family is needed either.
+  return if $opts{binaries_suffice} && $class->_toolkit_binaries_present;
+
   my $os = operating_system();
 
   my $family = is_debian() ? 'debian'
@@ -1044,6 +1098,38 @@ sub _toolkit_present {
     return 0;
   }
   Rex::Logger::info("NVIDIA Container Toolkit already present — skipping repository setup and install ($version)");
+  return 1;
+}
+
+# karr #74, binaries_suffice: the binaries a CRI execs, whoever put them
+# there -- a vendor image (DGX Spark) ships them outside the package manager,
+# and RKE2/K3s find nvidia-container-runtime on PATH themselves. The package
+# manager is not asked. `command -v` through run, as Detect's _has_lspci (karr
+# #46), not can_run: can_run runs the same `command -v` but then stats the
+# path through the file interface (SFTP on SSH/OpenSSH); run answers under
+# the PATH the later `run "nvidia-ctk ..."` calls get. nvidia-ctk must run,
+# as in _toolkit_present (karr #42): a broken one is no toolkit. Anything
+# less returns 0, and install_container_toolkit goes on as without the
+# option.
+sub _toolkit_binaries_present {
+  my ( $class ) = @_;
+  my %path;
+  for my $bin (qw( nvidia-container-runtime nvidia-ctk )) {
+    my $out = run "command -v $bin 2>/dev/null", auto_die => 0;
+    my $found = $? == 0;
+    ( $path{$bin} ) = split /\n/, ( $out // '' );
+    next if $found && defined $path{$bin} && length $path{$bin};
+    Rex::Logger::info("binaries_suffice: $bin not found on the PATH — checking for the nvidia-container-toolkit package as without the option");
+    return 0;
+  }
+  my $version = run "nvidia-ctk --version 2>&1", auto_die => 0;
+  if ($? != 0) {
+    Rex::Logger::info("binaries_suffice: $path{'nvidia-ctk'} does not run (nvidia-ctk --version failed) — checking for the nvidia-container-toolkit package as without the option", "warn");
+    return 0;
+  }
+  ($version) = split /\n/, ($version // '');
+  $version //= 'nvidia-ctk';
+  Rex::Logger::info("NVIDIA Container Toolkit already present (binaries_suffice: $path{'nvidia-container-runtime'}, $path{'nvidia-ctk'}, $version) — skipping repository setup and install; the package manager was not asked");
   return 1;
 }
 

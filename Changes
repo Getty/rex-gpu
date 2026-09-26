@@ -31,6 +31,12 @@ Revision history for Rex-GPU
     is touched. Function calls, their arguments and the defaults are
     unchanged.
 
+  [Container toolkit]
+  - install_container_toolkit(binaries_suffice => 1) counts the toolkit as
+    present when nvidia-container-runtime and nvidia-ctk are on the PATH and
+    nvidia-ctk runs, without asking the package manager (vendor images
+    such as DGX Spark); gpu_setup and the default are unchanged
+
 0.002     2026-09-24 21:34:32Z
   - None of the changes below has run on GPU hardware yet; they are
     checked against the commands they send to the host.

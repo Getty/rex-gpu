@@ -8,7 +8,7 @@ The full pipeline, driven by a single `gpu_setup()` call:
 
 1. **GPU detection** — scans PCI devices via `lspci -nn`, identifies NVIDIA and AMD hardware, filters out virtual GPUs (virtio, QEMU, VMware). Only CUDA-capable NVIDIA GPUs trigger installation, decided by the GPU generation read from the PCI device ID, not by name or PCI class (see [Supported GPUs](#supported-gpus)).
 2. **NVIDIA driver installation** — distribution-appropriate packages via DKMS for kernel-version independence, one driver chosen to fit every detected GPU. Blacklists `nouveau`, regenerates initramfs. Skipped if a working driver (`nvidia-smi -L` lists a GPU and `libcuda.so.1` is in the linker cache) is already there.
-3. **NVIDIA Container Toolkit** — installs from the official NVIDIA repository for all supported distributions; an already installed toolkit is left as it is, not upgraded.
+3. **NVIDIA Container Toolkit** — installs from the official NVIDIA repository for all supported distributions; an already installed toolkit is left as it is, not upgraded. Called on its own, `install_container_toolkit(binaries_suffice => 1)` also accepts a toolkit that is not a package (a vendor image that ships `nvidia-container-runtime` and `nvidia-ctk` on the `PATH`), for setups that leave the containerd wiring to RKE2/K3s.
 4. **CDI spec generation** — writes `/etc/cdi/nvidia.yaml` so the Kubernetes device plugin enumerates GPU resources without privileged containers.
 5. **Containerd runtime configuration** — injects the NVIDIA runtime into the containerd config for the target Kubernetes distribution (`rke2`, `k3s`, or standalone `containerd`).
 
