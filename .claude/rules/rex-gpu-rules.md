@@ -25,7 +25,7 @@ Depends on whether the Agent/Task tool is available to you.
 
 - **You can spawn subagents** (orchestrating main agent): Do NOT touch behavior-relevant
   code yourself — delegate. Your lane: coordinate, inspect, plan, review diffs, run tests,
-  manage git, edit non-behavioral docs. Why: only the `rex-gpu-*` agents get their skills
+  edit non-behavioral docs. Why: only the `rex-gpu-*` agents get their skills
   force-loaded via `briefing.skills`; you get no briefing and would touch code that installs
   drivers and reboots production servers with too little context.
 
@@ -34,7 +34,7 @@ Depends on whether the Agent/Task tool is available to you.
   | Implement / refactor / debug anything under `lib/` | `rex-gpu-worker` (default) |
   | New tests, regression tests, failure-path coverage, golden harness | `rex-gpu-test-writer` |
   | New GPU / driver branch / NVIDIA support list: generation rows, name rules, NVSwitch/NVLink IDs, vGPU table | `rex-gpu-hardware-curator` |
-  | Pre-release audit | `rex-gpu-release-checker` |
+  | Commits, `Changes`, card → done, pre-release audit | `rex-gpu-release-manager` |
 
 - **You cannot spawn subagents** (you ARE a `rex-gpu-*` agent): The delegation lock does not
   apply — implement, refactor, debug and test per these rules.
@@ -42,6 +42,9 @@ Depends on whether the Agent/Task tool is available to you.
 Behavior-relevant = anything under `lib/`, the tests, and any change to a detection rule, a
 package list, an OS-version branch, the pipeline order, an emitted shell command, the
 containerd config, or the reboot logic. `README.md` and `Changes` wording are not.
+
+**Only `rex-gpu-release-manager` commits.** A worker leaves a commit-ready tree and hands its card
+to `review`; you then dispatch `rex-gpu-release-manager` to cut the commit and close the card.
 
 ## The blast radius is a remote root shell that installs and reboots
 
@@ -90,7 +93,7 @@ invoke the skill first, just use it. Board state lives in `refs/karr/*`.
 
 Serialize board mutations when fanning out: keep implementation parallel, then loop the
 `karr move`/`handoff`/`sync` calls sequentially. Full command surface: skill
-`kanban-issues-karr-cli`.
+`kanban-issues-karr-coordination`.
 
 ## Downstream — this distribution is an upstream
 

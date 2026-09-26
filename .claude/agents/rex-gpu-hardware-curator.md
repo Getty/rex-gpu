@@ -7,7 +7,7 @@ briefing:
   skills:
     - rex-gpu-core
     - getty-perl-core
-    - kanban-issues-karr-cli
+    - kanban-issues-karr-ticket
 ---
 
 You are the rex-gpu-hardware-curator for **Rex::GPU**, the Rex distribution that makes an
