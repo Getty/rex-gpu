@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-09-26T02:01:15Z
+claimed_by: claude
+class: standard
+completed: 2026-09-25T22:37:04Z
+created: 2026-09-25T19:55:18Z
+id: 72
+priority: high
+started: 2026-09-25T22:19:05Z
+status: archived
+tags:
+- ocp
+- driver
+- ubuntu
+- escalated-from:kubernetes-ocp#191
+title: 'Grace Hopper (GH200): open kernel module erzwingen'
+updated: 2026-09-26T02:01:20Z
+---
+
+Aus kubernetes-ocp k191 (OCP stellt den Ubuntu-Treiberzweig auf install_driver + Setup::UbuntuDrivers um).
+
+Problem: Die Treibertabelle fuehrt Hopper unter "No constraint" (NVIDIA.pm ~281/1630); nur 0x2330 hat eine open-Regel. Grace Hopper (GH200, Hopper-GPU an Grace-CPU/arm64) laeuft laut NVIDIA NUR mit den open kernel modules ("NVIDIA Transitions Fully Towards Open-Source GPU Kernel Modules"). Mit UbuntuDrivers bekaeme ein GH200 das proprietaere -server-Paket. Vorher waehlte ubuntu-drivers per modalias richtig -> Regression fuer OCP.
+
+Done: alle GH200-Device-IDs (bzw. Hopper auf aarch64/Grace) verlangen kernel_module open, auf allen Setups; Test dafuer. Sollte vor dem 0.003-Release rein, weil OCP 0.003 pinnt.
+
+Curator 2026-09-26: keine Änderung. NVIDIA-Treiber-README (aarch64+x86_64, 535-615) nennt Hopper als vom proprietären Flavor unterstützt, ohne Grace/GH200-Ausnahme; aarch64-.run liefert nv-kernel.o_binary mit. Nur-open steht nur im NVIDIA-Blog. 0x2330 ist nur POD-Beispiel (Requirement.pm:155). GH200-IDs belegt: 2342 (min 535), 2348 (min 565). t/80-ubuntu-open-driver.t:87 behauptet 2342 => 0. Wartet auf Maintainer-Entscheidung.
+
+2026-09-26 Maintainer: GH200-Hardware haben wir nicht, Thema wird nicht verfolgt. Archiviert.
