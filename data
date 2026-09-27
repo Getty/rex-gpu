@@ -1,0 +1,71 @@
+---
+claimed_at: 2026-09-27T04:56:40Z
+claimed_by: kubernetes-ocp
+class: standard
+completed: 2026-09-26T23:29:26Z
+created: 2026-09-26T23:00:23Z
+id: 74
+priority: high
+started: 2026-09-26T23:00:50Z
+status: done
+tags:
+- toolkit
+- ocp
+- escalated-from:kubernetes-ocp#196
+title: 'Toolkit: Option "Binaries reichen" fuer install_container_toolkit (OCP G2)'
+updated: 2026-09-27T04:56:40Z
+---
+
+Auftrag aus kubernetes-ocp (k196, Session kubernetes-ocp-c3), Grundsatz des Maintainers 2026-09-27.
+
+Heute gilt ein Toolkit nur als vorhanden, wenn nvidia-ctk laeuft UND das Paket installiert ist (NVIDIA.pm _toolkit_present ~1031-1048), weil configure_containerd /usr/bin/nvidia-container-runtime voraussetzt. OCP ruft configure_containerd nie auf: rke2/k3s suchen nvidia-container-runtime beim Start selbst im PATH. OCP haelt das Toolkit deshalb fuer vorhanden, wenn nvidia-container-runtime und nvidia-ctk als Binaries da sind (~/dev/kubernetes-ocp share/Rexfile ~361-366 _nvidia_toolkit_present, nur lesen) -- z. B. DGX-Images, deren Paketquellen OCP nicht anfassen will.
+
+Was: diese Semantik als Option von install_container_toolkit, damit OCP die Funktion wieder selbst aufrufen kann. Default unveraendert (gpu_setup / Rex::Rancher merken nichts).
+
+Fertig wenn: Option + POD (inkl. Hinweis auf configure_containerd), Tests, bestehende Toolkit-Goldens unveraendert, prove -lr t/ gruen, Commit auf main durch den Release-Manager.
+
+2026-09-26 23:10 Relaunch: the first worker was pinned to the wrong worktree and could not write; its design is being applied now in worktree .claude/worktrees/k74-toolkit (branch k74-toolkit).
+
+2026-09-26 23:16 Checked before relying on the design: (a) Rex 1.16.1 can_run (Interface/Exec/Base.pm) runs 'command -v' over exec, then is_file() on the result through Rex::Interface::Fs (SFTP on SSH/OpenSSH) -- so the Detect.pm comment is right and the new comment says exactly that. (b) gpu_setup's _step calls install_container_toolkit with no arguments ($base->can($name)->() / $target->$name()), so the new option check cannot die from the pipeline. Design applied unchanged in lib/Rex/GPU/NVIDIA.pm (code + POD); no golden moved, prove -lr t/ green (1690). Ad-hoc throwaway harness run (not added to t/) confirmed claims 1-8 on debian-12/ubuntu-24.04/rocky-9/leap-16.0.
+
+2026-09-26 23:16 Done (uncommitted, worktree k74-toolkit): install_container_toolkit(binaries_suffice => 1) -- toolkit counts as present when 'command -v' finds nvidia-container-runtime and nvidia-ctk on the PATH and 'nvidia-ctk --version' exits 0; package manager not asked, no repo/key/package touched, checked before the OS family (unknown OS + both binaries returns). Otherwise logs why and continues exactly as without the option. Unknown option / odd-length list dies before any host call. Default and gpu_setup unchanged; t/golden/toolkit/* unchanged; prove -lr t/ green. POD documents the option incl. the configure_containerd caveat. Not exercised on a real host. Next: rex-gpu-test-writer for the claims list, then rex-gpu-release-manager (commit + Changes).
+
+2026-09-26 23:27 Tests written in worktree k74-toolkit (uncommitted, for the release manager to
+commit alongside lib/Rex/GPU/NVIDIA.pm):
+- t/64-toolkit-binaries-suffice.t (new): claims 1-9 from the brief --
+  all-probes-good on debian-12/ubuntu-24.04/rocky-9/leap-16.0 (one golden,
+  since the transcript is OS-independent), runtime-missing, ctk-missing,
+  --version-fails (each with an explicit byte-for-byte compare against a
+  freshly recorded default install, not just a frozen golden), default
+  unchanged (binaries_suffice=>0 and no option both re-verified against the
+  existing t/golden/toolkit/<os>.txt), unknown-option/odd-length-list dies,
+  Class->method form, `set gpu_nvidia_class` reaching a subclass whose
+  _toolkit_binaries_present override is honoured (both a true and a false
+  override), an OS with no install path (Gentoo) returning vs. dying, and
+  gpu_setup's own call to install_container_toolkit carrying zero arguments
+  (empty @_ for the built-in class, invocant-only @_ for a configured
+  subclass).
+- t/lib/Test/RexGPU/Golden.pm: extended @READ_ONLY with
+  `command -v \S+ 2>/dev/null` (the new probes are read-only) -- checked it
+  doesn't match any existing golden's `command -v` lines (Detect's
+  lspci/ubuntu-drivers probes use `>/dev/null 2>&1` or bare `>/dev/null`,
+  never `2>/dev/null`), so no existing test's mutating_lines() classification
+  changes.
+- t/golden/toolkit/binaries-suffice--all-present.txt (new, via
+  REX_GPU_GOLDEN_UPDATE=1): the three read-only lines, shared by all four
+  OSes -- reviewed, matches the three run lines the worker's diff emits.
+
+prove -lr t/: 1739 tests, all green (was 1690 before this file). No existing
+golden touched -- git status shows only the two new files plus the Golden.pm
+edit; every t/golden/toolkit/*.txt from before this card is byte-identical
+(re-verified against them directly in the new test, not just left alone).
+No finding against lib/ -- the implementation matched every claim in the
+brief on first read of the diff. Not exercised on a real host (no command -v
+over LibSSH/SSH, no real DGX Spark, no RKE2/K3s wiring) -- same caveat as
+everywhere else in this suite.
+
+2026-09-26 23:29 Committed c1ebb68 on branch k74-toolkit.
+
+2026-09-26 23:29 Committed c1ebb68 on branch k74-toolkit: install_container_toolkit(binaries_suffice => 1), test t/64-toolkit-binaries-suffice.t, golden t/golden/toolkit/binaries-suffice--all-present.txt, Golden.pm read-only pattern, README.md, Changes [Container toolkit] section under {{$NEXT}}. prove -lr t/ green (34 files, 1739 tests). main is fast-forwarded to this branch by the dispatcher.
+
+2026-09-27 Live-Nachweis über kubernetes-ocp (vendored 2996fe8): install_container_toolkit(binaries_suffice => 1) auf Ubuntu 24.04 mit vorinstalliertem Toolkit 1.20.0 (aus dem Paket). Log: 'already present (binaries_suffice: /bin/nvidia-container-runtime, /bin/nvidia-ctk, … 1.20.0) — skipping … the package manager was not asked'. Zweimal gelaufen (Bootstrap und Re-Bootstrap). Der Installationspfad ohne vorhandene Binaries lief live NICHT (kein treiberloser GPU-Host verfügbar).
