@@ -1,0 +1,47 @@
+---
+claimed_at: 2026-09-27T04:56:34Z
+claimed_by: kubernetes-ocp
+class: standard
+completed: 2026-09-26T23:54:37Z
+created: 2026-09-26T23:00:06Z
+id: 73
+priority: high
+started: 2026-09-26T23:00:42Z
+status: done
+tags:
+- detect
+- ocp
+- escalated-from:kubernetes-ocp#196
+title: 'Detect: sysfs-Backend ohne lspci/pciutils (OCP G1)'
+updated: 2026-09-27T04:56:34Z
+---
+
+Auftrag aus kubernetes-ocp (k196, Session kubernetes-ocp-c3), Grundsatz des Maintainers 2026-09-27: alles Generische, das OCP selbst macht, wandert vor 0.003 in die Lib.
+
+Was: ein Detect-Backend, das dieselbe Rueckgabe wie Rex::GPU::Detect::detect liefert ({nvidia, amd, nvswitch}), aber aus /sys/bus/pci/devices liest (vendor, device, class, subsystem_vendor, subsystem_device) -- ohne lspci, ohne pciutils zu installieren (OCP ADR 0015: keine Paketinstallation nur fuer die Erkennung).
+
+Muss liefern, damit OCP die Hashes 1:1 an install_driver weiterreicht:
+- nvswitch: 10de-Geraete der PCI-Klasse 0680 mit bekannter NVSwitch-ID (-> Fabric Manager, Setup nvswitches)
+- vgpu/vgpu_type/subsystem_vendor_id/subsystem_id aus sysfs (ein Hash ohne vgpu gilt heute als Nicht-vGPU, Setup.pm ~1416)
+- compute: 1/0 wie beim lspci-Pfad, wo Tabelle oder PCI-Klasse entscheiden; OCP k194 filtert compute 0 (Kepler und aelter) und reicht unbekannte IDs (compute undef) weiter.
+
+Vorlage (nur lesen): ~/dev/kubernetes-ocp share/Rexfile ~218-297 (_pci_display_devices, _nvidia_gpus, _gpu_action).
+
+Auswahl: explizit (Unterklasse ueber den k71-Klassenmechanismus), der lspci-Default bleibt -- Begruendung in der Uebergabe an OCP.
+Frage aus dem Auftrag: install_driver(gpus => []) heisst GPU-agnostisch, nicht "nichts tun" -- Verhalten nicht aendern, nur dokumentieren.
+
+Fertig wenn: Backend + POD + Tests, lspci-Goldens unveraendert, prove -lr t/ gruen, Commit auf main durch den Release-Manager.
+
+2026-09-26 23:07 Worker start (worktree k73-sysfs, base a3ba55d, prove baseline green 1690). Plan: Rex::GPU::Detect::Sysfs as a Detect subclass (k71 load_user_class works unchanged, no clash). Detect.pm refactor, lspci-neutral: _is_nvidia_compute split into _nvidia_compute_by_generation (Kepler row 0 / class 0302 1 / row compute 1 / else undef) + _nvidia_compute_by_name (name rules, unknown 0) -- Sysfs overrides only the name half (undef + warn); vGPU marking split out of _detect_vgpu into _mark_vgpu (shared); NVSwitch IDs and virtual display vendors exposed as class methods nvswitch_device_ids / virtual_display_vendor_ids, lspci path reads them too (one list, one override point). Host side: one builtin-only read (cd + for + read, no forks) of class/vendor/device/subsystem_vendor/subsystem_device, exit status checked; missing/unreadable dir, failed read, unreadable/malformed class or vendor => croak; unreadable device/subsystem => undef.
+
+Dispatcher: Worker blockiert, weil die Worktree-Sperre der Session nach k74-toolkit gewechselt ist (Fehler des Dispatchers, nicht des Workers). Design geprüft und festgehalten (Detect::Sysfs-Unterklasse, _nvidia_compute_by_generation/_by_name, _mark_vgpu, nvswitch_device_ids, virtual_display_vendor_ids). Geht weiter, sobald k74 committet ist; k73-sysfs wird dann per ff auf k74-toolkit gehoben.
+
+2026-09-26 23:36 Done, commit-ready in worktree k73-sysfs on c1ebb68 (uncommitted). New lib/Rex/GPU/Detect/Sysfs.pm: opt-in Detect subclass via the k71 mechanism (Sysfs->detect, detect option of gpu_detect and gpu_setup, set gpu_detect_class); lspci stays the default. One read-only builtin-only run over /sys/bus/pci/devices, no lspci, no pkg. Same nvidia/amd/nvswitch shape; IDs four lowercase hex without 0x, undef if unreadable; synthetic names NVIDIA GPU [10de:XXXX]; compute as lspci where generation row or class decide, undef with a warning where lspci would use name rules; NVSwitch by nvswitch_device_ids only; vGPU via shared _mark_vgpu. Dies on missing or unreadable dir, non-zero read, malformed line, unreadable or malformed class/vendor of any device; empty dir gives empty result. Detect.pm refactor keeps lspci output identical (t/golden untouched): compute split into _nvidia_compute_by_generation plus _nvidia_compute_by_name, _mark_vgpu split out, new experimental nvswitch_device_ids and virtual_display_vendor_ids read by both paths. POD in Sysfs, Detect, Rex::GPU, NVIDIA install_driver gpus (empty list is GPU-agnostic; callers left with none skip install_driver). README, rex-gpu-core skill and hardware.md updated. Verified: prove -lr t/ green, 34 files, 1739 tests; shell probe under dash/bash/busybox on real /sys and fake trees; scratch record_host run of every selection path and failure case. Not exercised on any GPU host. Sysfs tests still to write (test-writer). Changes entry proposed in the report, not written.
+
+2026-09-26 23:37 Also found (not changed, for the dispatcher): (1) rex-gpu-core SKILL.md says Detect reads the base Requirement table, not a subclass -- stale since k71 made requirement_class overridable. (2) The release-manager agent description lists the VERSION modules without Detect/Sysfs.pm (agent config, not my lane). (3) Cosmetic: the inherited Kepler warning prints NVIDIA GPU NVIDIA GPU [10de:102d] with sysfs names; left alone to keep lspci log text identical.
+
+2026-09-26 23:51 Test-writer: added t/12-detect-sysfs.t (11 subtests mapping the card's 11 claims: one-command golden, hash shape incl. uppercase-hex input, compute classification incl. list-context and gpu_setup's compute-only grep, vGPU, NVSwitch, virtual displays, other-device edge cases (domains, AMD, class 0380/ASPEED -- pinned as today's behaviour, not judged), all 4 die paths incl. 'never says no GPU found', all 5 selection paths (direct/gpu_detect/gpu_setup/set+bare detect()/fully-qualified), the shared nvswitch_device_ids/virtual_display_vendor_ids override point for both lspci and Sysfs, and the SYNOPSIS filter feeding Setup->new). Added one golden t/golden/detect/sysfs--rtx3090.txt (single line, the sysfs read, no auto_die tag since it's auto_die=>0 -- matches the existing lspci convention). Edited t/00-load.t to add use_ok('Rex::GPU::Detect::Sysfs'). No existing golden moved. prove -lr t/ green: 35 files, 1752 tests. No lib/ changes; no findings against lib/ -- the implementation matched its own POD everywhere I checked it against a fixture.
+
+2026-09-26 23:54 Committed 2996fe8 on k73-sysfs: Add Rex::GPU::Detect::Sysfs: GPU detection without lspci or pciutils (k73). prove -lr t/ green (35 files, 1752 tests); dzil build clean (0.003, no warnings; build dir/tarball removed after). $VERSION consistent at 0.003 across all lib/ modules incl. new Detect/Sysfs.pm. Changes {{$NEXT}} [Detection] entry added. Branch k73-sysfs is ready for the dispatcher to fast-forward main.
+
+2026-09-27 Live-Nachweis über kubernetes-ocp (vendored 2996fe8): Rex::GPU::Detect::Sysfs auf einer QEMU-VM mit durchgereichter RTX 3090 (Ubuntu 24.04, 6.8.0-139). Ergebnis: '[ok] NVIDIA: NVIDIA GPU [10de:2204] (PCI class 0300, 0000:01:00.0)'. Die QEMU-Std-VGA 1234:1111 daneben wird korrekt übergangen. Das Ergebnis geht per do_task an install_driver (UbuntuDrivers) weiter, der vorhandene Treiber 610.57 wird erkannt und in Ruhe gelassen. Danach GPU Operator, nvidia.com/gpu=1, nvidia-smi in einem Pod ok.
