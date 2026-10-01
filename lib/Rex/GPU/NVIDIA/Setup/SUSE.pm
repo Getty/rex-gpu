@@ -1,7 +1,7 @@
 # ABSTRACT: NVIDIA driver setup for openSUSE Leap (experimental)
 
 package Rex::GPU::NVIDIA::Setup::SUSE;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 use Moo;
 use Rex::Logger ();
 use namespace::autoclean;

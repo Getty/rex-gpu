@@ -1,7 +1,7 @@
 # ABSTRACT: NVIDIA GPU driver and container toolkit management
 
 package Rex::GPU::NVIDIA;
-our $VERSION = '0.004';
+our $VERSION = '0.005';
 use v5.14.4;
 use warnings;
 
