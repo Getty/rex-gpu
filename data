@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-10-01T13:55:54Z
+claimed_by: rex-gpu
+class: standard
+created: 2026-10-01T06:23:39Z
+id: 76
+priority: high
+started: 2026-10-01T13:53:35Z
+status: review
+tags:
+- bug
+- gpu
+title: CDI-Spec auf Hosts ohne nvidia-cdi-refresh erzeugen (GB10/DGX OS, Toolkit 1.19)
+updated: 2026-10-01T13:55:54Z
+---
+
+Live 2026-10-01 (CitiAI-Lab, GB10 brain/cortex, nvidia-container-toolkit 1.19.1): /var/run/cdi ist nach Reboot leer, der GPU-Operator-Validator scheitert mit "unresolvable CDI devices management.nvidia.com/gpu=all", kein nvidia.com/gpu am Node. crag (Toolkit 1.20.1) hat nvidia-cdi-refresh.path/.service und funktioniert. Handfix: nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml und nvidia-ctk cdi generate --mode=management --vendor=management.nvidia.com --class=gpu --output=/etc/cdi/management.nvidia.yaml (ohne --vendor erzeugt 1.19 kind nvidia.com/gpu und kollidiert). Vorschlag: Rex::GPU prüft nach Toolkit-Setup, ob CDI-Specs für nvidia.com/gpu und management.nvidia.com/gpu auflösbar sind (nvidia-ctk cdi list) und erzeugt sie sonst dauerhaft unter /etc/cdi; idempotent, auch bei "toolkit already present".
+
+2026-10-01 13:50 Start: generate_cdi_specs bekommt Auflösbarkeits-Check via 'nvidia-ctk cdi list' für nvidia.com/gpu=all + management.nvidia.com/gpu=all. Upstream-Quellcode geprüft: --mode=management, --vendor (Alias --cdi-vendor), --class (Alias --cdi-class) heißen in v1.19.1 und v1.20.1 identisch (cmd/nvidia-ctk/cdi/generate/generate.go, pkg/nvcdi/mode.go). Unbekannter Modus -> 'invalid discovery mode', Exit != 0. gpu_setup ruft generate_cdi_specs auch im Zweig 'toolkit already present' auf (install_container_toolkit kehrt nur selbst früh zurück).
+
+2026-10-01 13:53 Done (Commit 834c010, lokal, nicht gepusht): generate_cdi_specs prüft nach dem Toolkit-Schritt per 'nvidia-ctk cdi list', ob nvidia.com/gpu=all und management.nvidia.com/gpu=all auflösen, und schreibt nur Fehlendes unter /etc/cdi (nvidia.yaml; management.nvidia.yaml via --mode=management --vendor=management.nvidia.com --class=gpu). Neben nvidia-cdi-refresh nie eine statische nvidia.yaml (Warnung statt Doppel-Kind). Auflösbares bleibt unangetastet -> zweiter Lauf schreibt nichts. Danach erneutes cdi list, Rest = Warnung. Alte CLI ohne Management-Modus bzw. ohne 'cdi list' = Warnung, kein die. Flag-Namen in v1.19.1 und v1.20.1 identisch (Upstream-Quelle geprüft). Verhaltensänderung: bestehende /etc/cdi/nvidia.yaml wird nicht mehr bei jedem Lauf neu geschrieben (Treiber-Update -> manuell regenerieren). Verifiziert: t/61-cdi.t (13 Subtests, gemockt), prove -lr t grün (35 Dateien/1762 Tests), dzil build -> Rex-GPU-0.004.tar.gz. LIVE NOCH NACHZUWEISEN: (1) GB10 brain/cortex, Toolkit 1.19.1: Handfix-Specs aus /etc/cdi wegräumen, generate_cdi_specs laufen lassen -> /etc/cdi/nvidia.yaml + management.nvidia.yaml, cdi list zeigt beide =all ohne Konflikt, Operator-Validator grün, nvidia.com/gpu am Node; zweiter Lauf schreibt nichts. (2) crag, Toolkit 1.20.1: /var/run/cdi/nvidia.yaml bleibt, nur /etc/cdi/management.nvidia.yaml kommt dazu, keine /etc/cdi/nvidia.yaml. (3) nach Reboot auf GB10 bleibt alles auflösbar.
+
+LIVE NACHGEWIESEN (Koordinator, 2026-10-01, Commit 834c010 per PERL5LIB gegen echte Hosts): (1) cortex, Toolkit 1.19.1, nvidia-cdi-refresh enabled: Unit angestoßen -> /run/cdi/nvidia.yaml, dazu nur /etc/cdi/management.nvidia.yaml; 2. Lauf schreibt nichts. (2) brain, Toolkit 1.19.1, nvidia-cdi-refresh vorhanden aber DISABLED (DGX OS, Unit unter /etc/systemd/system): /etc/cdi/nvidia.yaml + management.nvidia.yaml dauerhaft; 2. Lauf idempotent. (3) crag, Toolkit 1.20.1, refresh aktiv: nur management dazu, keine /etc/cdi/nvidia.yaml. Danach im Cluster nvidia.com/gpu je 1, gpu-operator inkl. DCGM komplett Running. Handfix-Dateien von brain/cortex liegen in /root/cdi-handfix-2026-10-01/.
