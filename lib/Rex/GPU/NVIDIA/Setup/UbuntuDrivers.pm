@@ -1,7 +1,7 @@
 # ABSTRACT: NVIDIA driver setup for Ubuntu, package named by ubuntu-drivers (experimental)
 
 package Rex::GPU::NVIDIA::Setup::UbuntuDrivers;
-our $VERSION = '0.003';
+our $VERSION = '0.004';
 use Moo;
 use namespace::autoclean;
 

@@ -1,5 +1,7 @@
 Revision history for Rex-GPU
 
+{{$NEXT}}
+
 0.003     2026-10-01 04:00:20Z
   - None of the changes below has run on GPU hardware yet; they are
     checked against the commands they send to the host.
