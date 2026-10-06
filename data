@@ -1,0 +1,24 @@
+---
+class: standard
+created: 2026-10-06T19:50:39Z
+id: 78
+priority: medium
+status: backlog
+tags:
+- bug
+- gpu
+- reboot
+- review-2026-10-06
+title: _reboot_and_wait kann den noch nicht heruntergefahrenen Host als 'wieder online'
+  erkennen
+updated: 2026-10-06T19:50:39Z
+---
+
+`lib/Rex/GPU/NVIDIA.pm:1720-1745`: `shutdown -r now` wird nach `sleep 2` im Hintergrund abgesetzt, dann wartet der Code fest 20 Sekunden (`NVIDIA.pm:1728`) und nimmt den ersten Reconnect, bei dem `echo ok` antwortet, als Beweis für den Neustart. Geprüft wird nur, dass *ein* System antwortet - nicht, dass es ein neu gebootetes ist. Braucht das Herunterfahren länger als ~22 s, bis sshd keine Verbindungen mehr annimmt (Retrofit auf einem Node mit laufendem rke2/k3s und vielen Pods, Dienste mit langem Stop-Timeout), verbindet sich die Probe mit dem alten, gerade herunterfahrenden System: es folgt 'Host is back online', und die nächsten Schritte (Modul-/nvidia-smi-Prüfung, Toolkit, containerd) laufen gegen einen Host, der Sekunden später weg ist.
+
+k65 hat die Probe so repariert, dass sie die echte Kommandoausgabe prüft; die Identität des Boots prüft sie weiterhin nicht (`grep -rn boot_id lib t` ist leer). Nicht nachgestellt (braucht einen echten Host mit langsamem Shutdown).
+
+Fertig, wenn: vor dem Reboot `/proc/sys/kernel/random/boot_id` gelesen und 'wieder online' erst gemeldet wird, wenn nach dem Reconnect eine andere boot_id zurückkommt; `t/41-reboot.t` deckt den Fall 'gleiche boot_id -> weiter warten' ab.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: plausible
