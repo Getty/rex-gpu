@@ -1,0 +1,30 @@
+---
+class: standard
+created: 2026-10-06T19:50:33Z
+id: 77
+priority: medium
+status: backlog
+tags:
+- bug
+- gpu
+- cdi
+- review-2026-10-06
+title: _write_cdi_spec meldet '[ok] CDI specs written' für nvidia.com/gpu=all, ohne
+  den Exit-Code von nvidia-ctk zu prüfen
+updated: 2026-10-06T19:50:33Z
+---
+
+`lib/Rex/GPU/NVIDIA.pm:1647-1651`:
+
+    run "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml 2>/dev/null", auto_die => 0;
+    Rex::Logger::info("  [ok] CDI specs written to /etc/cdi/nvidia.yaml");
+    return 1;
+
+Kein Blick auf `$?`, stderr geht nach /dev/null. Der Management-Zweig direkt darunter (`NVIDIA.pm:1652-1663`) macht es richtig: Ausgabe einsammeln, bei `$? != 0` warnen und 0 zurückgeben. Scheitert `nvidia-ctk cdi generate` (Treiber nicht geladen, NVML nicht erreichbar), steht im Log trotzdem `[ok]`.
+
+Besonders im Zweig `nvidia-ctk cdi list failed` (`NVIDIA.pm:1597-1602`): dort wird `_write_cdi_spec('nvidia.com/gpu=all')` aufgerufen und sofort `return` gemacht - die Nachkontrolle über `_cdi_missing_devices` (`NVIDIA.pm:1625-1631`) läuft in diesem Pfad nie, das falsche `[ok]` ist also das Letzte, was der Lauf dazu sagt. Der Code kam mit k76 (Commit 834c010), die Karte steht noch auf review - dort einhängen.
+
+Fertig, wenn: der gpu=all-Zweig wie der Management-Zweig `$?` prüft, bei Fehler die nvidia-ctk-Ausgabe als Warnung loggt und 0 zurückgibt, und `t/61-cdi.t` einen fehlschlagenden `cdi generate` für beide Geräte abdeckt.
+
+---
+Fleet review 2026-10-06 · kind: bug · confidence: verified
