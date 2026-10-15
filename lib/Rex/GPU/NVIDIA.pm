@@ -1731,6 +1731,13 @@ sub _reboot_and_wait {
   my ( $class ) = @_;
   Rex::Logger::info("Rebooting host to activate NVIDIA driver (replacing nouveau)...");
 
+  # The identity of the boot we are leaving (karr #78): an answer to `echo ok`
+  # alone can come from the old system still shutting down. Reading it must
+  # never stop the reboot: unreadable -> the old, answer-only behaviour.
+  my $boot_id = _read_boot_id();
+  Rex::Logger::info("  boot_id not readable before reboot, checking only that the host answers")
+    unless length $boot_id;
+
   # Schedule reboot 2 s from now so the run() call can return cleanly
   run "nohup sh -c 'sleep 2 && shutdown -r now' >/dev/null 2>&1 &", auto_die => 0;
 
@@ -1747,7 +1754,9 @@ sub _reboot_and_wait {
       # Verify we can actually run a command: its output, not just that run
       # returned (karr #65); a PTY session answers "ok\r"
       my $test = eval { run "echo ok", auto_die => 0 };
-      if (defined $test && $test =~ /^ok\r?$/m) {
+      # same boot_id = still the old system going down: keep waiting
+      if (defined $test && $test =~ /^ok\r?$/m
+          && ( !length $boot_id || _new_boot_id( $boot_id ) )) {
         Rex::Logger::info("  Host is back online (after ~" . ($i * 5 + 20) . "s)");
         $back = 1;
         last;
@@ -1758,6 +1767,22 @@ sub _reboot_and_wait {
   }
 
   die "Host did not come back after reboot\n" unless $back;
+}
+
+# True only for a readable boot_id that differs from the old one; an
+# unreadable one proves nothing, so the caller keeps waiting.
+sub _new_boot_id {
+  my ( $old ) = @_;
+  my $now = _read_boot_id();
+  return length $now && $now ne $old ? 1 : 0;
+}
+
+# The kernel's per-boot UUID, or '' when it cannot be read (never dies).
+# A plain function: _reboot_and_wait is called as function and as method.
+sub _read_boot_id {
+  my $out = eval { run "cat /proc/sys/kernel/random/boot_id 2>/dev/null", auto_die => 0 };
+  return '' unless defined $out;
+  return $out =~ /^\s*([0-9a-fA-F-]{32,36})\s*$/m ? lc $1 : '';
 }
 
 1;

@@ -4,6 +4,10 @@ Revision history for Rex-GPU
   - generate_cdi_specs no longer logs "[ok] CDI specs written" when
     nvidia-ctk cdi generate for nvidia.com/gpu=all fails; it warns and
     carries on, like the management spec.
+  - _reboot_and_wait now compares /proc/sys/kernel/random/boot_id before
+    and after the reboot and reports the host back only on a different
+    boot; a host that cannot read it falls back to the old answer-only
+    check.
 
 0.004     2026-10-01 16:14:46Z
   - Not run on GPU hardware yet; checked against the commands sent to the
