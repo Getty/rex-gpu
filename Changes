@@ -1,6 +1,11 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - detect (lspci and sysfs) now lists AMD Instinct accelerators, which
+    enumerate as PCI class 0380, under "amd" (compute 0, still no driver
+    install); gpu_setup logs its "AMD GPU detected" warning for them.
+    Class 0380 is accepted for vendor 1002 only; NVIDIA detection is
+    unchanged. The lspci read command string changed to match.
   - generate_cdi_specs no longer logs "[ok] CDI specs written" when
     nvidia-ctk cdi generate for nvidia.com/gpu=all fails; it warns and
     carries on, like the management spec.
