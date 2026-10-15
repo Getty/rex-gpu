@@ -1,6 +1,9 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - generate_cdi_specs no longer logs "[ok] CDI specs written" when
+    nvidia-ctk cdi generate for nvidia.com/gpu=all fails; it warns and
+    carries on, like the management spec.
 
 0.004     2026-10-01 16:14:46Z
   - Not run on GPU hardware yet; checked against the commands sent to the

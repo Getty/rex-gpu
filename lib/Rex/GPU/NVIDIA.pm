@@ -1645,7 +1645,17 @@ sub _write_cdi_spec {
   my ( $class, $device, %opt ) = @_;
   run "mkdir -p /etc/cdi", auto_die => 0 if $opt{mkdir} // 1;
   if ($device eq 'nvidia.com/gpu=all') {
-    run "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml 2>/dev/null", auto_die => 0;
+    my $out = run "nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml 2>/dev/null", auto_die => 0;
+    if ($? != 0) {
+      # stderr stays discarded (the emitted command is unchanged): only stdout
+      # and the exit code can be reported.
+      my $code = $? >> 8;
+      $out //= '';
+      $out =~ s/\s+\z//;
+      Rex::Logger::info("  could not generate the CDI spec for $device (nvidia-ctk cdi generate: "
+        . ($out eq '' ? 'failed, exit ' . $code : $out) . ")", "warn");
+      return 0;
+    }
     Rex::Logger::info("  [ok] CDI specs written to /etc/cdi/nvidia.yaml");
     return 1;
   }
