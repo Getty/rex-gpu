@@ -936,6 +936,12 @@ logged for each failure; the function does not die. A partial installation
 (e.g. driver installed but host not yet rebooted) emits a summary warning
 noting that features may not work until reboot.
 
+Also, if C<crun> is on the host and C<crun --version> reports a version
+older than 1.15 (1.14.1 is known broken: GPU sandboxes fail with "unknown
+version specified" once the GPU Operator's toolkit makes crun the first
+runtime), a warning says so. It is advice only: it does not change the
+return value, and nothing is changed on the host. No crun, no output.
+
 =cut
 
 sub verify_nvidia {
@@ -950,6 +956,9 @@ sub verify_nvidia {
     Rex::Logger::info("nvidia-container-toolkit not found", "warn");
     $ok = 0;
   }
+
+  # Warns only, never changes $ok (karr #79).
+  $class->_warn_old_crun;
 
   unless ($ok) {
     Rex::Logger::info("GPU verification incomplete — some features may not work until reboot", "warn");
@@ -1012,6 +1021,33 @@ sub verify_nvidia_driver {
   }
 
   return $ok;
+}
+
+# karr #79: a crun older than 1.15 (1.14.1 seen broken live) rejects the OCI
+# spec once the GPU Operator's toolkit makes the crun runtime first ("unknown
+# version specified"): no GPU sandbox starts. Warning only, nothing is changed;
+# no crun on the host => silent. The bound is conservative, only 1.14.1 is
+# known broken. Compared per numeric component (1.9 < 1.15), not as strings.
+sub _warn_old_crun {
+  my ( $class ) = @_;
+  return unless can_run("crun");
+  my $out = run "crun --version 2>&1", auto_die => 0;
+  return unless defined $out && $out =~ /\bcrun version (\d+(?:\.\d+)*)/;
+  my $version = $1;
+  my @have    = split /\./, $version;
+  my @min     = ( 1, 15 );
+  my $older   = 0;
+  for my $i ( 0 .. $#min ) {
+    my $h = $have[$i] // 0;
+    last if $h > $min[$i];
+    if ($h < $min[$i]) { $older = 1; last }
+  }
+  return unless $older;
+  Rex::Logger::info("crun $version found: older than 1.15 (known broken: 1.14.1). "
+    ."With the GPU Operator's NVIDIA toolkit making the crun runtime first, "
+    ."GPU sandboxes fail with 'OCI runtime create failed: unknown version specified'. "
+    ."Update or remove crun, or keep runc as the first runtime. Nothing was changed.", "warn");
+  return;
 }
 
 # The kernel module and nvidia-smi checks both verify_* share; warns per

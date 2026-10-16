@@ -13,6 +13,11 @@ Revision history for Rex-GPU
     and after the reboot and reports the host back only on a different
     boot; a host that cannot read it falls back to the old answer-only
     check.
+  - verify_nvidia (the last gpu_setup step) warns when `crun --version`
+    reports a crun older than 1.15 (1.14.1 is known broken: with the GPU
+    Operator's NVIDIA toolkit making crun the first runtime, sandboxes fail
+    with "unknown version specified"). Warning only, nothing is changed; a
+    host without crun is silent. It adds one `can_run: crun` probe.
 
 0.004     2026-10-01 16:14:46Z
   - Not run on GPU hardware yet; checked against the commands sent to the
