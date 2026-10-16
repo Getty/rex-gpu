@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-10-16T00:20:00Z
+claimed_by: hub-79
+class: standard
+completed: 2026-10-16T00:20:00Z
+created: 2026-10-16T00:14:31Z
+id: 79
+priority: medium
+started: 2026-10-16T00:15:03Z
+status: done
+tags:
+- crun
+- runtime
+- lab
+title: Warnen, wenn ein altes crun (< 1.15) als OCI-Runtime auf dem Host liegt
+updated: 2026-10-16T04:52:38Z
+---
+
+Live 2026-10-16 (kubernetes-ocp Lab, crag, Ubuntu 24.04): /usr/bin/crun 1.14.1 (kam mit podman) lehnt die OCI-Spec ab, sobald das NVIDIA-Toolkit des GPU Operators die crun-Runtime an die erste Stelle setzt ('OCI runtime create failed: unknown version specified'); mit runc zuerst laufen Sandboxes sofort. Belegt ist nur 1.14.1 kaputt, die genaue Grenze ist nicht ermittelt.
+Vorschlag: gpu_setup/Detect prüft 'crun --version' (wenn vorhanden) und warnt deutlich mit Version und Folge (Operator-Toolkit + crun = kaputte GPU-Sandboxes; Abhilfe: crun aktualisieren/entfernen oder runc als erste Runtime). Nur Warnung, kein Eingriff. Grenze konservativ (< 1.15) und im Text als 'bekannt kaputt: 1.14.1' benennen.
+Fertig, wenn: Warnung mit Test (Golden), keine Änderung des Erfolgspfads ohne crun.
+
+2026-10-16 00:17 crun < 1.15 warning in NVIDIA::verify_nvidia (_warn_old_crun): can_run crun, crun --version, per-component compare, warn only. New t/65-crun-warning.t + t/golden/verify/crun-{1.14.1,1.9}.txt; t/62 expected lines gained one 'can_run: crun'. Suite green (prove -lr -j2 t), not exercised on hardware. Live check: crun 1.14.1 host -> warn in gpu_setup log. Downstream Rancher tests recording verify_nvidia host commands may see the extra can_run.
+
+Umgesetzt in Commit 899a2d8 (Branch karr-79-crun-warn, ab main-Tip 84b14b1, nicht gepusht). verify_nvidia -> _warn_old_crun: can_run crun, crun --version, numerischer Vergleich < 1.15, nur Warnung (bekannt kaputt: 1.14.1). Ohne crun still; einzige Aenderung am Erfolgspfad: zusaetzliche Probe 'can_run: crun' (t/62 angepasst; Downstream-Tests von Rex::Rancher, die verify_nvidia-Befehle aufzeichnen, sehen diese Zeile). Tests: t/65-crun-warning.t + Goldens t/golden/verify/crun-*.txt; prove -lr -j2 t gruen (1777). Live offen: auf Host mit crun 1.14.1 pruefen, dass Warnung erscheint und Format 'crun version X' stimmt.
+
+Live 2026-10-16 (ocplab, crag Re-Join über robocop): Warnung erscheint wörtlich: '[WARN] crun 1.14.1 found: older than 1.15 (known broken: 1.14.1). … Update or remove crun, or keep runc as the first runtime. Nothing was changed.' Im CLI-Pfad bei Erfolg nur mit --verbose sichtbar (OCP #231 Punkt 3).
