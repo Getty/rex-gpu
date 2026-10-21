@@ -1,7 +1,7 @@
 # ABSTRACT: GPU detection and driver management for Rex
 
 package Rex::GPU;
-our $VERSION = '0.005';
+our $VERSION = '0.006';
 use v5.14.4;
 use warnings;
 

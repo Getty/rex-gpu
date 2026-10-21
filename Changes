@@ -1,5 +1,7 @@
 Revision history for Rex-GPU
 
+{{$NEXT}}
+
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which
     enumerate as PCI class 0380, under "amd" (compute 0, still no driver
