@@ -1,0 +1,89 @@
+---
+claimed_at: 2026-10-31T01:20:54Z
+claimed_by: rex-gpu-amd
+class: standard
+completed: 2026-10-31T01:18:40Z
+created: 2026-08-31T04:29:46Z
+id: 1
+priority: high
+started: 2026-09-26T02:01:38Z
+status: done
+tags:
+- amd
+- driver
+title: AMD GPU driver support
+updated: 2026-10-31T04:47:11Z
+---
+
+AMD GPUs are detected (vendor 1002) but compute is hardcoded to 0 and gpu_setup only logs a warning — no driver/ROCm install path exists. lib/Rex/GPU.pm:159, Detect.pm _parse_amd_line. Detect-only is a deliberate current state; building the install path needs a decision on ROCm vs amdgpu-dkms and the k8s device-plugin story.
+
+2026-09-26 Maintainer: keine AMD-GPUs im Einsatz, nicht verfolgt. Archiviert.
+
+2026-10-31 Maintainer-Go: AMD-Support wird jetzt gebraucht — ein AMD-Node soll regulär als GPU-Worker einem OCP-Cluster beitreten (kubernetes-ocp). Wiederbelebt, Priorität hoch. Die Betriebspolitik (wer welche GPU bekommt) entscheidet später ein anderes System; die Lib soll alle Wege anbieten, nicht einen festlegen.
+
+Testhost synapse.ai.citilan.de (root per SSH, Key dieser Maschine eingetragen): bare metal, Ryzen AI Max+ PRO 495 / Radeon 8065S, 1002:1586 = gfx1151 (APU), PCI-Klasse 0380, Ubuntu 24.04.5 HWE-Kernel 7.0.0-42, Secure Boot aus, inbox amdgpu (kein DKMS), ROCm 7.2.4 Userspace vorinstalliert (amdgpu-install von repo.radeon.com). /dev/kfd root:render. Live bestätigt 2026-10-31: Rex::GPU::Detect::Sysfs liefert amd => [{ name => 'AMD GPU [1002:1586]', pci_class => '0380', compute => 0 }] (erste Hardware-Bestätigung von k75). PyTorch 2.9.1+rocm7.2.4 und ComfyUI laufen dort auf der GPU (fp16/bf16/SDPA ok), mit Host-ROCm.
+
+Scope (generische Lib, keine OCP-Politik):
+1. Rex::GPU::AMD, analog Rex::GPU::NVIDIA:
+   - install_driver(gpus => \@amd, [method => 'auto'|'inbox'|'dkms']) — lässt einen funktionierenden Treiber in Ruhe (amdgpu geladen, /dev/kfd da, ein renderD* mit Vendor 0x1002, KFD-Topologie listet die GPU). auto: inbox, wenn der laufende Kernel amdgpu.ko mitbringt, sonst amdgpu-dkms aus repo.radeon.com — nur Header des laufenden Kernels (wie NVIDIA), Firmware, modprobe, verify. Stirbt vor jeder Änderung bei nicht unterstützter OS/Kernel-Kombination.
+   - verify_amd() — warnt, stirbt nie (wie verify_nvidia); liefert pro GPU gfx-Target, VRAM, KFD-Node.
+   - optional install_rocm(...) für Host-ROCm-Userspace — NICHT Default. Kubernetes braucht nur Kernel-Treiber + /dev/kfd + /dev/dri; Container bringen ihr ROCm selbst mit.
+   - optional AMD Container Toolkit (amd-ctk) + CDI-Specs — nur wenn sich zeigt, dass DRA/CDI es braucht (OCP recherchiert das gerade, Ergebnis kommt als Notiz hierher).
+2. Detection: compute für AMD nicht mehr hart 0. Semantik wie NVIDIA: 1 = bekannt ROCm-fähig, 0 = bekannt unfähig, undef = unbekannt (OCP reicht undef weiter). Gern gfx-Target aus der KFD-Topologie, wenn der Treiber schon läuft.
+3. gpu_setup dispatcht AMD, statt nur zu warnen.
+
+Kontrakt mit OCP: share/Rexfile ruft Rex::GPU::AMD::install_driver(gpus => [...]) und Rex::GPU::AMD::verify_amd(). Namen/Signatur nur mit Notiz hier ändern, OCP baut parallel dagegen.
+
+Live auf synapse: lesen und Verify-/No-op-Pfad frei. Treiber tauschen (DKMS-Pfad), ROCm deinstallieren oder rebooten nur nach Rücksprache mit der OCP-Session (SendMessage an kubernetes-ocp-9c) — dort läuft parallel der Cluster-Join-Test mit synapse. Kein Push, kein Release (Publish-Gate).
+
+2026-10-31 rex-gpu-amd (Orchestrator): Kontrakt festgelegt (an kubernetes-ocp-9c und rex-rancher-amd geschickt; Änderungen nur mit Notiz hier).
+- Rex::GPU::AMD exportiert nichts per Default (install_driver kollidiert sonst mit Rex::GPU::NVIDIA). Aufruf voll qualifiziert oder als Klassenmethode; set gpu_amd_class für eine Unterklasse.
+- my $how = Rex::GPU::AMD::install_driver(gpus => \@amd (optional, detect-Form; kein compute-Filter, Politik beim Aufrufer), method => auto|inbox|dkms (Default auto), reboot => 0|1 (nur nach DKMS wirksam)). Rückgabe: present (funktionierender Treiber, nichts geändert) | inbox | dkms. Stirbt vor jeder Änderung bei falschen Argumenten oder nicht unterstützter OS/Kernel-Kombination.
+- my $v = Rex::GPU::AMD::verify_amd([gpus => \@amd]): warnt, stirbt nie. Rückgabe { ok => 1|0, gpus => [ { slot => 0000:95:00.0, device_id => 1586, gfx_target => gfx1151, vram_bytes => ..., kfd_node => 1 } ] }.
+- Rex::GPU::AMD::install_rocm(...): optional, nie von gpu_setup; Signatur folgt.
+- Detect: AMD-Elemente bekommen device_id und gfx_target (KFD-Topologie, sonst Tabelle, sonst undef); compute 1/0/undef.
+- gpu_setup: AMD-GPUs mit compute 1 -> AMD install_driver(reboot wie übergeben) -> verify_amd; compute 0/undef nur Warnung. containerd_config gilt nicht für AMD. Gemischter Host: beide Vendors in einem Aufruf, NVIDIA zuerst. Rückgabe unverändert das Detect-Hashref. Neue Option amd => / set gpu_amd_class; Feature-Flag: Rex::GPU->can(amd_class).
+Live-Faktencheck synapse (read-only): inbox amdgpu.ko in linux-modules 7.0.0-42, KFD-Node 1 gfx_target_version 110501, location_id 0x9500 = 95:00.0, VRAM 128 GiB (UMA), Repos repo.radeon.com amdgpu/30.30.4, rocm/apt/7.2.4, graphics/7.2.4.
+
+2026-10-31 Ergebnis OCP-DRA/CDI-Recherche (von kubernetes-ocp-9c, übernommen durch rex-gpu-amd; Bericht: /tmp/claude-1000/-home-getty-dev-kubernetes-ocp/40f58f97-eafe-411c-a3b3-2d81a09fd894/scratchpad/research/amd-gpu-k8s-upstream-2026-10-31.md):
+1) amd-ctk / AMD Container Toolkit braucht KEIN Kubernetes-Pfad -> für AMD nichts dergleichen nachziehen. Device-Plugin (rocm/k8s-device-plugin 1.31.0.11) liefert nur kubelet-DeviceSpecs (/dev/kfd, /dev/dri/cardN, renderDN), kein CDI, keine RuntimeClass. DRA-Treiber (rocm/k8s-gpu-dra-driver v1.0.1) schreibt seine CDI-Specs selbst nach /var/run/cdi; containerd 2.x in RKE2/k3s 1.36 hat CDI per Default an.
+2) Weder AMDs Node-Labeller noch der DRA-Treiber publizieren das gfx-Target. OCP setzt es beim Join aus verify_amd()->{gpus}[]{gfx_target} als Node-Label -> gfx_target verlässlich liefern (synapse: gfx1151), auch vor geladenem Treiber aus der Tabelle, wo bekannt.
+3) Beide AMD-Komponenten lesen VRAM aus KFD mem_banks/0; auf APUs ist das der Carve-out (DRA-Issue #84). Kontrakt-Ergänzung (additiv): verify_amd()->{gpus}[] bekommt zusätzlich gtt_bytes (mem_info_gtt_total), wo lesbar.
+
+2026-10-31 rex-gpu-amd: Kontrakt-Ergänzungen nach Kurator-Recherche (an rex-rancher-amd und kubernetes-ocp-9c gemeldet):
+- Detect: AMD-Elemente bekommen zusätzlich integrated => 1|0|undef (iGPU einer Client-Ryzen-CPU, aus der gfx-Target-Tabelle; MI300A = 0). Grund: gfx1103 (Phoenix/Hawk Point, Hetzner AX42 Ryzen 7 PRO 8700GE) ist seit ROCm Core SDK 10.1.0 offiziell unterstützt -> compute 1; ohne Schutz kämen Rancher-gpu=>1-Deploys auf AX42 in den AMD-Pfad und würden auf OS/Kernel-Kombinationen, die AMD für APUs nicht unterstützt (nur Ubuntu 24.04.5 HWE 7.0 / 26.04.1), sogar sterben.
+- gpu_setup: AMD-GPUs mit wahrem compute UND nicht integrated bekommen den Treiber; integrated nur mit der neuen Option amd_integrated => 1 (Default 0), sonst Warnung wie bisher. install_driver direkt (OCP) filtert nicht.
+- Detect: PCI-Klasse 1200 (Processing accelerators) wird für Vendor 1002 akzeptiert wie 0380 — MI300A/X, MI325X, MI350X/MI355X melden sich dort (AMD Instinct system-acceptance guides), heute erscheinen sie gar nicht; der k75-Kommentar (MI300 an 0380) ist falsch. In k1 aufgenommen statt eigener Karte, weil der neue Installpfad sonst für die Haupt-Rechenzentrums-GPUs unerreichbar ist.
+- Hinweis: aktuelle ROCm-Linie ist ROCm Core SDK 10.1.0 (2026-10-05, amdrocm-*, repo.amd.com, amdgpu 31.50/31.60); die alte Linie endete mit 7.2.4. Installpfade werden darauf geprüft.
+
+2026-10-31 rex-gpu-amd: Phase A abgeschlossen (Worker + Kurator, read-only). Entscheidungen für Phase B:
+- Quellen: ROCm Core SDK 10.1.0 aktuell (stable.repo.amd.com/rocm/core/packages/<distro>/, amdrocm10.1-gfxNNNN, Key-Fingerprint D0F004A0025A1145C7807FCD0701EAC4D5E02107); amdgpu-Treiber 31.60 weiter auf repo.radeon.com/amdgpu/31.60/ (repo.amd.com hat kein amdgpu; Key rocm.gpg.key Fingerprint CA8BB4727A47B4D09B4EE8969386B48A1A693C5C). Alle URLs HTTP 200, geprüft 2026-10-30/31.
+- auto (Präzisierung, Kontrakt-Semantik): present hat Vorrang (funktionierender Treiber nie angefasst); sonst AMDs Vorgabe pro Familie aus der Tabelle (Instinct/Radeon -> amdgpu-dkms, Ryzen-APU -> inbox; AMD: APUs nur inbox auf Ubuntu 24.04.5 HWE 7.0 / 26.04.1 GA 7.0); ohne Tabellenzeile die Kartenregel. method=dkms auf Inbox-only-GPU stirbt vor jeder Änderung; reboot => 1 wirkt auch im Inbox-Pfad, wenn der Treiber sonst nicht greift.
+- verify_amd gpus[]: slot, device_id, gfx_target, vram_bytes, gtt_bytes, kfd_node, kfd_nodes (additiv).
+- install_rocm(release => 10.1, gpus => [...] | targets => [...]) -> present|installed; nur apt; stirbt vor jeder Änderung, wenn die alte Linie (rocm-core <= 7.2.4) installiert ist (AMD verlangt Deinstallation, wir deinstallieren nie). Auf synapse also Abbruch ohne Änderung.
+- DKMS-Kernel-Gates pro OS aus AMDs Systemanforderungen; linux-modules-extra-$K nur wo apt einen Kandidaten hat (synapse HWE 7.0: keiner, live geprüft).
+- synapse read-only geprüft: kein nomodeset, Secure Boot aus, keine amdgpu-Blacklist, 95:00.0 an amdgpu gebunden, rev 0xda.
+
+Phase B implemented, not committed (worker). New: lib/Rex/GPU/AMD.pm, AMD/Hardware.pm (only the 1586 -> gfx1151 row pair, integrated, inbox), AMD/Setup.pm + Setup/Apt.pm, Setup/Ubuntu.pm, Setup/Debian.pm, Setup/RHEL.pm (untracked, need git add). Changed: Detect.pm and Detect/Sysfs.pm (class 1200 for 1002 only, k75 comment fixed, AMD elements always carry slot/device_id/gfx_target/compute/integrated, one extra read-only state read only on AMD hosts), GPU.pm (amd and amd_integrated options, amd_class, AMD dispatch with a warning per skipped GPU), README AMD section, rex-gpu-core SKILL.md. Contract unchanged: Rex::GPU::AMD::install_driver(gpus => [...]) returns present/inbox/dkms; verify_amd(gpus =>) returns ok + gpus (slot, device_id, gfx_target, vram_bytes, gtt_bytes, kfd_node, kfd_nodes). Present/verify path sends exactly one read-only command (state_script); an explicit method adds uname -r and modinfo -n amdgpu. prove -lr t/ is red only where expected: lspci grep string keyed in t/11, t/93, t/94 and 16 detect goldens; AMD-only hosts gain the state read (t/93 test 4, golden detect/debian-12--amd-only); AMD compute 0 assertions (t/10 tests 5/21/22, t/12 test 8); t/05 test 2 warning text. Checked: with only the grep string swapped in scratch copies, t/11 passes and t/93/t/94 fail only on the AMD-only state read. Next: curator (rows + hardware.md), then test-writer (goldens, AMD coverage, AMD state read into the harness READ_ONLY list). Not run on hardware.
+
+2026-10-31 01:36 rex-gpu-amd: LIVE auf synapse (Phase-B-Stand, read-only hinter einem Guard auf der LibSSH-Exec-Ebene, der jeden ändernden Befehl verweigert; 0 Verweigerungen, alle gesendeten Befehle protokolliert):
+- gpu_detect(Sysfs) und gpu_detect(lspci): amd => [{ slot 0000:95:00.0, device_id 1586, pci_class 0380, gfx_target gfx1151 (aus KFD), compute 1, integrated 1 }]; Sysfs 2 Befehle, lspci 3 (command -v lspci, lspci|grep, State-Read).
+- verify_amd() und verify_amd(gpus): ok 1, gfx1151, kfd_node 1, kfd_nodes [1], vram_bytes 137438953472, gtt_bytes 33535848448; 1 Befehl.
+- install_driver(gpus) auto, install_driver() ohne gpus: present, 1 Befehl; method inbox: present, 3 Befehle (+ uname -r, modinfo -n amdgpu).
+- install_rocm(release 10.1): stirbt vor jeder Änderung wegen rocm-core 7.2.4.70204-93~24.04 (3 Lesebefehle).
+- gpu_setup(containerd_config none): Warnung integrated/amd_integrated, kein Treiberschritt; mit amd_integrated => 1: install_driver present + verify_amd ok.
+Nicht live gelaufen: Inbox-Installation, DKMS, Reboot, install_rocm-Installation (würde Treiber/ROCm auf synapse ändern; nur nach Rücksprache mit OCP).
+
+Fix round done (worker, not committed). 1) A working driver is never touched for any method: explicit inbox/dkms that is not the working driver's kind returns present with the warning 'method => X asked, but a working inbox/DKMS amdgpu already drives the GPUs; install_driver never replaces a working driver. Nothing was changed on the host'. dkms on an inbox-only GPU still dies before the present check. The inbox-for-dkms-row warning now fires only on a real install. POD updated. 2) lspci name that is the bare pci.ids placeholder Device (or Device XXXX) becomes AMD GPU [1002:XXXX], AMD only; synapse now reads 'AMD GPU detected: AMD GPU [1002:1586] -- ...'. 3) Explicit gpus => [] is refused in _check_gpus: install_driver and install_rocm die before any command, verify_amd warns and returns ok 0 gpus []; no gpus still means every AMD GPU. 4) Class 1200 = MI300 and MI350 series, 0380 = MI100/MI210/MI250 in Detect.pm, Sysfs.pm, README, SKILL.md. 5) Ubuntu.pm source comment notes the 24.04.4 + OEM 6.14 vs matrix discrepancy; matrix followed. Present path offline: install_driver(gpus => [slot]) and verify_amd() send exactly one command (state_script). prove -lr t/: same expected red as before (grep key t/11 t/93 t/94 + detect goldens, AMD-only state read t/93 test 4 and golden amd-only, AMD compute-0 asserts t/10 tests 5/21/22 and t/12 test 8, t/05 test 2 text) plus t/10 test 8 (name Device -> AMD GPU [1002:7550], item 2). Rancher: with the curator's discrete rows, gpu => 1 now installs the AMD driver on hosts with a ROCm-capable discrete AMD GPU.
+
+2026-10-31 01:15 rex-gpu-test-writer: tests for the AMD path done, uncommitted in the worktree. New: t/13-amd-hardware.t, t/14-amd-detect.t (lspci + sysfs, KFD wins over table), t/15-amd-gpu-setup.t (dispatch), t/16-amd-driver-state.t (present / verify_amd / arg dies), t/17-amd-install-driver.t (+ t/golden/amd/*, 22 goldens), t/18-amd-rocm.t (+ 3 goldens), t/lib/Test/RexGPU/AMD.pm (scripted AMD hosts). Changed: t/00-load, t/05, t/10, t/11, t/12, t/93, t/94, Golden.pm (state read + modinfo/dkms/od/modprobe.d grep known read-only), 16 detect goldens (grep line; amd-only also gets the state read). prove -lr t/: 42 files, 1852 tests, PASS. Offline against a scripted host only -- no real hardware, goldens record command strings not shell behaviour.
+
+Live probe 2 on synapse (2026-10-31 02:00, final lib after fix round, RexGuard active: 27 commands, 0 refused, all read-only). gpu_detect Sysfs+lspci: 0000:95:00.0 1002:1586 class 0380 gfx1151 compute 1 integrated 1, name 'AMD GPU [1002:1586]'. verify_amd()/verify_amd(gpus): ok 1. install_driver auto/no gpus: present (1 cmd); method inbox: present, no mismatch warning (module source inbox). method dkms: dies before change (gfx1151 inbox-only). gpus => []: install_driver dies with 0 cmds, verify_amd warns + ok 0 with 0 cmds. install_rocm(10.1): dies, rocm-core 7.2.4 installed. gpu_setup(containerd_config none): integrated warning, no driver step; with amd_integrated 1: present + verified. NOT run on synapse: inbox install, amdgpu-dkms install, modprobe, reboot, install_rocm install (mutating, needs OCP go). prove -lr t/: Files=42 Tests=1852 PASS (offline, no hardware).
+
+Committed as fed6101 on worktree-k1-amd-driver; not pushed. Install paths untested on hardware; Rancher follow-up is k95.
+
+Downstream ack from rex-rancher-amd (2026-10-31): Rex::Rancher needs no change for fed6101. It never passes gpus =>, reads only compute/integrated, detects via Rex::GPU->can('amd_class'), no cpanfile pin until a release. rex-rancher k95/k101/k102 committed on its worktree-k95-amd-gpu. Not run live yet: the Rex::Rancher → Rex::GPU::AMD path (gpu_amd_integrated => 1 on synapse); the host driver there came from OCP's own host step.
+
+OCP ack (kubernetes-ocp-9c, 2026-10-31): fed6101 matches OCP main since k249 (1e68072). OCP vendors rex-gpu straight from this worktree branch (make vendor clones its committed HEAD = fed6101). Keep branch worktree-k1-amd-driver and its worktree in place until the maintainer decides on merge/release. No mutating run on synapse needed: OCP's auto path ends at 'present'.
+
+Live through OCP (kubernetes-ocp, 2026-10-31, amdlab, synapse gfx1151 on Ubuntu 24.04 / HWE 7.0, inbox amdgpu). OCP image live-20bec47 with Rex::GPU 0.006 from worktree-k1-amd-driver fed6101: ocp node add --gpu ran the host step twice (after an RKE2 uninstall). The node registered with ocp.internal/amd-gpu.present=true and gfx-target=gfx1151, the host stayed unchanged (no DKMS, no reboot), and the torch smoke passed afterwards via the device plugin and via DRA. From the OCP side the branch is ready to release. Merge and release are the maintainer's call.
