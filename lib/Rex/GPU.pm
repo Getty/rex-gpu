@@ -9,6 +9,7 @@ use Scalar::Util qw( blessed );
 
 use Rex::GPU::Detect;
 use Rex::GPU::NVIDIA;
+use Rex::GPU::AMD ();
 
 require Rex::Exporter;
 use base qw(Rex::Exporter);
@@ -55,10 +56,14 @@ NVSwitch chips under C<nvswitch>:
   #   ],
   #   amd => [
   #     {
-  #       name      => "Navi 31 [Radeon RX 7900 XTX]",
-  #       vendor    => "amd",
-  #       pci_class => "0300",
-  #       compute   => 0,        # always 0 (AMD not yet supported)
+  #       name       => "AMD GPU [1002:1586]",   # pci.ids name if the host's knows it
+  #       vendor     => "amd",
+  #       pci_class  => "0380",   # 0300, 0302, 0380 or 1200
+  #       slot       => "0000:95:00.0",
+  #       device_id  => "1586",
+  #       gfx_target => "gfx1151",
+  #       compute    => 1,        # 1 ROCm-capable, 0 not, undef unknown
+  #       integrated => 1,        # 1 APU, 0 discrete, undef unknown
   #     }
   #   ],
   #   nvswitch => [],            # HGX NVSwitch chips, see Rex::GPU::Detect
@@ -70,8 +75,10 @@ C<nvswitch>) are empty; a real card passed through next to one (vfio-pci,
 cloud GPU VM) is still detected. An NVIDIA vGPU guest device is told
 apart from a physical or passed-through card by its PCI subsystem ID, read
 with another read-only C<lspci> only on hosts with an NVIDIA GPU: C<vgpu =E<gt> 1>
-and C<vgpu_type> (see L<Rex::GPU::Detect/NVIDIA vGPU guests>). See
-L<Rex::GPU::Detect> for details on the classification logic.
+and C<vgpu_type> (see L<Rex::GPU::Detect/NVIDIA vGPU guests>). On hosts
+with an AMD GPU one more read-only command reads the AMD driver state, for
+the GPU's gfx target (see L<Rex::GPU::Detect/AMD compute classification>).
+See L<Rex::GPU::Detect> for details on the classification logic.
 
   my $gpus = gpu_detect(detect => 'My::GPU::Detect');
 
@@ -172,7 +179,19 @@ anything missing (e.g. the module before the first reboot); it never dies.
 It runs on every call with a CUDA-capable GPU, also when the driver was
 already installed.
 
-AMD GPUs are detected and logged but not yet supported (a warning is emitted).
+B<Experimental.> Every ROCm-capable AMD GPU (C<compute =E<gt> 1> in the
+L</gpu_detect> result) that is not integrated is passed to
+L<Rex::GPU::AMD/install_driver> as C<gpus>, with C<reboot>, which makes the
+AMD kernel driver C<amdgpu> usable for ROCm -- or does nothing if it already
+is (one read-only command) -- and then to L<Rex::GPU::AMD/verify_amd>,
+which logs a warning for anything missing and never dies. An integrated GPU
+(C<integrated =E<gt> 1>: an APU such as the Ryzen AI Max) is passed only
+with C<amd_integrated =E<gt> 1>. Every AMD GPU not passed gets a warning
+naming why: unknown (no hardware row, C<compute =E<gt> undef>), not
+ROCm-capable, or integrated. Neither ROCm itself
+(L<Rex::GPU::AMD/install_rocm>) nor any container runtime or CDI setup for
+AMD is part of C<gpu_setup>. A die of L<Rex::GPU::AMD/install_driver>
+(most of them before it changes the host, see there) ends C<gpu_setup>.
 
   gpu_setup(
     containerd_config => 'rke2',  # containerd integration target
@@ -261,16 +280,32 @@ gpu_detect_class>. See L</detect_class>. C<detect =E<gt>
 without installing C<pciutils>; a GPU it leaves at C<compute =E<gt> undef>
 (no generation row, no name to judge) gets no driver here.
 
+=item C<amd>
+
+B<Experimental.> A subclass of L<Rex::GPU::AMD> (a class name) that runs
+the AMD steps -- L<Rex::GPU::AMD/install_driver> and
+L<Rex::GPU::AMD/verify_amd> -- as class methods. Without it, C<set
+gpu_amd_class =E<gt> 'My::GPU::AMD'> in the Rexfile does the same for every
+call; this option wins over it. See L</amd_class>.
+
+=item C<amd_integrated>
+
+B<Experimental.> If true, a ROCm-capable integrated AMD GPU (an APU, e.g.
+the Ryzen AI Max C<gfx1151>) gets the driver too. Default: C<0>, an
+integrated GPU is skipped with a warning.
+
 =back
 
-A class of C<setup>, C<nvidia> or C<detect> that cannot be loaded or does
-not extend its base class makes C<gpu_setup> die before anything is done on
-the host, even on a host without a GPU.
+A class of C<setup>, C<nvidia>, C<detect> or C<amd> that cannot be loaded
+or does not extend its base class makes C<gpu_setup> die before anything is
+done on the host, even on a host without a GPU.
 
 None of these options changes anything for a caller that does not pass
 it; in particular L<Rex::Rancher>'s C<gpu =E<gt> 1> passes none, and picks
 up a custom setup through C<set gpu_nvidia_setup> and custom classes
-through C<set gpu_nvidia_class> / C<set gpu_detect_class>.
+through C<set gpu_nvidia_class> / C<set gpu_detect_class> /
+C<set gpu_amd_class>. The AMD driver install itself needs no option: it
+runs for every ROCm-capable discrete AMD GPU, C<gpu =E<gt> 1> included.
 
 Returns the result of L<Rex::GPU::Detect/detect> — a hashref with C<nvidia>,
 C<amd> and C<nvswitch> array keys.
@@ -301,11 +336,12 @@ sub gpu_setup {
 
   $class->_step($class, __PACKAGE__, '_check_connection');
 
-  # A class of the user's (nvidia => / detect =>, set gpu_nvidia_class /
-  # gpu_detect_class, karr #71) that cannot be loaded dies here, before
-  # anything touches the host.
+  # A class of the user's (nvidia => / detect => / amd =>, set
+  # gpu_nvidia_class / gpu_detect_class / gpu_amd_class, karr #71, k1) that
+  # cannot be loaded dies here, before anything touches the host.
   my $nvidia = $class->nvidia_class($opts{nvidia});
   $class->detect_class($opts{detect});
+  my $amd = $class->amd_class($opts{amd});
 
   # A containerd_config typo dies here (karr #66), not after the driver
   # install and a reboot.
@@ -349,8 +385,31 @@ sub gpu_setup {
     }
   }
 
+  # AMD (karr k1): the amdgpu driver for every ROCm-capable AMD GPU -- an
+  # integrated one (APU) only with amd_integrated => 1. Every other one is
+  # named in a warning with the reason. Unknown (compute undef) gets nothing.
   if ($gpus->{amd} && @{$gpus->{amd}}) {
-    Rex::Logger::info("AMD GPU detected — driver support not yet implemented", "warn");
+    my @install;
+    for my $gpu (@{$gpus->{amd}}) {
+      my $why = !defined $gpu->{compute} ? 'no hardware row for it, compute unknown'
+        : !$gpu->{compute}               ? 'not ROCm-capable'
+        : $gpu->{integrated} && !$opts{amd_integrated}
+          ? 'integrated GPU (APU); pass amd_integrated => 1 to install for it'
+        : undef;
+      if (defined $why) {
+        Rex::Logger::info("AMD GPU detected: $gpu->{name} -- no driver installed: $why", "warn");
+        next;
+      }
+      Rex::Logger::info("ROCm-capable AMD GPU: " . $gpu->{name});
+      push @install, $gpu;
+    }
+    if (@install) {
+      $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
+        gpus   => \@install,
+        reboot => ($opts{reboot} ? 1 : 0),
+      );
+      $class->_step($amd, 'Rex::GPU::AMD', 'verify_amd', gpus => \@install);
+    }
   }
 
   return $gpus;
@@ -387,6 +446,23 @@ L<Rex::GPU::Detect/configured_class>.
 sub detect_class {
   my ( $class, $detect ) = @_;
   return Rex::GPU::Detect->configured_class($detect);
+}
+
+=method amd_class
+
+  my $class = Rex::GPU->amd_class($amd_option);
+
+B<Experimental.> The L<Rex::GPU::AMD> class L</gpu_setup> installs the AMD
+driver with: C<$amd_option> (its C<amd> option) if defined, else C<set
+gpu_amd_class>, else C<Rex::GPU::AMD>. See
+L<Rex::GPU::AMD/configured_class>; croaks before anything touches the host
+for a class that cannot be loaded or is not a L<Rex::GPU::AMD>.
+
+=cut
+
+sub amd_class {
+  my ( $class, $amd ) = @_;
+  return Rex::GPU::AMD->configured_class($amd);
 }
 
 # One step of the pipeline. With the built-in class ($target eq $base) it is
@@ -475,6 +551,11 @@ into the containerd config for the target Kubernetes distribution.
 
 =back
 
+AMD (B<experimental>): a ROCm-capable discrete AMD GPU gets the AMD kernel
+driver C<amdgpu> -- the distribution kernel's own, or AMD's C<amdgpu-dkms>
+-- through L<Rex::GPU::AMD>; steps 3 to 5 are NVIDIA's only. ROCm itself is
+a separate call, L<Rex::GPU::AMD/install_rocm>. See L</gpu_setup>.
+
 Tested on Hetzner dedicated servers (bare metal) running:
 
 =over
@@ -523,7 +604,8 @@ a deliberate security tradeoff:
 =head1 CLASSES OF YOUR OWN
 
 B<Experimental>, like L<Rex::GPU::NVIDIA::Setup>. C<Rex::GPU>,
-L<Rex::GPU::Detect> and L<Rex::GPU::NVIDIA> are plain packages whose
+L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA> and L<Rex::GPU::AMD> are plain
+packages whose
 functions are also class methods: every step and every private helper is
 called through the class it runs as, so a subclass overrides one without
 copying the rest.
@@ -554,6 +636,6 @@ arguments as before.
 =head1 SEE ALSO
 
 L<Rex>, L<Rex::LibSSH>, L<Rex::GPU::Detect>, L<Rex::GPU::NVIDIA>,
-L<Rex::Rancher>
+L<Rex::GPU::AMD>, L<Rex::Rancher>
 
 =cut

@@ -1,6 +1,29 @@
 Revision history for Rex-GPU
 
 {{$NEXT}}
+  - New Rex::GPU::AMD (experimental): install_driver(gpus =>, method =>
+    auto|inbox|dkms, reboot =>) makes the distribution kernel's amdgpu
+    usable (plus firmware or linux-modules-extra where missing) or installs
+    amdgpu-dkms 31.60 from repo.radeon.com with a pinned key fingerprint, on
+    Ubuntu 22.04/24.04/26.04, Debian and RHEL-family 8/9/10. A working
+    driver is left alone ('present'); every refusal dies before any change.
+    verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
+    =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
+    (apt only). gpus => [] is refused.
+  - gpu_setup installs the AMD driver for ROCm-capable discrete AMD GPUs;
+    an APU only with the new option amd_integrated => 1; amd => or
+    set gpu_amd_class picks a custom class. Rex::GPU->can('amd_class') is
+    the feature flag for Rex::Rancher's gpu => 1.
+  - gpu_detect lists AMD GPUs at PCI class 1200 (MI300/MI350) too, and every
+    AMD entry carries slot, device_id, gfx_target, compute and integrated.
+    compute is no longer always 0: it comes from the new
+    Rex::GPU::AMD::Hardware tables (gfx targets, PCI IDs) or, when the
+    running amdgpu reports one, from the KFD topology. An unknown GPU stays
+    compute undef and gets no driver. A placeholder name "Device" becomes
+    "AMD GPU [1002:XXXX]". The lspci read command string changed.
+  - AMD support is experimental: only detection, verify_amd, the no-op
+    paths and the refusals ran, read-only, on one Ryzen AI Max+ 395 host.
+    No AMD install, modprobe, reboot or install_rocm has run on hardware.
 
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which

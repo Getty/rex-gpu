@@ -49,6 +49,7 @@ use Rex::Commands::Gather ();
 use Rex::Commands::Pkg ();
 use Rex::Commands::Run ();
 use Rex::Logger ();
+use Rex::GPU::AMD ();
 use Rex::GPU::Detect ();
 use Rex::GPU::NVIDIA ();
 
@@ -463,6 +464,7 @@ sub _opt_tag {
 
 # Transcript lines that change the host. Everything else is a read-only probe.
 my $RUN = qr{^run(?:\([^)]*\))?: };
+my $AMD_STATE = do { my $script = Rex::GPU::AMD->state_script; qr{${RUN}\Q$script\E$} };
 my @READ_ONLY = (
   qr{${RUN}nvidia-smi -L },
   qr{${RUN}uname -[rm]$},
@@ -489,6 +491,18 @@ my @READ_ONLY = (
   qr{${RUN}dnf -q list --showduplicates --available },
   # karr #56: the HGX B200/B300 Fabric State read
   qr{${RUN}nvidia-smi -q 2>&1$},
+  # k1: Rex::GPU::AMD's driver state read -- ONE command, shell builtins that
+  # only read sysfs (/sys/module/amdgpu, /sys/bus/pci/devices/*/{vendor,class,
+  # device,driver,mem_info_*}, /sys/class/drm/renderD*, the KFD topology
+  # properties) and test -c /dev/kfd. It writes nothing. Matched as the exact
+  # string the module hands out, so a changed script is flagged until read.
+  $AMD_STATE,
+  # k1: the other AMD probes -- modinfo, dkms status, the Secure Boot EFI
+  # variable's value byte, and the grep over modprobe.d for a blacklist
+  qr{${RUN}modinfo -n amdgpu 2>/dev/null$},
+  qr{${RUN}dkms status -m amdgpu -k \S+ 2>&1$},
+  qr{${RUN}od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/\S+ 2>/dev/null$},
+  qr{${RUN}grep -rsHE --include='\*\.conf' '[^']*' /etc/modprobe\.d /run/modprobe\.d /usr/lib/modprobe\.d /lib/modprobe\.d 2>/dev/null$},
   qr{^can_run: }
 );
 

@@ -12,6 +12,8 @@ The full pipeline, driven by a single `gpu_setup()` call:
 4. **CDI spec generation** — makes `nvidia.com/gpu=all` and `management.nvidia.com/gpu=all` resolvable, writing under `/etc/cdi` only what `nvidia-ctk cdi list` does not already show, so the Kubernetes device plugin enumerates GPU resources without privileged containers and the GPU Operator validator finds its management device.
 5. **Containerd runtime configuration** — injects the NVIDIA runtime into the containerd config for the target Kubernetes distribution (`rke2`, `k3s`, or standalone `containerd`).
 
+AMD GPUs get the `amdgpu` kernel driver (experimental, see [AMD](#amd-experimental)); steps 3–5 are NVIDIA only.
+
 ## Synopsis
 
 ```perl
@@ -63,7 +65,7 @@ Decided by generation (PCI device ID), whatever the marketing name or PCI class:
 | Maxwell, Pascal, Volta (V100, P100, GTX 9xx/10xx, GT 1030, MX1xx–MX3xx) | yes | proprietary 580 branch, their last: Ubuntu `nvidia-driver-580-server`, RHEL pinned 580 kmod, openSUSE `G06` proprietary, Debian `non-free` |
 | Kepler and older (K80/K40/K20, GT 710, GTX 7xx) | no | none — last branch 470 is no longer packaged; skipped with a warning at any PCI class, a newer GPU on the same host still gets its driver |
 
-GPUs that cannot share one driver (a V100 next to a B200) make `gpu_setup` die before any driver package is installed, unless a working driver is already installed. Such a die (like the vGPU and HGX ones below) is known without a refreshed package index: by then no package source has been added and nothing installed, except `pciutils` when `lspci` was missing for detection. An unrecognised NVIDIA model beyond the table defaults to no install, with a warning. AMD GPUs are detected and logged; no AMD driver is installed.
+GPUs that cannot share one driver (a V100 next to a B200) make `gpu_setup` die before any driver package is installed, unless a working driver is already installed. Such a die (like the vGPU and HGX ones below) is known without a refreshed package index: by then no package source has been added and nothing installed, except `pciutils` when `lspci` was missing for detection. An unrecognised NVIDIA model beyond the table defaults to no install, with a warning. AMD GPUs: see [AMD (experimental)](#amd-experimental).
 
 ### NVIDIA vGPU guests
 
@@ -72,6 +74,27 @@ On a VM with an NVIDIA vGPU (Azure NVadsA10 v5, AWS G6f, a vGPU on VMware or KVM
 ### NVSwitch / HGX (Fabric Manager)
 
 On an HGX baseboard whose NVSwitches are PCI devices on the host (HGX-2, HGX A100, HGX H100/H200), `gpu_detect` lists them under `nvswitch`, and `gpu_setup` installs NVIDIA Fabric Manager together with the driver, at exactly the driver's version, and enables `nvidia-fabricmanager.service`. Without it CUDA does not initialise on those hosts. Debian's `non-free` has no Fabric Manager, so Debian 12/13 takes NVIDIA's CUDA repository instead; Debian 11 and openSUSE die before any driver package is installed. On a host whose driver is already installed, Fabric Manager is added only if the host's own package sources offer it at exactly the running driver's version (asked after an `apt-get update` on Debian/Ubuntu); otherwise `gpu_setup` warns and installs nothing. No package source is added and the driver is not touched either way. **HGX B200/B300:** their NVSwitches are not visible on the host PCI bus, so `gpu_setup` recognises them by the GPU device IDs (B200 `2901`/`2909`, B300 `3182`). It installs Fabric Manager with the driver as above, then the NVLink Subnet Manager `nvlsm`, `infiniband-diags` and `libibumad3`/`libibumad` unversioned (plus `linux-modules-extra` of the running kernel on Ubuntu), loads `ib_umad` persistently, warns on a kernel older than 5.17 (not on the RHEL family), and after Fabric Manager starts checks that `nvidia-smi -q` reports `Fabric State: Completed` on every GPU -- a loud warning if not, never a failure. With the driver already installed, the missing ones of these packages are installed from the host's own package sources (after an `apt-get update` on Debian/Ubuntu; no source is added, one not offered only warns) and `ib_umad` is loaded. `nvlsm` comes from NVIDIA's CUDA repository: on Debian 12/13 and RHEL/Rocky/Alma 9/10 the driver's own; on Ubuntu 22.04/24.04 (amd64) it is added for these hosts only, after the driver, with an apt pin that lets nothing but `nvlsm` come from it, so the driver stays Ubuntu's. Elsewhere (other Ubuntu releases, RHEL 8, openSUSE) `gpu_setup` dies before any driver package is installed. GB200/GB300 NVL72 compute trays run no Fabric Manager (it runs on the switch trays); they get a note that multi-node NVLink needs `nvidia-imex`, which Rex::GPU does not set up. None of this has been tested on HGX hardware.
+
+### AMD (experimental)
+
+`gpu_detect` lists AMD GPUs at PCI class `0300`, `0302`, `0380` (Instinct MI100/MI210/MI250, the Strix Halo APU) and `1200` (Instinct MI300 and MI350 series) with `slot`, `device_id`, `gfx_target`, `compute` (ROCm-capable) and `integrated` (APU). The gfx target comes from what the running `amdgpu` reports in the KFD topology (one more read-only command, only on hosts with an AMD GPU), else from the device table `Rex::GPU::AMD::Hardware`; a GPU without a row there stays `compute => undef` and gets no driver. The table is filled by research with a cited source per row: the Instinct MI100 to MI350 series, Radeon RDNA 1 to RDNA 4, the Ryzen APUs and older GCN parts; `compute` is 1 for a gfx target AMD's current ROCm release (10.1) lists for Linux. Where the host's `pci.ids` does not know a GPU (`lspci` prints only `Device`), it is named `AMD GPU [1002:XXXX]`.
+
+`gpu_setup` passes every ROCm-capable discrete AMD GPU to `Rex::GPU::AMD::install_driver`, an integrated one only with `amd_integrated => 1`; every other AMD GPU gets a warning naming why. `install_driver` does nothing when the driver already works (`/sys/module/amdgpu`, `/dev/kfd`, a KFD node and a render node per GPU — one read-only command); otherwise it makes the distribution kernel's own `amdgpu` usable (installing only the missing firmware or module package) or installs AMD's `amdgpu-dkms` 31.60 from `repo.radeon.com` with the running kernel's headers, its key checked against a pinned fingerprint. Which one follows AMD's support per gfx target (the Ryzen APUs: inbox driver only) or `method => 'inbox' | 'dkms'`. Ubuntu, Debian and RHEL/Rocky/Alma only; `amdgpu-dkms` only on Ubuntu 22.04/24.04/26.04, Debian 12/13 and RHEL 8/9/10 with a kernel of AMD's ROCm 10.1 matrix, without Secure Boot; the Ryzen APUs only on Ubuntu 26.04 and 24.04 with the HWE kernel 7.0. Anything else, `nomodeset` or an `amdgpu` blacklist dies before any change. `Rex::GPU::AMD::verify_amd` reports the result per GPU (gfx target, VRAM, GTT, KFD nodes) and never dies.
+
+ROCm itself is a separate call: `Rex::GPU::AMD::install_rocm(release => '10.1')` installs AMD's ROCm Core SDK packages for the GPUs' gfx targets from `stable.repo.amd.com` (apt only: Ubuntu, Debian). No container toolkit, CDI spec or containerd runtime is set up for AMD.
+
+```perl
+use Rex::GPU;
+use Rex::GPU::AMD;
+my @amd = grep { $_->{compute} } @{ gpu_detect()->{amd} };
+if (@amd) {   # gpus => [] dies; omitting gpus means every AMD GPU of the host
+    my $how = Rex::GPU::AMD::install_driver(gpus => \@amd);  # 'present', 'inbox' or 'dkms'
+    my $ok  = Rex::GPU::AMD::verify_amd(gpus => \@amd)->{ok};
+    Rex::GPU::AMD::install_rocm(release => '10.1', gpus => \@amd);
+}
+```
+
+Tested on one AMD host only (Ubuntu 24.04, Ryzen AI Max+ 395 class APU `1002:1586`, gfx1151, inbox `amdgpu` already working), and only read-only: detection, `verify_amd`, the no-op paths, the refusals and `gpu_setup` with and without `amd_integrated`. The inbox install, the `amdgpu-dkms` install, `modprobe`, the reboot path and `install_rocm` have not run on any AMD hardware.
 
 ### MIG (A100 / H100 / B200)
 
