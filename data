@@ -1,0 +1,36 @@
+---
+claimed_at: 2026-11-04T02:51:03Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:51:03Z
+created: 2026-11-04T01:23:54Z
+id: 82
+priority: medium
+started: 2026-11-04T01:46:09Z
+status: done
+tags:
+- amd
+- debian
+- rhel
+- hardware
+- decision
+title: 'AMD Radeon auf Debian/RHEL außerhalb von AMDs ROCm-Matrix: amdgpu-dkms ohne
+  Prüfung'
+updated: 2026-11-04T02:56:36Z
+---
+
+Fund aus k80.
+
+Ist: Der Quellkommentar in Setup/Debian.pm (Z. 10-17) hält fest, dass AMDs ROCm-10.1-Matrix auf Debian kein Radeon (und keine Ryzen-APU) listet; RHEL-Kommentar ähnlich (Radeon nur 10.2/9.8). Die Radeon-Zeilen in AMD/Hardware.pm (gfx1030, gfx1100-1102, gfx1200, gfx1201) haben driver => dkms und bekommen auf Debian 12/13 amdgpu-dkms ohne Prüfung. Die POD schweigt dazu.
+
+Empfehlung: entweder ein strukturiertes Feld (Instinct/Radeon) in den Hardware-Zeilen und eine Prüfung pro OS-Klasse analog inbox_only_unsupported (Curator für die Zeilen, Worker für die Logik; nicht gegen den Freitext in family matchen), oder bewusst zulassen und in der POD als "außerhalb von AMDs Matrix" dokumentieren. Entscheidung Maintainer. Bei Verhaltensänderung Test.
+
+2026-11-04 01:46 Go: Getty (2026-11-04: "k82 bis k87 auch nach todo und Agent drauf"). Variante hat der Hub gewählt: AMDs ROCm-Matrix gilt streng (strukturiertes Feld Instinct/Radeon in den Hardware-Zeilen, Prüfung je OS-Klasse, Abbruch vor jeder Änderung, present hat Vorrang). Auftrag: perl-developer docs/rex-karten-2026-11-04/rex-gpu-k82-k87-auftrag.md
+
+curator: Feld matrix (instinct/radeon/ryzen/undef) in allen targets()-Zeilen, aus den source-Feldern (Tabellen von [rocm-10.1-matrix], kein Netz); Validierung nur des Werts; references/hardware.md nachgezogen. worker: resolve reicht matrix weiter; Setup::check_radeon in plan_inbox und plan_dkms (nach host_unsupported/preflight) und in _die_mixed_drivers; radeon_unsupported: Basis/Debian nie, Ubuntu 26.04 7.0 / 24.04 HWE 7.0 / 22.04 HWE 6.8, RHEL-Familie 10.2+6.12.0-211 / 9.8+5.14.0-687. Lesarten des Hauptagenten (nicht Hub-Vorgabe): Prüfung methodenunabhängig (inbox und dkms); RHEL-Kernelbindung aus der Instinct-Liste derselben Release; Rocky/Alma wie RHEL (bestehende Klassenkonvention); matrix undef bei compute 1 -> durchgelassen. install_rocm ausgelagert -> k91. Tests: test-writer läuft.
+
+Tests (test-writer): t/13 matrix-Konsistenz + Subklassen-Validierung; neu t/19-amd-radeon.t (8 Subtests), 13 neue Goldens (verweigert: Debian 13, Ubuntu 24.04 GA 6.8, 22.04 GA 5.15, RHEL 9.6, RHEL 9.8/-570, je dkms+inbox; durch: Ubuntu 22.04 HWE 6.8, 26.04, RHEL 9.8/-687, Alma 9.8; Proxmox zuerst; present zuerst; gemischt APU+Radeon 3 Fälle); 1 Golden nur Zeilentausch (uname -r vor dpkg --print-architecture). Rot gegen lib 1551c20: alle Verweigerungsfälle in t/19 (z. B. 'debian-13--dkms--navi31: the literal message' got undef; '... no command that changes the host ran' got 'run: systemctl stop unattended-upgrades …'), gemischt 24.04 GA 6.8, t/13 croak-Tests; Proxmox/present/Instinct/k85-Rat grün auch alt (Regressionswächter). README-Satz (Hauptagent). prove -lr t/: Files=43, Tests=1879, Result: PASS. Nicht gegen Hardware geprüft.
+
+Commit 92d871b, main ff auf 92d871b. install_rocm ausgelagert nach k91.
+
+2026-11-04 02:56 Live geprüft (Hub, 2026-11-04, synapse: Ubuntu 24.04.5, Kernel 7.0.0-42-generic, gfx1151, über Rex::LibSSH, nur lesend): Ziel erkannt mit driver=inbox, matrix=ryzen; state_problems leer (install_driver → present); host_unsupported, inbox_only_unsupported, inbox_unsupported undef; check_radeon ok; plan_inbox braucht nichts; Header-Kandidat für den laufenden Kernel vorhanden (k84). main fc97b7a gepusht.
