@@ -1,0 +1,29 @@
+---
+claimed_at: 2026-11-04T02:12:08Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:12:08Z
+created: 2026-11-04T01:24:09Z
+id: 85
+priority: low
+started: 2026-11-04T01:46:23Z
+status: done
+tags:
+- amd
+- message
+title: 'AMD auto bei APU + dGPU: Meldung rät zu method => inbox, das auf Debian/RHEL
+  für die APU sofort stirbt'
+updated: 2026-11-04T02:12:08Z
+---
+
+Fund aus k80.
+
+Ist: _auto_method (AMD.pm) stirbt bei gemischten Zeilen (APU inbox + dGPU dkms) mit "Pass method => inbox to drive all of them with the inbox driver". Auf Debian und RHEL stirbt genau das danach in plan_inbox für die APU (inbox_only_unsupported). Auf Ubuntu nur mit passendem Kernel.
+
+Empfehlung: den Rat nur geben, wenn setup->inbox_only_unsupported leer ist, sonst die APU-Begründung gleich mitnennen (bzw. gpus => auf die dGPUs einschränken). Kleine Verhaltensänderung der Meldung → Test.
+
+Worker: nur lib/ (AMD.pm: _auto_method -> neues _die_mixed_drivers; POD install_driver; Setup.pm nur POD). Reihenfolge wie plan_inbox: host_unsupported (Proxmox-Meldung), dann inbox_only_unsupported, nur wenn leer inbox_unsupported; inbox-Rat nur wenn beide leer, sonst Grund + 'Pass gpus => with <dGPU> only to leave <APU> out.' Neue Lesebefehle nur im gemischten Fall: uname -r (Debian zusätzlich dpkg-query pve-firmware). prove -lr t/ grün (Files=42, Tests=1860), kein bestehender Test rot (t/16 prüft den Text auf Ubuntu HWE 7.0, dort unverändert). Nicht gegen Hardware gelaufen.
+
+k85 umgesetzt (worker: _die_mixed_drivers in Rex::GPU::AMD, POD AMD.pm/Setup.pm; test-writer: t/16 Block 'karr k85', 5 Subtests). Rat zu method => 'inbox' nur, wenn inbox_only_unsupported und inbox_unsupported leer sind; sonst Grund plus gpus => mit den dkms-GPUs; Proxmox: host_unsupported-Grund. Rot gegen lib von 60dfd72: t/16 'Failed 3/17 subtests' (Ubuntu GA 6.8, Ubuntu 22.04, Debian 13, RHEL 9, Proxmox, inbox_unsupported-Subklasse rot; HWE-/26.04-Pin grün). prove -lr t/: Files=42, Tests=1864, Result: PASS. Nicht gegen Hardware geprüft.
+
+Commit 0965681, main ff auf 0965681
