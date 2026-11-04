@@ -265,7 +265,7 @@ C<amdgpu-dkms>). On 10.0, 9.6, 9.4, 8.10, another release or kernel
 L<Rex::GPU::AMD/install_driver> dies before any change for them; a working
 driver is answered with C<present>, as everywhere. The matrix's Radeon
 list names the releases only; the kernel build and that it binds C<inbox>
-too are this distribution's reading (karr k82).
+too are this distribution's reading.
 
 =back
 

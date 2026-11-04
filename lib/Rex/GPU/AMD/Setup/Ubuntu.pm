@@ -188,7 +188,7 @@ HWE kernel 7.0 and on 22.04 with the HWE kernel 6.8, all C<-generic>
 change for them, naming the kernel; no kernel is installed. A working
 driver is answered with C<present>, as everywhere. That the Radeon list
 binds C<inbox> too, and not only the C<amdgpu-dkms> the matrix names, is
-this distribution's reading (karr k82): the matrix lists the operating
+this distribution's reading: the matrix lists the operating
 systems per GPU table.
 
 =back

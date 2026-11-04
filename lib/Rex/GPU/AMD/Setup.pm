@@ -246,7 +246,7 @@ sub preflight {
 
 =method check_radeon
 
-Host-read-only (karr k82): dies, naming them, for the GPUs of L</gpus>
+Host-read-only: dies, naming them, for the GPUs of L</gpus>
 whose hardware row says C<matrix =E<gt> 'radeon'> (the Radeon table of
 AMD's ROCm compatibility matrix) unless L</radeon_unsupported> is empty --
 whatever the method, since the matrix lists operating systems and kernels

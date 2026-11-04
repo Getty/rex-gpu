@@ -149,8 +149,8 @@ for a Radeon GPU (hardware row C<matrix =E<gt> 'radeon'>) outside the
 releases and kernels AMD's matrix lists for Radeon
 (L<Rex::GPU::AMD::Setup/radeon_supported>: none on Debian, Ubuntu 26.04 GA
 7.0, 24.04 HWE 7.0, 22.04 HWE 6.8, RHEL 10.2 and 9.8 with their kernel
-build) whatever the method -- this distribution's reading of the matrix,
-karr k82 --, and on Debian for C<inbox> too (the per-OS matrix is in
+build) whatever the method (this distribution's reading of the matrix),
+and on Debian for C<inbox> too (the per-OS matrix is in
 L<Rex::GPU::AMD::Setup::Ubuntu>, L<Rex::GPU::AMD::Setup::Debian> and
 L<Rex::GPU::AMD::Setup::RHEL>; on Ubuntu and RHEL C<inbox> for any GPU
 but these two kinds checks neither the release nor the kernel series; a
