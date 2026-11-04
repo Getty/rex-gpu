@@ -14,8 +14,8 @@ Every host command goes through its L<Rex::GPU::AMD/host_run>.
 =attr gpus
 
 The GPUs to install for, as L<Rex::GPU::AMD/install_driver> resolved them
-(C<slot>, C<device_id>, C<gfx_target>, C<driver>, C<integrated>,
-C<bound_driver>, ...). Default C<[]>.
+(C<slot>, C<device_id>, C<gfx_target>, C<driver>, C<matrix>,
+C<integrated>, C<bound_driver>, ...). Default C<[]>.
 
 =attr state
 
@@ -116,9 +116,9 @@ sub install {
 =method plan_inbox
 
 Host-read-only. Dies for a L</host_unsupported> reason first, then
-L</preflight>; for GPUs whose hardware row says C<driver =E<gt> 'inbox'>
-(AMD supports them with the inbox driver only) dies unless
-L</inbox_only_unsupported> is empty, then for any GPU unless
+L</preflight>, then L</check_radeon>; for GPUs whose hardware row says
+C<driver =E<gt> 'inbox'> (AMD supports them with the inbox driver only)
+dies unless L</inbox_only_unsupported> is empty, then for any GPU unless
 L</inbox_unsupported> is; then what is missing: the
 L</inbox_module_packages> when the running kernel has no C<amdgpu.ko>
 (dies if there are none), the first of L</firmware_packages> when none of
@@ -127,8 +127,8 @@ them is installed. C<needed> is C<0> when nothing is.
 =method plan_dkms
 
 Host-read-only. Dies for a L</host_unsupported> reason first, then
-L</preflight>, then dies for an architecture other than
-L</supported_arch>, a L</dkms_unsupported> reason, Secure Boot
+L</preflight>, then L</check_radeon>, then dies for an architecture other
+than L</supported_arch>, a L</dkms_unsupported> reason, Secure Boot
 (L</secure_boot_enabled>) and an existing L</dkms_repo> file of other
 content. C<needed> is C<0> when C<dkms status> already shows C<amdgpu>
 installed for the running kernel; else the plan requires
@@ -146,6 +146,7 @@ sub plan_inbox {
     die 'install_driver: '.$why.". Nothing was changed on the host\n";
   }
   $self->preflight;
+  $self->check_radeon;
   my @only = grep { ( $_->{driver} // '' ) eq 'inbox' } @{ $self->gpus };
   if (@only and my $why = $self->inbox_only_unsupported) {
     die 'install_driver: '.$self->_labels(@only).': '.$why.". Nothing was changed on the host\n";
@@ -174,6 +175,7 @@ sub plan_dkms {
     die 'install_driver: '.$why.". Nothing was changed on the host\n";
   }
   $self->preflight;
+  $self->check_radeon;
   die 'install_driver: amdgpu-dkms is built for '.$self->supported_arch.' only; this host is '
     .$self->arch.". Nothing was changed on the host\n"
     unless $self->arch eq $self->supported_arch;
@@ -238,6 +240,30 @@ sub preflight {
   for my $gpu (grep { defined $_->{bound_driver} && $_->{bound_driver} ne 'amdgpu' } @{ $self->gpus }) {
     die 'install_driver: '.$self->amd->gpu_label($gpu).' is bound to '.$gpu->{bound_driver}
       ."; install_driver does not unbind it. Nothing was changed on the host\n";
+  }
+  return;
+}
+
+=method check_radeon
+
+Host-read-only (karr k82): dies, naming them, for the GPUs of L</gpus>
+whose hardware row says C<matrix =E<gt> 'radeon'> (the Radeon table of
+AMD's ROCm compatibility matrix) unless L</radeon_unsupported> is empty --
+whatever the method, since the matrix lists operating systems and kernels
+per GPU table, not per driver. A GPU without C<matrix> -- no row, a
+C<compute =E<gt> 0> target, a row of your own written without the field --
+is not checked: it is not guessed from C<family>. Asked by L</plan_inbox>
+and L</plan_dkms> after L</preflight>, and by
+L<Rex::GPU::AMD/install_driver> before it names a way out for GPUs whose
+hardware rows disagree.
+
+=cut
+
+sub check_radeon {
+  my ( $self ) = @_;
+  my @radeon = grep { ( $_->{matrix} // '' ) eq 'radeon' } @{ $self->gpus };
+  if (@radeon and my $why = $self->radeon_unsupported) {
+    die 'install_driver: '.$self->_labels(@radeon).': '.$why.". Nothing was changed on the host\n";
   }
   return;
 }
@@ -586,6 +612,24 @@ Where AMD supports the inbox-only GPUs, for messages: Ubuntu 26.04 with the
 GA kernel 7.0 and Ubuntu 24.04 with the HWE kernel 7.0 (ROCm 10.1
 compatibility matrix).
 
+=method radeon_unsupported
+
+Why a GPU of the Radeon table of AMD's ROCm compatibility matrix
+(C<matrix =E<gt> 'radeon'>) is not supported on this OS release and
+kernel, or C<undef> when it is -- for C<inbox> and C<amdgpu-dkms> alike.
+Asked by L</check_radeon>; host-read-only. Here: always a reason -- AMD
+lists the Radeon GPUs only on Ubuntu and RHEL (L</radeon_supported>);
+L<Rex::GPU::AMD::Setup::Debian> inherits it (no Radeon on Debian),
+L<Rex::GPU::AMD::Setup::Ubuntu> and L<Rex::GPU::AMD::Setup::RHEL> bind it
+to the releases and kernels the matrix lists for them.
+
+=method radeon_supported
+
+Where AMD supports the Radeon GPUs, for messages: Ubuntu 26.04 (GA kernel
+7.0), Ubuntu 24.04 (HWE kernel 7.0), Ubuntu 22.04 (HWE kernel 6.8), RHEL
+10.2 (kernel 6.12.0-211) and RHEL 9.8 (kernel 5.14.0-687), per the ROCm
+10.1 compatibility matrix.
+
 =method kernel_header_packages
 
 =method optional_packages
@@ -642,6 +686,18 @@ sub inbox_only_supported {
 sub inbox_only_unsupported {
   my ( $self ) = @_;
   return 'AMD supports them with the inbox driver only on '.$self->inbox_only_supported
+    .'; this host runs '.$self->os_label.' with kernel '.$self->kernel;
+}
+
+sub radeon_supported {
+  'Ubuntu 26.04 (GA kernel 7.0), Ubuntu 24.04 (HWE kernel 7.0), Ubuntu 22.04 (HWE kernel 6.8), '
+    .'RHEL 10.2 (kernel 6.12.0-211) and RHEL 9.8 (kernel 5.14.0-687), per the ROCm 10.1 '
+    .'compatibility matrix'
+}
+
+sub radeon_unsupported {
+  my ( $self ) = @_;
+  return 'AMD supports Radeon GPUs only on '.$self->radeon_supported
     .'; this host runs '.$self->os_label.' with kernel '.$self->kernel;
 }
 

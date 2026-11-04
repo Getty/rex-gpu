@@ -9,13 +9,19 @@ Revision history for Rex-GPU
     release's own amd64 kernel) and RHEL-family 8/9/10. A working driver is
     left alone ('present'); every refusal dies before any change, among them
     a Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
-    would remove proxmox-ve and its kernel. For dkms the running kernel's
-    headers and amdgpu-dkms need an installation candidate (installed or
-    offered by the sources; on RHEL checked with dnf repoquery), else it
-    dies before any package install, for headers gone from the mirror with
-    the advice to upgrade the kernel and reboot. With an APU next to a dGPU,
-    method => 'auto' names method => 'inbox' only where the inbox driver
-    is supported for the APU, else the reason and gpus => with the dGPUs.
+    would remove proxmox-ve and its kernel. Radeon GPUs (the Radeon table
+    of AMD's ROCm 10.1 matrix, new field matrix in the Hardware rows) get
+    either driver only where that table lists them: Ubuntu 26.04 GA kernel
+    7.0, 24.04 HWE 7.0, 22.04 HWE 6.8, RHEL-family 10.2 and 9.8 with their
+    kernel build, never Debian; elsewhere install_driver dies before any
+    change (a working driver is still 'present'). For dkms the running
+    kernel's headers and amdgpu-dkms need an installation candidate
+    (installed or offered by the sources; on RHEL checked with dnf
+    repoquery), else it dies before any package install, for headers gone
+    from the mirror with the advice to upgrade the kernel and reboot. With
+    an APU next to a dGPU, method => 'auto' names method => 'inbox' only
+    where the inbox driver is supported for the APU, else the reason and
+    gpus => with the dGPUs.
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
     =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
     (apt only). gpus => [] is refused.

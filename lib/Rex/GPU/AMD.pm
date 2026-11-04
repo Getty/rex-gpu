@@ -123,7 +123,9 @@ C<method =E<gt> 'inbox'> only where the inbox driver is supported for all
 of them on this host (neither L<Rex::GPU::AMD::Setup/inbox_only_unsupported>
 nor L<Rex::GPU::AMD::Setup/inbox_unsupported> gives a reason), else that
 reason and C<gpus> with only the C<amdgpu-dkms> ones -- on a Proxmox VE host
-the Proxmox reason instead; for GPUs without a row it takes
+the Proxmox reason instead, and for a Radeon GPU AMD's matrix does not list
+on this host (L<Rex::GPU::AMD::Setup/check_radeon>) the Radeon reason,
+naming no way out: both would include it; for GPUs without a row it takes
 C<inbox> if the running kernel has an C<amdgpu.ko> or can get one from the
 host's package sources, else C<dkms>. C<method =E<gt> 'dkms'> for a GPU
 AMD supports only with the inbox driver dies, also where the driver
@@ -143,10 +145,16 @@ without an AMD GPU, a state that could not be read; and, unless the driver
 already works (C<present>), for an unsupported OS, a Proxmox VE host
 (C<pve-firmware> installed; whatever the method), an unsupported release
 or kernel for C<dkms>, for a GPU AMD supports only with the inbox driver,
-and on Debian for C<inbox> too (the per-OS matrix is in
+for a Radeon GPU (hardware row C<matrix =E<gt> 'radeon'>) outside the
+releases and kernels AMD's matrix lists for Radeon
+(L<Rex::GPU::AMD::Setup/radeon_supported>: none on Debian, Ubuntu 26.04 GA
+7.0, 24.04 HWE 7.0, 22.04 HWE 6.8, RHEL 10.2 and 9.8 with their kernel
+build) whatever the method -- this distribution's reading of the matrix,
+karr k82 --, and on Debian for C<inbox> too (the per-OS matrix is in
 L<Rex::GPU::AMD::Setup::Ubuntu>, L<Rex::GPU::AMD::Setup::Debian> and
-L<Rex::GPU::AMD::Setup::RHEL>; on Ubuntu and RHEL C<inbox> for any other
-GPU checks neither the release nor the kernel series), a kernel command
+L<Rex::GPU::AMD::Setup::RHEL>; on Ubuntu and RHEL C<inbox> for any GPU
+but these two kinds checks neither the release nor the kernel series; a
+GPU whose row has no C<matrix> is not taken for a Radeon), a kernel command
 line with C<nomodeset>, C<amdgpu.modeset=0> or a module
 blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
@@ -259,12 +267,16 @@ sub _auto_method {
 # Rows that disagree under auto (karr k85): the way out it names must not
 # die in turn. method => 'inbox' only where plan_inbox would let every GPU
 # through (the same checks, host-read-only, in its order), else gpus => with
-# the amdgpu-dkms GPUs only. On a host no driver may go to, that reason.
+# the amdgpu-dkms GPUs only. On a host no driver may go to, that reason. A
+# Radeon GPU outside AMD's matrix on this host (k82) is in both ways out --
+# every GPU for inbox, and its row says dkms -- and both plans die for it:
+# no way out is named, check_radeon dies as the plans would.
 sub _die_mixed_drivers {
   my ( $class, $setup, $inbox, $dkms ) = @_;
   if (my $why = $setup->host_unsupported) {
     die 'install_driver: '.$why.". Nothing was changed on the host\n";
   }
+  $setup->check_radeon;
   my $only = $setup->inbox_only_unsupported;
   my $all  = $only ? undef : $setup->inbox_unsupported;
   die 'install_driver: AMD supports '.$inbox.' only with the inbox driver and '.$dkms
@@ -790,7 +802,8 @@ sub setup_for {
 =method hardware_class
 
 B<Experimental.> The class L</install_driver> and L</verify_amd> ask for a
-GPU's gfx target, C<compute>, C<integrated> and supported C<driver>:
+GPU's gfx target, C<compute>, C<integrated>, supported C<driver> and AMD
+C<matrix> table:
 L<Rex::GPU::AMD::Hardware>. Override it in a subclass to use your own rows.
 
 =method normalize_slot

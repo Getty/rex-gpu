@@ -35,7 +35,7 @@ directly.
 ## AMD GPUs — `Rex::GPU::AMD::Hardware` (k1)
 
 Two overridable tables, first match wins: `targets` (gfx target → `compute`, `integrated`,
-`driver`, `family`, `source`, optional `rocm_last`) and `devices` (explicit `ids` lists →
+`driver`, `matrix`, `family`, `source`, optional `rocm_last`) and `devices` (explicit `ids` lists →
 `gfx_target`, `product`, `source`). **Never ID ranges**: AMD interleaves families (`73F0`
 is Navi 33 inside the Navi 23 `73E0`–`73FF` area). Every row cites its source; URLs and
 revisions are in the comment above the tables (all checked 2026-10-31).
@@ -64,15 +64,15 @@ detection paths take 0380/1200 for vendor 1002 only.
 lacks); 0 = a released target no current release lists; no row = undef. Per target, not
 per product (ROCm ships code per target).
 
-| gfx targets | `compute` | `integrated` | `driver` | What |
-|---|---|---|---|---|
-| 950, 942, 90a, 908 | 1 | 0 | dkms | Instinct MI350/MI355, MI300X/MI300A/MI325X, MI250/MI210, MI100 |
-| 1201, 1200, 1100, 1101, 1102, 1030 | 1 | 0 | dkms | Radeon RX 9070/9060, 7900/7800/7700/7600, PRO W7900/W7800/W7700/V710, W6800/V620 |
-| 1151, 1150, 1152, 1153, 1103 | 1 | 1 | inbox | Ryzen AI Max, Ryzen AI 300/400, Phoenix/Hawk Point (Ryzen 200, 7840U) |
-| 906 (`rocm_last` 6.3.3), 900 | 0 | 0 | — | MI50/MI60/Radeon VII, MI25/Vega 10 |
-| 904, 803, 802, 701, 1010–1012, 1031, 1032, 1034 | 0 | 0 | — | older Radeon (in no ROCm release checked) |
-| 902, 90c, 801, 700, 1013, 1033, 1035, **1036** | 0 | 1 | — | older APUs; gfx1036 = Raphael/Mendocino |
-| 1154, 1170–1172, 1250, 1251 | no row | | | KFD/LLVM know them, AMD makes no statement |
+| gfx targets | `compute` | `integrated` | `driver` | `matrix` | What |
+|---|---|---|---|---|---|
+| 950, 942, 90a, 908 | 1 | 0 | dkms | instinct | Instinct MI350/MI355, MI300X/MI300A/MI325X, MI250/MI210, MI100 |
+| 1201, 1200, 1100, 1101, 1102, 1030 | 1 | 0 | dkms | radeon | Radeon RX 9070/9060, 7900/7800/7700/7600, PRO W7900/W7800/W7700/V710, W6800/V620 |
+| 1151, 1150, 1152, 1153, 1103 | 1 | 1 | inbox | ryzen | Ryzen AI Max, Ryzen AI 300/400, Phoenix/Hawk Point (Ryzen 200, 7840U) |
+| 906 (`rocm_last` 6.3.3), 900 | 0 | 0 | — | — | MI50/MI60/Radeon VII, MI25/Vega 10 |
+| 904, 803, 802, 701, 1010–1012, 1031, 1032, 1034 | 0 | 0 | — | — | older Radeon (in no ROCm release checked) |
+| 902, 90c, 801, 700, 1013, 1033, 1035, **1036** | 0 | 1 | — | — | older APUs; gfx1036 = Raphael/Mendocino |
+| 1154, 1170–1172, 1250, 1251 | no row | | | | KFD/LLVM know them, AMD makes no statement |
 
 - `integrated`: LLVM AMDGPUUsage's dGPU/APU column. gfx942 covers the MI300X and the
   MI300A (APU): 0 — LLVM says dGPU, and the MI300A is a datacenter accelerator (k1).
@@ -81,6 +81,12 @@ per product (ROCm ships code per target).
   require the inbox kernel driver included with Ubuntu" (Ubuntu only — matrix: 26.04.1 GA
   7.0, 24.04.5 HWE 7.0; the install page also names 24.04.4 and the OEM 6.14 kernel).
   undef for every compute-0 target.
+- `matrix`: the table of AMD's ROCm 10.1.0 compatibility matrix (`[rocm-10.1-matrix]`)
+  that lists the target — `instinct`, `radeon` or `ryzen` (Ryzen APU), each table with its
+  own OS list. `matrix`, not the free text in `family`, tells Instinct, Radeon and Ryzen APU
+  apart (k82). No compute-1 target is in two tables (gfx942 = MI300X and MI300A, both
+  Instinct). undef = in no table: every compute-0 target, and a subclass row written
+  without the field (only the value is checked).
 
 **`devices`** (229 IDs, 35 rows): an ID gets a row only when a source maps it to its target
 (kernel pciidlist chip → KFD case, `rocm_agent_enumerator`, libhsakmt, rocprofiler-compute,

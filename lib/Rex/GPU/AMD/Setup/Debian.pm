@@ -9,7 +9,9 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 
 # Sources, checked 2026-10-30:
 #   ROCm 10.1 compatibility matrix (Instinct): Debian 13 kernel 6.12, Debian
-#     12 kernel 6.1.0; no Radeon and no Ryzen APU support on Debian.
+#     12 kernel 6.1.0; no Radeon and no Ryzen APU support on Debian. Both
+#     die here, with either driver: radeon_unsupported and
+#     inbox_only_unsupported are inherited from Rex::GPU::AMD::Setup (k82).
 #   amdgpu 31.60 install guide, Debian: the Ubuntu repository of
 #     repo.radeon.com, suite noble for Debian 13 and jammy for Debian 12;
 #     linux-headers-$K.
@@ -133,6 +135,16 @@ Ryzen APUs, rows with C<driver =E<gt> 'inbox'>) are not supported on
 Debian: L<Rex::GPU::AMD/install_driver> dies before any change for them,
 unless their driver already works, which it answers with C<present>
 (C<method =E<gt> 'dkms'> dies then too).
+
+=item * B<No Radeon GPU> (gfx target rows with C<matrix =E<gt> 'radeon'>,
+L<Rex::GPU::AMD::Hardware/targets>), with either driver: AMD's matrix lists
+the Radeon GPUs only on Ubuntu and RHEL
+(L<Rex::GPU::AMD::Setup/radeon_unsupported>, inherited).
+L<Rex::GPU::AMD/install_driver> dies before any change for them, on every
+Debian release and kernel, unless their driver already works, which it
+answers with C<present>. With the Ryzen APUs refused as well, only the
+Instinct GPUs -- and GPUs whose row says no C<matrix>, or that have no row
+-- get C<amdgpu-dkms> or the inbox driver here.
 
 =item * B<Not on Proxmox VE> (L</host_unsupported>): with C<pve-firmware>
 installed both paths die before any change, also on a Debian kernel. A

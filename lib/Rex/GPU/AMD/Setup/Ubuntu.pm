@@ -15,7 +15,9 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #     Ryzen APUs: "Inbox kernel driver in supported Ubuntu version", 26.04.1 GA
 #     7.0 and 24.04.5 HWE 7.0 only. AMD's Ryzen install page names 24.04.4
 #     with the OEM kernel 6.14 instead (hardware curator, k1). The matrix is
-#     followed, so an APU on 6.14 dies before any change.
+#     followed, so an APU on 6.14 dies before any change. The Radeon list
+#     binds every GPU of the Radeon table (matrix => 'radeon'), whatever
+#     the method (k82): a Radeon on 24.04 GA 6.8 or 22.04 GA 5.15 dies.
 #   amdgpu 31.60 install guide (instinct.docs.amd.com/projects/amdgpu-docs,
 #     docs-31.60.0): suites resolute/noble/jammy; linux-headers-$K, and on
 #     24.04/22.04 linux-modules-extra-$K.
@@ -27,12 +29,15 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #     linux-firmware still carries the files -- either one installed suffices.
 my %RELEASE = (
   '26.04' => { suite => 'resolute', dkms => [qw( 7.0 )], inbox_only => [qw( 7.0 )],
+               radeon => [qw( 7.0 )],
                firmware => [qw( linux-firmware-amd-graphics linux-firmware )],
                modules_extra => 0, rocm => 'ubuntu2604' },
   '24.04' => { suite => 'noble', dkms => [qw( 6.8 7.0 )], inbox_only => [qw( 7.0 )],
+               radeon => [qw( 7.0 )],
                firmware => [qw( linux-firmware-amd-graphics linux-firmware )],
                modules_extra => 1, rocm => 'ubuntu2404' },
   '22.04' => { suite => 'jammy', dkms => [qw( 5.15 6.8 )], inbox_only => [],
+               radeon => [qw( 6.8 )],
                firmware => [qw( linux-firmware )],
                modules_extra => 1, rocm => 'ubuntu2204' },
 );
@@ -41,18 +46,28 @@ my %RELEASE = (
 
 The row of this Ubuntu release (C<VERSION_ID>), C<undef> for another one:
 
-  release  amdgpu-dkms kernels  inbox-only GPUs (APUs)  ROCm repo
-  26.04    7.0                  7.0                     ubuntu2604
-  24.04    6.8, 7.0             7.0 (HWE)               ubuntu2404
-  22.04    5.15, 6.8            --                      ubuntu2204
+  release  amdgpu-dkms kernels  Radeon GPUs  inbox-only GPUs (APUs)  ROCm repo
+  26.04    7.0                  7.0          7.0                     ubuntu2604
+  24.04    6.8, 7.0             7.0 (HWE)    7.0 (HWE)               ubuntu2404
+  22.04    5.15, 6.8            6.8 (HWE)    --                      ubuntu2204
 
 Kernels are the C<MAJOR.MINOR> of a C<-generic> C<uname -r>
-(C<7.0.0-42-generic>), from the ROCm 10.1 compatibility matrix.
+(C<7.0.0-42-generic>), from the ROCm 10.1 compatibility matrix. The
+C<amdgpu-dkms> kernels are the Instinct table's; the Radeon GPUs
+(C<matrix =E<gt> 'radeon'>) are bound to their own, for C<inbox> and
+C<amdgpu-dkms> alike (L</radeon_unsupported>).
 
 =method kernel_series
 
 C<MAJOR.MINOR> of the running kernel if it is a C<-generic> one, else
 C<undef> (no other flavour is in AMD's matrix).
+
+=method radeon_unsupported
+
+C<undef> when the running kernel is one L</release_data> lists for the
+Radeon GPUs on this release (C<-generic>), else the reason, naming the
+kernel series; on a release without a row the reason of
+L<Rex::GPU::AMD::Setup/radeon_unsupported>. Host-read-only.
 
 =cut
 
@@ -83,6 +98,14 @@ sub inbox_only_unsupported {
   return $self->SUPER::inbox_only_unsupported unless $row && @{ $row->{inbox_only} };
   my $why = $self->_kernel_unsupported('AMD (inbox driver only)', $row->{inbox_only}) // return;
   return $why.' -- '.$self->inbox_only_supported;
+}
+
+sub radeon_unsupported {
+  my ( $self ) = @_;
+  my $row = $self->release_data;
+  return $self->SUPER::radeon_unsupported unless $row && @{ $row->{radeon} };
+  my $why = $self->_kernel_unsupported('AMD (Radeon GPUs)', $row->{radeon}) // return;
+  return $why.' -- '.$self->radeon_supported;
 }
 
 sub _kernel_unsupported {
@@ -138,8 +161,9 @@ kernel (a kernel update the host was not rebooted into) -- then the
 message says to upgrade the kernel and reboot first.
 
 =item * B<inbox>: the kernel's own C<amdgpu>. For any GPU but the Ryzen
-APUs this checks neither the release nor the kernel series;
-L</release_data> only names the packages added when missing: on 26.04
+APUs and the Radeon GPUs (below) this checks neither the release nor the
+kernel series; L</release_data> only names the packages added when
+missing: on 26.04
 and 24.04, when neither C<linux-firmware-amd-graphics> nor
 C<linux-firmware> is installed, the first of them apt has a candidate for;
 on 22.04 C<linux-firmware> when it is not installed; on 24.04 and 22.04
@@ -153,6 +177,19 @@ release or kernel (on the 24.04 GA kernel 6.8 the message names the kernel
 to boot) L<Rex::GPU::AMD/install_driver> dies before any change for them,
 unless their driver already works, which it answers with C<present>
 (C<method =E<gt> 'dkms'> dies then too).
+
+=item * B<Radeon GPUs> (gfx target rows with C<matrix =E<gt> 'radeon'>,
+L<Rex::GPU::AMD::Hardware/targets>), with
+either driver, only where AMD's matrix lists them, which is not where it
+lists the Instinct GPUs: on 26.04 with the GA kernel 7.0, on 24.04 with the
+HWE kernel 7.0 and on 22.04 with the HWE kernel 6.8, all C<-generic>
+(L</radeon_unsupported>). On the 24.04 GA kernel 6.8, the 22.04 GA kernel
+5.15 or another release L<Rex::GPU::AMD/install_driver> dies before any
+change for them, naming the kernel; no kernel is installed. A working
+driver is answered with C<present>, as everywhere. That the Radeon list
+binds C<inbox> too, and not only the C<amdgpu-dkms> the matrix names, is
+this distribution's reading (karr k82): the matrix lists the operating
+systems per GPU table.
 
 =back
 

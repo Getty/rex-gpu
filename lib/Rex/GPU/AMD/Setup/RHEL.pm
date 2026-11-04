@@ -12,7 +12,12 @@ extends 'Rex::GPU::AMD::Setup';
 #   ROCm 10.1 compatibility matrix (Instinct, amdgpu-dkms): RHEL 10.2
 #     6.12.0-211, 10.0 6.12.0-55, 9.8 5.14.0-687, 9.6 5.14.0-570, 9.4
 #     5.14.0-427, 8.10 4.18.0-553; Rocky 9 5.14.0-570. Radeon: RHEL 10.2, 9.8.
-#     No Ryzen APU support on RHEL.
+#     No Ryzen APU support on RHEL. The Radeon list names the releases only;
+#     %RADEON binds each to the kernel build the Instinct list gives that
+#     release (10.2 6.12.0-211, 9.8 5.14.0-687) -- this distribution's
+#     reading (k82), as strict as the amdgpu-dkms check, for either driver.
+#     Rocky and AlmaLinux with the same VERSION_ID count as RHEL, as they do
+#     for amdgpu-dkms.
 #   amdgpu 31.60 install guide, RHEL: /etc/yum.repos.d/amdgpu.repo, baseurl
 #     https://repo.radeon.com/amdgpu/31.60/el/MAJOR/main/x86_64/, priority=50,
 #     gpgcheck=1; kernel-headers-$K kernel-devel-$K kernel-devel-matched-$K
@@ -27,6 +32,10 @@ my %MAJOR = (
   8  => { kernel => qr/\A4\.18\.0-553\./, kernel_text => '4.18.0-553',
           matched => 0, firmware => [qw( linux-firmware )] },
 );
+my %RADEON = (
+  '10.2' => { kernel => qr/\A6\.12\.0-211\./, kernel_text => '6.12.0-211' },
+  '9.8'  => { kernel => qr/\A5\.14\.0-687\./, kernel_text => '5.14.0-687' },
+);
 
 =method major
 
@@ -39,6 +48,14 @@ one: the kernels AMD supports C<amdgpu-dkms> on (the matrix's RHEL kernel
 builds, C<6.12.0-211>/C<-55>, C<5.14.0-687>/C<-570>/C<-427>,
 C<4.18.0-553>), whether C<kernel-devel-matched> exists, the firmware
 package.
+
+=method radeon_unsupported
+
+C<undef> on the two releases AMD's matrix lists the Radeon GPUs for --
+C<VERSION_ID> C<10.2> with kernel C<6.12.0-211.*> and C<9.8> with
+C<5.14.0-687.*>, RHEL, Rocky Linux or AlmaLinux --, else the reason
+(another kernel: naming the one of the release; another release: the one
+of L<Rex::GPU::AMD::Setup/radeon_unsupported>). Host-read-only.
 
 =cut
 
@@ -80,6 +97,14 @@ sub dkms_unsupported {
   return if $self->kernel =~ $row->{kernel};
   return 'amdgpu-dkms '.$self->amdgpu_release.' supports '.$self->os_label.' with kernel '
     .$row->{kernel_text}.'; this host runs '.$self->kernel;
+}
+
+sub radeon_unsupported {
+  my ( $self ) = @_;
+  my $row = $RADEON{ $self->os_version } or return $self->SUPER::radeon_unsupported;
+  return if $self->kernel =~ $row->{kernel};
+  return 'AMD supports Radeon GPUs on '.$self->os_label.' with kernel '.$row->{kernel_text}
+    .' only; this host runs '.$self->kernel;
 }
 
 sub kernel_header_packages {
@@ -218,8 +243,9 @@ the kernel and reboot (Rocky and Alma move a superseded minor release's
 builds to their vault); the re-run checks the new kernel against AMD's
 matrix again.
 
-=item * B<inbox>, which checks neither the release nor the kernel;
-L</release_data> only names the firmware package: the kernel's own
+=item * B<inbox>, which checks neither the release nor the kernel but for
+the Radeon GPUs (below); L</release_data> only names the firmware package:
+the kernel's own
 C<amdgpu>, plus the firmware package (C<amd-gpu-firmware> on 10,
 C<linux-firmware> on 9 and 8) when it is not installed (it dies, before
 installing anything, if no enabled repository offers it) -- on another
@@ -229,6 +255,17 @@ supports only with the inbox driver (the Ryzen APUs) are not supported on
 RHEL: L<Rex::GPU::AMD/install_driver> dies before any change for them,
 unless their driver already works, which it answers with C<present>
 (C<method =E<gt> 'dkms'> dies then too).
+
+=item * B<Radeon GPUs> (gfx target rows with C<matrix =E<gt> 'radeon'>,
+L<Rex::GPU::AMD::Hardware/targets>), with either driver, only on the two
+releases AMD's matrix lists them for, each with its kernel build: 10.2 with
+C<6.12.0-211>, 9.8 with C<5.14.0-687> (L</radeon_unsupported>; Rocky Linux
+and AlmaLinux of the same C<VERSION_ID> count as RHEL, as for
+C<amdgpu-dkms>). On 10.0, 9.6, 9.4, 8.10, another release or kernel
+L<Rex::GPU::AMD/install_driver> dies before any change for them; a working
+driver is answered with C<present>, as everywhere. The matrix's Radeon
+list names the releases only; the kernel build and that it binds C<inbox>
+too are this distribution's reading (karr k82).
 
 =back
 

@@ -103,6 +103,19 @@ use Rex::Logger;
 # Ubuntu version"; [rocm-10.1-install]); undef where AMD says nothing, i.e.
 # every compute 0 target.
 #
+# targets, matrix: the table of [rocm-10.1-matrix] that lists the gfx target,
+# as the row's source names it -- 'instinct' (Instinct table), 'radeon'
+# (Radeon table), 'ryzen' (Ryzen APU table) -- and undef for every compute 0
+# target (no table lists it). Each table has its own operating systems, so
+# this field, never the free text in family, tells an Instinct from a Radeon
+# (karr k82). Per target, like compute: the RX 6800/6900 are 'radeon' with
+# gfx1030. No compute 1 target is in two tables: gfx942 covers the MI300X and
+# the MI300A, both in the Instinct table; gfx906 (MI50/MI60 and Radeon VII)
+# is in none. In the rows below matrix is set exactly when compute is 1,
+# 'ryzen' goes with driver 'inbox', 'instinct' and 'radeon' with 'dkms'.
+# _check_target_row checks only the value, as for driver: a subclass row
+# written without the field stays valid.
+#
 # devices: an ID gets a row only when (a) a source maps it to its gfx target --
 # the kernel (pciidlist chip -> KFD case), [rae], [hsakmt], [rocprof], or an
 # AMD product -> target list ([rocm-10.1-matrix], [rocm-10.1-specs], [llvm])
@@ -138,7 +151,8 @@ use Rex::Logger;
 #   13f3        only [rae] (gfx1013), in no device listing.
 #   SI, Bonaire, Kabini, Mullins, Topaz: the [kernel] KFD has no case for them.
 
-my %DRIVERS = map { $_ => 1 } qw( inbox dkms );
+my %DRIVERS  = map { $_ => 1 } qw( inbox dkms );
+my %MATRICES = map { $_ => 1 } qw( instinct radeon ryzen );
 
 =method targets
 
@@ -153,6 +167,9 @@ target:
     driver     => 'inbox',              # kernel driver AMD supports: 'inbox' (the
                                         # distribution kernel's amdgpu), 'dkms'
                                         # (amdgpu-dkms from repo.radeon.com), undef
+    matrix     => 'ryzen',              # the table of AMD's ROCm compatibility
+                                        # matrix listing it: 'instinct', 'radeon',
+                                        # 'ryzen' (Ryzen APU), undef (none)
     family     => 'RDNA 3.5 ...',       # for messages
     source     => '...',                # where the row comes from
     rocm_last  => '6.4',                # optional: last ROCm release supporting it
@@ -164,7 +181,8 @@ with C<amd_integrated =E<gt> 1>). C<driver> is what
 L<Rex::GPU::AMD/install_driver>'s C<method =E<gt> 'auto'> follows. A target
 without a row has all three C<undef>. Croaks, naming the row, for a row
 without a valid C<gfx_target>, a C<compute> or C<integrated> other than 0, 1
-or C<undef>, or a C<driver> other than C<inbox>, C<dkms> or C<undef>.
+or C<undef>, a C<driver> other than C<inbox>, C<dkms> or C<undef>, or a
+C<matrix> other than C<instinct>, C<radeon>, C<ryzen> or C<undef>.
 
 The built-in rows, all checked 2026-10-31 (the source comment above the
 tables in the module has every URL and revision):
@@ -202,6 +220,17 @@ C<amdgpu-dkms>), C<inbox> for the Ryzen APU targets (AMD: "Supported Ryzen
 APUs require the inbox kernel driver included with Ubuntu"), C<undef> for
 every C<compute =E<gt> 0> target.
 
+=item * C<matrix>: the table of AMD's ROCm 10.1.0 compatibility matrix that
+lists the target -- C<instinct> (C<gfx950>, C<gfx942>, C<gfx90a>,
+C<gfx908>), C<radeon> (C<gfx1201>, C<gfx1200>, C<gfx1100>, C<gfx1101>,
+C<gfx1102>, C<gfx1030>), C<ryzen> (the Ryzen APU table: C<gfx1151>,
+C<gfx1150>, C<gfx1152>, C<gfx1153>, C<gfx1103>) -- and C<undef> for every
+C<compute =E<gt> 0> target. Each table has its own supported operating
+systems; this field, not C<family>, tells an Instinct from a Radeon. No
+built-in target is in two tables (C<gfx942> is the MI300X and the MI300A,
+both Instinct). Only the value is checked: a row of your own without
+C<matrix> stays valid.
+
 =back
 
 =cut
@@ -209,140 +238,140 @@ every C<compute =E<gt> 0> target.
 sub targets {
   return (
     # --- CDNA, Instinct (discrete; AMD: AMD GPU Driver = amdgpu-dkms) ----------
-    { gfx_target => 'gfx950', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx950', compute => 1, integrated => 0, driver => 'dkms', matrix => 'instinct',
       family     => 'CDNA 4 (Instinct MI350X, MI355X, MI350P)',
       source     => '[rocm-10.1-matrix] Instinct table, AMD GPU Driver 31.60.0..30.10.2; '
         .'listed 7.0.0-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx942', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx942', compute => 1, integrated => 0, driver => 'dkms', matrix => 'instinct',
       family     => 'CDNA 3 (Instinct MI300X, MI300A, MI325X)',
       source     => '[rocm-10.1-matrix] Instinct table, AMD GPU Driver 31.60.0..30.10.2; '
         .'listed 6.0.0-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU (the MI300A is an '
         .'APU, but a datacenter accelerator: integrated 0, karr k1)' },
-    { gfx_target => 'gfx90a', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx90a', compute => 1, integrated => 0, driver => 'dkms', matrix => 'instinct',
       family     => 'CDNA 2 (Instinct MI250X, MI250, MI210)',
       source     => '[rocm-10.1-matrix] Instinct table, AMD GPU Driver 31.60.0..30.10.2; '
         .'listed 5.7.1 [rocm-sysreq], 6.0.0-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx908', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx908', compute => 1, integrated => 0, driver => 'dkms', matrix => 'instinct',
       family     => 'CDNA (Instinct MI100)',
       source     => '[rocm-10.1-matrix] Instinct table, AMD GPU Driver 31.60.0..30.10.2; '
         .'listed 5.7.1 [rocm-sysreq], 6.0.0-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
 
     # --- RDNA, Radeon (discrete; AMD: AMD GPU Driver = amdgpu-dkms) -----------
-    { gfx_target => 'gfx1201', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1201', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 4 (Navi 48: Radeon RX 9070 XT/GRE/9070, '
         .'AI PRO R9700/R9700S/R9600D/R9600)',
       source     => '[rocm-10.1-matrix] Radeon table, AMD GPU Driver 31.60.0/31.50.0; '
         .'listed 6.4.1-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx1200', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1200', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 4 (Navi 44: Radeon RX 9060 XT/9060, RX 9050)',
       source     => '[rocm-10.1-matrix] Radeon table, AMD GPU Driver 31.60.0/31.50.0; '
         .'listed 6.4.1-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx1100', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1100', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 3 (Navi 31: Radeon RX 7900 XTX/XT/GRE, PRO W7900, PRO W7800)',
       source     => '[rocm-10.1-matrix] Radeon table, AMD GPU Driver 31.60.0/31.50.0; '
         .'listed 5.7.1 [rocm-sysreq], 6.0.0-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx1101', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1101', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 3 (Navi 32: Radeon RX 7800 XT/7700 XT/7700, PRO W7700, PRO V710)',
       source     => '[rocm-10.1-matrix] Radeon table, AMD GPU Driver 31.60.0/31.50.0; '
         .'listed 6.4.1-7.2.4 [rocm-hist] and 7.14.0-10.1.0; [llvm] dGPU' },
-    { gfx_target => 'gfx1102', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1102', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 3 (Navi 33: Radeon RX 7600)',
       source     => '[rocm-10.1-matrix] Radeon table (RX 7600 only), AMD GPU Driver '
         .'31.60.0/31.50.0; listed 7.14.0-10.1.0 only, not in [rocm-hist]; [llvm] dGPU' },
-    { gfx_target => 'gfx1030', compute => 1, integrated => 0, driver => 'dkms',
+    { gfx_target => 'gfx1030', compute => 1, integrated => 0, driver => 'dkms', matrix => 'radeon',
       family     => 'RDNA 2 (Navi 21: Radeon PRO W6800, PRO V620, RX 6800/6900)',
       source     => '[rocm-10.1-matrix] Radeon table (PRO W6800 and PRO V620 only), AMD GPU '
         .'Driver 31.60.0/31.50.0; listed 5.7.1 [rocm-sysreq], 6.0.0-7.2.4 [rocm-hist] and '
         .'7.14.0-10.1.0; [llvm] dGPU' },
 
     # --- RDNA 3.5 / 3, Ryzen APUs (integrated; AMD: inbox driver only) --------
-    { gfx_target => 'gfx1151', compute => 1, integrated => 1, driver => 'inbox',
+    { gfx_target => 'gfx1151', compute => 1, integrated => 1, driver => 'inbox', matrix => 'ryzen',
       family     => 'RDNA 3.5 Ryzen AI Max APU (Strix Halo / Gorgon Halo)',
       source     => '[rocm-10.1-matrix] Ryzen APU table: gfx1151, "Inbox kernel driver in '
         .'supported Ubuntu version"; listed [rocm-ryzen] 6.4.4-7.2.1 and 7.14.0-10.1.0; '
         .'[llvm] APU; [synapse-kfd]' },
-    { gfx_target => 'gfx1150', compute => 1, integrated => 1, driver => 'inbox',
+    { gfx_target => 'gfx1150', compute => 1, integrated => 1, driver => 'inbox', matrix => 'ryzen',
       family     => 'RDNA 3.5 Ryzen AI APU (Strix Point / Gorgon Point: Radeon 890M, 880M)',
       source     => '[rocm-10.1-matrix] Ryzen APU table, inbox kernel driver; listed '
         .'[rocm-ryzen] 6.4.4-7.2.1 and 7.14.0-10.1.0; [llvm] APU' },
-    { gfx_target => 'gfx1152', compute => 1, integrated => 1, driver => 'inbox',
+    { gfx_target => 'gfx1152', compute => 1, integrated => 1, driver => 'inbox', matrix => 'ryzen',
       family     => 'RDNA 3.5 Ryzen AI APU (Krackan Point: Radeon 860M, 840M, 820M)',
       source     => '[rocm-10.1-matrix] Ryzen APU table, inbox kernel driver; listed '
         .'7.14.0-10.1.0 only; [llvm] APU' },
-    { gfx_target => 'gfx1153', compute => 1, integrated => 1, driver => 'inbox',
+    { gfx_target => 'gfx1153', compute => 1, integrated => 1, driver => 'inbox', matrix => 'ryzen',
       family     => 'RDNA 3.5 Ryzen AI 400 APU (Radeon 840M)',
       source     => '[rocm-10.1-matrix] Ryzen APU table (Ryzen AI 7 445, AI 5 PRO 435, '
         .'AI 5 435, AI 5 430), inbox kernel driver; listed 7.14.0-10.1.0 only; '
         .'[rocm-10.1-specs] lists those parts as gfx1152 and has no gfx1153; [llvm] APU' },
-    { gfx_target => 'gfx1103', compute => 1, integrated => 1, driver => 'inbox',
+    { gfx_target => 'gfx1103', compute => 1, integrated => 1, driver => 'inbox', matrix => 'ryzen',
       family     => 'RDNA 3 Ryzen APU (Phoenix / Hawk Point: Radeon 780M, 760M, 740M)',
       source     => '[rocm-10.1-matrix] Ryzen APU table (Ryzen 200 / PRO 200), inbox kernel '
         .'driver; [rocm-10.1-specs] also the Ryzen 7 7840U; listed 7.14.0-10.1.0 only; '
         .'[llvm] APU' },
 
     # --- known, not supported by any current ROCm release ---------------------
-    { gfx_target => 'gfx906', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx906', compute => 0, integrated => 0, driver => undef, matrix => undef,
       rocm_last  => '6.3.3',
       family     => 'GCN 5.1 (Vega 20: Instinct MI50/MI60, Radeon VII, Radeon PRO VII)',
       source     => '[rocm-sysreq] supported 5.7.1, deprecated 6.0.0-6.3.3 (6.0.0: MI50 '
         .'deprecated, PRO VII and VII supported), "Unsupported" 6.4.0-7.0.0; absent from '
         .'[rocm-hist] and [rocm-10.1-matrix]; [llvm] dGPU' },
-    { gfx_target => 'gfx900', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx900', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'GCN 5 (Vega 10: Instinct MI25, Radeon RX Vega 56/64)',
       source     => '[rocm-sysreq] "Unsupported" 5.7.1-7.0.0; [llvm] dGPU' },
-    { gfx_target => 'gfx904', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx904', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'GCN 5 (Vega 12)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 90004; [llvm] dGPU' },
-    { gfx_target => 'gfx902', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx902', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'GCN 5 Ryzen APU (Raven Ridge / Picasso)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 90002; [llvm] APU' },
-    { gfx_target => 'gfx90c', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx90c', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'GCN 5 Ryzen APU (Renoir / Lucienne / Cezanne / Barcelo)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 90012; [llvm] APU' },
-    { gfx_target => 'gfx803', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx803', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'GCN 3/4 (Fiji, Polaris, Vega M)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 80003; [llvm] dGPU' },
-    { gfx_target => 'gfx802', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx802', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'GCN 3 (Tonga)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 80002; [llvm] dGPU' },
-    { gfx_target => 'gfx801', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx801', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'GCN 3 APU (Carrizo)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 80001; [llvm] APU' },
-    { gfx_target => 'gfx701', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx701', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'GCN 2 (Hawaii)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 70001, only with '
         .'amdgpu.exp_hw_support; [llvm] dGPU' },
-    { gfx_target => 'gfx700', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx700', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'GCN 2 APU (Kaveri)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 70000; [llvm] APU' },
-    { gfx_target => 'gfx1010', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1010', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 1 (Navi 10)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100100; [llvm] dGPU' },
-    { gfx_target => 'gfx1011', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1011', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 1 (Navi 12)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100101; [llvm] dGPU' },
-    { gfx_target => 'gfx1012', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1012', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 1 (Navi 14)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100102; [llvm] dGPU' },
-    { gfx_target => 'gfx1013', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx1013', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'RDNA 1 APU (Cyan Skillfish)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100103; [llvm] APU' },
-    { gfx_target => 'gfx1031', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1031', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 2 (Navi 22)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100301; [llvm] dGPU' },
-    { gfx_target => 'gfx1032', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1032', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 2 (Navi 23)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100302; [llvm] dGPU' },
-    { gfx_target => 'gfx1033', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx1033', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'RDNA 2 APU (Van Gogh)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100303; [llvm] APU' },
-    { gfx_target => 'gfx1034', compute => 0, integrated => 0, driver => undef,
+    { gfx_target => 'gfx1034', compute => 0, integrated => 0, driver => undef, matrix => undef,
       family     => 'RDNA 2 (Navi 24)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100304; [llvm] dGPU' },
-    { gfx_target => 'gfx1035', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx1035', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'RDNA 2 Ryzen APU (Rembrandt)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100305; [llvm] APU' },
-    { gfx_target => 'gfx1036', compute => 0, integrated => 1, driver => undef,
+    { gfx_target => 'gfx1036', compute => 0, integrated => 1, driver => undef, matrix => undef,
       family     => 'RDNA 2 Ryzen APU (Raphael / Mendocino)',
       source     => 'in no release of [rocm-all]; [kernel] KFD 100306 for GC 10.3.6 and '
         .'10.3.7; [llvm] APU' },
@@ -623,13 +652,14 @@ sub gfx_target_from_version {
     name           => '...',       # optional, for the message
   );
   # { gfx_target => 'gfx1151', compute => 1, integrated => 1, driver => 'inbox',
-  #   family => '...' }
+  #   matrix => 'ryzen', family => '...' }
 
 B<Experimental.> The verdict for one GPU: the gfx target the running driver
 reports (KFD topology) wins over the L</devices> table; when both are known
 and differ, a warning names both and the KFD one is used. The other keys
-come from that target's L</targets> row, all C<undef> without one (and
-without a gfx target).
+(C<compute>, C<integrated>, C<driver>, C<matrix>, C<family>) come from that
+target's L</targets> row, all C<undef> without one (and without a gfx
+target).
 
 =cut
 
@@ -646,7 +676,7 @@ sub resolve {
   my $row = $class->target($gfx);
   return {
     gfx_target => $gfx,
-    map { $_ => ( $row ? $row->{$_} : undef ) } qw( compute integrated driver family )
+    map { $_ => ( $row ? $row->{$_} : undef ) } qw( compute integrated driver matrix family )
   };
 }
 
@@ -667,6 +697,8 @@ sub _check_target_row {
   }
   croak $class.'->targets: '.$row->{gfx_target}.' driver must be inbox, dkms or undef'
     if defined $row->{driver} && !$DRIVERS{ $row->{driver} };
+  croak $class.'->targets: '.$row->{gfx_target}.' matrix must be instinct, radeon, ryzen or undef'
+    if defined $row->{matrix} && !$MATRICES{ $row->{matrix} };
   return;
 }
 

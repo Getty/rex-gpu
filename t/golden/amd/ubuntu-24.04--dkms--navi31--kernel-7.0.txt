@@ -5,8 +5,8 @@ run: <AMD state script>
 run: cat /etc/os-release 2>/dev/null
 run: cat /proc/cmdline 2>/dev/null
 run: grep -rsHE --include='*.conf' '^[[:space:]]*(blacklist[[:space:]]+amdgpu|install[[:space:]]+amdgpu[[:space:]]+(/usr)?/bin/(false|true))([[:space:]]|$)' /etc/modprobe.d /run/modprobe.d /usr/lib/modprobe.d /lib/modprobe.d 2>/dev/null
-run: dpkg --print-architecture
 run: uname -r
+run: dpkg --print-architecture
 run: od -An -tu1 -j4 -N1 /sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c 2>/dev/null
 run: cat /etc/apt/sources.list.d/amdgpu.list 2>/dev/null
 run: dkms status -m amdgpu -k 7.0.0-42-generic 2>&1
