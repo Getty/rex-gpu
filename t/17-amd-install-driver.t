@@ -28,6 +28,14 @@ use lib "$Bin/lib";
 #              kernel has amdgpu.ko; linux-modules-extra when the kernel has
 #              none; Debian 12 / 13 with the release's own kernel: the
 #              pve-firmware read first, then firmware-amd-graphics (k81);
+#   * the Debian inbox failures that come with a change or none (k86):
+#       firmware-amd-graphics without a candidate dies after the apt timer
+#       stop and `apt-get update`, at the policy read, with no `apt-get
+#       install` and no modprobe; a kernel without amdgpu.ko dies before
+#       any change (no module package is known on Debian), no apt at all;
+#       `method => 'auto'` for a GPU without a hardware row on such a kernel
+#       falls back to dkms and runs the amdgpu-dkms install (the inbox path
+#       is not taken);
 #   * the driver packages are installed with a direct `apt-get install` /
 #     `dnf install` and verified by `dpkg -l` / `rpm -q` -- never through
 #     Rex::Pkg (no `pkg:` line in any transcript, asserted for all of them);
@@ -71,9 +79,11 @@ use lib "$Bin/lib";
 #     component today: the apt-cache policy answer is scripted per release
 #     (debian_install; 20250410-2 for trixie is what k81 read on a live PVE
 #     9.2, the bookworm version is a guess), because the base profile would
-#     answer with the NVIDIA candidate of Ubuntu 24.04 (580...); what a Debian
-#     host without a candidate does is not tested here (k86; the existing
-#     no-candidate golden is the Ubuntu one);
+#     answer with the NVIDIA candidate of Ubuntu 24.04 (580...); the Debian
+#     no-candidate golden scripts `Candidate: (none)` in the apt-cache format
+#     it assumes, not captured on a Debian host (k86); the dkms fallback
+#     golden shows the Ubuntu `noble` AMD repository line on Debian, as the
+#     existing Debian dkms goldens do -- whether that is right is not judged here;
 #   * what the remote shell does with a command: the key download pipeline, the
 #     printf quoting, the `grep -rsHE` over modprobe.d, the dearmor chain, are
 #     recorded verbatim and never evaluated -- a wrong quote or flag in them
@@ -86,7 +96,7 @@ use lib "$Bin/lib";
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw( record_host golden_is mutating_lines );
-use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x gpu_navi31 sequence module_path os_kernel );
+use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x gpu_navi31 gpu_unknown sequence module_path os_kernel );
 use Rex::GPU::AMD;
 
 my $STATE_CMD = Rex::GPU::AMD->state_script;
@@ -453,6 +463,59 @@ subtest 'a working amdgpu on Proxmox is answered with present: state read only (
   golden_is(masked($rec), 'amd/debian-13--present--proxmox');
 };
 
+#### Debian inbox: no firmware candidate, no amdgpu.ko (k86)
+
+subtest 'inbox on Debian 13, firmware-amd-graphics without a candidate: dies after apt-get update, before any install (golden)' => sub {
+  my $host = amd_host('debian-13', state => [ fresh('mi300x') ], module => 'inbox',
+    responses => [
+      firmware_missing(),
+      [ 'LC_ALL=C apt-cache policy firmware-amd-graphics 2>/dev/null' =>
+        "firmware-amd-graphics:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n", 0 ] ]);
+  my ( $rec ) = install($host, gpus => [ gpu_mi300x() ], method => 'inbox');
+  like($rec->{error}, qr/\Ainstall_driver: none of the amdgpu firmware packages \(firmware-amd-graphics\) can be installed from the host's package sources\. Nothing was installed\z/,
+    'dies naming the firmware package');
+  ok(!( grep { /apt-get .* install / } @{ $rec->{lines} }), 'no install command');
+  my @l = @{ $rec->{lines} };
+  my ( $stop ) = grep { $l[$_] =~ /systemctl stop/ } 0 .. $#l;
+  my ( $upd )  = grep { $l[$_] =~ /apt-get .* update -q$/ } 0 .. $#l;
+  my ( $pol )  = grep { $l[$_] =~ /apt-cache policy firmware-amd-graphics/ } 0 .. $#l;
+  ok(defined $stop && defined $upd && defined $pol && $stop < $upd && $upd < $pol,
+    'timer stop, then index refresh, then the policy read');
+  ok(!( grep { $_ eq 'run: modprobe amdgpu' } @l), 'no modprobe');
+  ok(no_pkg($rec), 'no pkg: line');
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  golden_is(masked($rec), 'amd/debian-13--inbox--mi300x--no-firmware-candidate');
+};
+
+subtest 'inbox on a Debian kernel without amdgpu.ko: dies before any change, no apt (golden)' => sub {
+  my $host = amd_host('debian-13', state => [ fresh('mi300x') ], module => 'none');
+  my ( $rec ) = install($host, gpus => [ gpu_mi300x() ], method => 'inbox');
+  like($rec->{error}, qr/\Ainstall_driver: kernel \S+ has no amdgpu module, and no package for it is known on Debian GNU\/Linux 13 \(trixie\)\. Nothing was changed on the host\z/,
+    'dies with the reason');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], 'no command that changes the host ran');
+  ok(!( grep { /apt-get|apt-cache|systemctl stop|dnf/ } @{ $rec->{lines} }), 'no apt-get, no apt-cache, no systemctl stop');
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  golden_is(masked($rec), 'amd/debian-13--inbox--mi300x--no-module');
+};
+
+subtest 'auto, GPU without a hardware row, Debian kernel without amdgpu.ko: dkms is chosen, not inbox (golden)' => sub {
+  my $K = os_kernel('debian-13');
+  my %unk = ( slot => '0000:03:00.0', class => '0300', device_id => '1902' );
+  my $host = amd_host('debian-13',
+    state => [ fresh('mi300x', %unk), working('mi300x') ],
+    module => [ 'none', 'dkms' ],
+    responses => [ dkms_status($K) ]);
+  my ( $rec, $how ) = install($host, gpus => [ gpu_unknown() ]);
+  is($rec->{error}, undef, 'lives');
+  is($how, 'dkms', 'auto fell back to dkms');
+  my ( $install ) = grep { /apt-get .* install -y .*amdgpu-dkms/ } @{ $rec->{lines} };
+  like($install, qr/ linux-headers-\Q$K\E amdgpu-dkms\z/, 'amdgpu-dkms installed with the running kernel\'s headers');
+  ok(!( grep { /firmware-amd-graphics/ } @{ $rec->{lines} }), 'no inbox firmware package');
+  ok(( grep { /radeon\.com/ } @{ $rec->{lines} }), 'the AMD repository is used (dkms path)');
+  ok(no_pkg($rec), 'no pkg: line');
+  golden_is(masked($rec), 'amd/debian-13--auto--unknown-gpu--dkms-fallback');
+};
+
 #### dies with a change made, no driver installed
 
 subtest 'a key that is not the pinned one: dies at the key, nothing installed (golden)' => sub {
@@ -474,7 +537,7 @@ subtest 'a required package without a candidate: dies after apt-get update, befo
   my $host = amd_host('ubuntu-24.04', kernel => $K, state => [ fresh('mi300x') ], module => 'none',
     responses => [ [ "LC_ALL=C apt-cache policy linux-modules-extra-$K 2>/dev/null" => "linux-modules-extra-$K:\n  Installed: (none)\n  Candidate: (none)\n", 0 ] ]);
   my ( $rec ) = install($host, gpus => [ gpu_mi300x() ], method => 'inbox');
-  like($rec->{error}, qr/\Ainstall_driver: linux-modules-extra-\Q$K\E cannot be installed from the host's package sources \(no candidate\)\. Nothing was installed/,
+  like($rec->{error}, qr/\Ainstall_driver: linux-modules-extra-\Q$K\E cannot be installed from the host's package sources \(no candidate\)\. Nothing was installed\z/,
     'dies naming the package');
   ok(!( grep { /apt-get .* install / } @{ $rec->{lines} }), 'no install command');
   ok(( grep { /apt-get .* update -q$/ } @{ $rec->{lines} }), '... after the index refresh');
