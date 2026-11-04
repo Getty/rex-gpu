@@ -9,7 +9,9 @@ Revision history for Rex-GPU
     release's own amd64 kernel) and RHEL-family 8/9/10. A working driver is
     left alone ('present'); every refusal dies before any change, among them
     a Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
-    would remove proxmox-ve and its kernel.
+    would remove proxmox-ve and its kernel. With an APU next to a dGPU,
+    method => 'auto' names method => 'inbox' only where the inbox driver
+    is supported for the APU, else the reason and gpus => with the dGPUs.
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
     =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
     (apt only). gpus => [] is refused.

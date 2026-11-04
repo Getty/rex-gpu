@@ -24,6 +24,15 @@ use lib "$Bin/lib";
 #     argument checks): an invalid method, an unknown option, malformed gpus,
 #     an explicit gpus => [], a GPU that is not on the host, a host with no
 #     AMD GPU, an unreadable state, and inbox + dkms GPUs together under auto;
+#   * (k85) inbox + dkms GPUs together under auto name a way out that does
+#     not die in turn: Ubuntu 24.04 HWE 7.0 and 26.04 GA 7.0 (the inbox driver
+#     is supported for the APU) get "Pass method => 'inbox' ..."; Ubuntu 24.04
+#     GA 6.8, Ubuntu 22.04, Debian 13 and RHEL 9 get NO such advice but the
+#     reason for the APU and "Pass gpus => with <dGPU> only to leave <APU>
+#     out"; a Proxmox VE host (Debian + pve-firmware) gets the Proxmox
+#     reason; a Setup with only inbox_unsupported set gets "is no way out on
+#     this host: <reason>" (no "for <APU>"); the extra reads are `uname -r`
+#     (Debian: pve-firmware before it), nothing mutating;
 #   * every host command goes through Rex::GPU::AMD->host_run: a subclass that
 #     overrides it sees all of them;
 #   * verify_amd returns { ok, gpus => [ { slot device_id gfx_target
@@ -37,6 +46,10 @@ use lib "$Bin/lib";
 # NOT covered -- scripted host, hand-written output:
 #   * the state script itself in a real shell: it is a string here, fed
 #     canned output, never run (t/14's header says the same);
+#   * that the advice is true on a real host: "supported" is what the Setup
+#     class says (t/17 pins what method => 'inbox' then does), the Debian 13
+#     kernel and pve-firmware answers are hand-written (Test::RexGPU::AMD,
+#     t/17's pve_status shape), not a captured Proxmox or RHEL host;
 #   * a real amdgpu / KFD: "works" means the canned lines say so. The synapse
 #     lines imitate the host read on 2026-10-31 (Test::RexGPU::AMD).
 # -----------------------------------------------------------------------------
@@ -45,6 +58,7 @@ use Test::RexGPU::Golden qw( record_host mutating_lines );
 use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x gpu_navi31 ubuntu_amd_host module_path );
 use Rex::Config;
 use Rex::GPU::AMD;
+use Rex::GPU::AMD::Setup::Ubuntu;
 
 my $STATE_CMD = Rex::GPU::AMD->state_script;
 my $STATE = 'run: '.$STATE_CMD;
@@ -207,6 +221,92 @@ subtest 'inbox-only and DKMS GPUs together under auto die; method inbox is the w
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only commands ran');
   is($rec->{lines}[0], $STATE, '... after the state read');
 };
+
+#### karr k85: the way out under auto must not be a dead end
+
+{
+  package Test::InboxUnsupportedSetup;   # only inbox_unsupported gives a reason
+  use parent -norequire, 'Rex::GPU::AMD::Setup::Ubuntu';
+  sub inbox_unsupported { 'the inbox amdgpu is not allowed on this test host' }
+  package Test::InboxUnsupportedAMD;
+  use parent -norequire, 'Rex::GPU::AMD';
+  sub setup_class_for_os { 'Test::InboxUnsupportedSetup' }
+}
+
+{
+  my $A = 'AMD GPU 0000:95:00.0 [1002:1586] (gfx1151)';
+  my $B = 'AMD GPU 0000:c1:00.0 [1002:74a1] (gfx942)';
+  my $HEAD = qr/\Ainstall_driver: AMD supports \Q$A\E only with the inbox driver and \Q$B\E with amdgpu-dkms, and one amdgpu drives every GPU of a host\. /;
+  my $TAIL = qr/Nothing was changed on the host\n?\z/;
+  my $both = amd_state(amdgpu => 0, kfd => 0, gpus => [ $BROKEN{synapse}, $BROKEN{mi300x} ]);
+  my $pve  = sub { [ qr{^dpkg-query -W -f='\$\{Status\}\\n' pve-firmware 2>/dev/null$} => $_[0], 0 ] };
+
+  my $mixed = sub {
+    my ( $os, %o ) = @_;
+    my $host = amd_host($os, state => $both, ( defined $o{kernel} ? ( kernel => $o{kernel} ) : () ),
+      responses => [ $pve->($o{pve} // '') ]);
+    my $class = $o{class} // 'Rex::GPU::AMD';
+    return on($host, sub { $class->install_driver(gpus => [ gpu_synapse(), gpu_mi300x() ]) });
+  };
+  my $clean = sub {
+    my ( $rec, $label ) = @_;
+    is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], "$label: only read-only commands ran");
+    is($rec->{lines}[0], $STATE, "$label: after the state read");
+  };
+
+  subtest 'the inbox driver is supported for the APU: the inbox advice stays (pin)' => sub {
+    for my $c ([ 'ubuntu-24.04 HWE kernel 7.0', 'ubuntu-24.04', '7.0.0-42-generic' ],
+               [ 'ubuntu-26.04 GA kernel 7.0',  'ubuntu-26.04', undef ]) {
+      my ( $label, $os, $kernel ) = @$c;
+      my ( undef, $rec ) = $mixed->($os, kernel => $kernel);
+      like($rec->{error}, qr/$HEAD\QPass method => 'inbox' to drive all of them with the inbox driver. \E$TAIL/, "$label: advice, and nothing else");
+      unlike($rec->{error}, qr/no way out|Pass gpus/, '... no dead-end note');
+      $clean->($rec, $label);
+      is_deeply([ grep { !/^run: (?:uname -r|cat \/etc\/os-release)/ && $_ ne $STATE } @{ $rec->{lines} } ], [], '... after the state read only os-release and uname -r');
+    }
+  };
+
+  subtest 'the inbox driver is NOT supported for the APU: reason + gpus advice, no inbox advice' => sub {
+    my $base = qr/AMD supports them with the inbox driver only on Ubuntu 26\.04 \(GA kernel 7\.0\) and Ubuntu 24\.04 \(HWE kernel 7\.0\), per the ROCm 10\.1 compatibility matrix; this host runs /;
+    my $hint = qr/ Pass gpus => with \Q$B\E only to leave \Q$A\E out\. /;
+    my @case = (
+      [ 'ubuntu-24.04 GA kernel 6.8', 'ubuntu-24.04', {}, qr/AMD \(inbox driver only\) supports Ubuntu 24\.04\.5 LTS with kernel 7\.0 \(-generic\); this host runs 6\.8\.0-85-generic -- / ],
+      [ 'ubuntu-22.04',               'ubuntu-22.04', {}, qr/$base\QUbuntu 22.04.5 LTS with kernel 5.15.0-151-generic\E/ ],
+      [ 'debian-13 own kernel, no pve-firmware', 'debian-13', { pve => 'unknown ok not-installed' }, qr/$base\QDebian GNU\/Linux 13 (trixie) with kernel 6.12.48+deb13-amd64\E/ ],
+      [ 'rhel-9',                     'rhel-9', {}, qr/$base\QRed Hat Enterprise Linux 9.6 (Plow) with kernel 5.14.0-570.12.1.el9_6.x86_64\E/ ],
+    );
+    for my $c (@case) {
+      my ( $label, $os, $o, $reason ) = @$c;
+      my ( undef, $rec ) = $mixed->($os, %$o);
+      like($rec->{error}, qr/$HEAD\Qmethod => 'inbox' is no way out on this host for $A: \E$reason/, "$label: names the reason for the APU");
+      like($rec->{error}, qr/\.$hint$TAIL/, '... then gpus => with the dGPU only');
+      unlike($rec->{error}, qr/Pass method => 'inbox'/, '... and does NOT advise method => inbox');
+      $clean->($rec, $label);
+    }
+    my ( undef, $rec ) = $mixed->('debian-13', pve => 'unknown ok not-installed');
+    is_deeply([ grep { /dpkg-query|uname/ } @{ $rec->{lines} } ],
+      [ "run: dpkg-query -W -f='\${Status}\\n' pve-firmware 2>/dev/null", 'run: uname -r' ],
+      'Debian: pve-firmware asked first, then uname -r');
+  };
+
+  subtest 'Proxmox VE (Debian 13 + pve-firmware): the Proxmox reason, no advice' => sub {
+    my ( undef, $rec ) = $mixed->('debian-13', pve => 'install ok installed');
+    like($rec->{error}, qr/\Ainstall_driver: this is a Proxmox VE host \(pve-firmware is installed\): .*removing proxmox-ve and the Proxmox kernel, so install_driver installs no AMD driver on Proxmox VE \(a working amdgpu of the Proxmox kernel is answered with present\)\. Nothing was changed on the host\n?\z/s,
+      'dies with the Proxmox message');
+    unlike($rec->{error}, qr/Pass method|Pass gpus|no way out|one amdgpu drives/, '... no inbox or gpus advice');
+    $clean->($rec, 'proxmox');
+    is_deeply([ grep { /dpkg-query|uname/ } @{ $rec->{lines} } ],
+      [ "run: dpkg-query -W -f='\${Status}\\n' pve-firmware 2>/dev/null" ], '... only the pve-firmware query, no uname -r');
+  };
+
+  subtest 'only inbox_unsupported gives a reason: "no way out on this host: <reason>"' => sub {
+    my ( undef, $rec ) = $mixed->('ubuntu-24.04', kernel => '7.0.0-42-generic', class => 'Test::InboxUnsupportedAMD');
+    like($rec->{error}, qr/$HEAD\Qmethod => 'inbox' is no way out on this host: the inbox amdgpu is not allowed on this test host. Pass gpus => with $B only to leave $A out. \E$TAIL/,
+      'the reason without "for <APU>", then gpus =>');
+    unlike($rec->{error}, qr/Pass method => 'inbox'|for \Q$A\E/, '... no inbox advice');
+    $clean->($rec, 'inbox_unsupported');
+  };
+}
 
 #### the seam
 

@@ -515,7 +515,8 @@ The C<amdgpu-dkms> repository for this OS. Per OS class.
 
 Why no AMD driver may be installed on this host at all, whatever the
 method, or C<undef>: L</plan_inbox> and L</plan_dkms> ask it before any
-other check. Here: C<undef>, without a host command;
+other check, L<Rex::GPU::AMD/install_driver> before it names a way out for
+GPUs whose hardware rows disagree. Here: C<undef>, without a host command;
 L<Rex::GPU::AMD::Setup::Debian> refuses a Proxmox VE host. Host-read-only.
 
 =method dkms_unsupported
@@ -527,15 +528,19 @@ C<undef> when it is. Here: always a reason.
 
 Why the inbox driver is not supported on this OS release and kernel, or
 C<undef> when it is -- for every GPU, asked by L</plan_inbox> after
-L</inbox_only_unsupported>. Here: C<undef>, nothing checked;
+L</inbox_only_unsupported>, and so by L<Rex::GPU::AMD/install_driver>
+before it names C<method =E<gt> 'inbox'> as the way out for GPUs whose
+hardware rows disagree. Host-read-only. Here: C<undef>, nothing checked;
 L<Rex::GPU::AMD::Setup::Debian> binds it to Debian 12 and 13 with Debian's
 own C<amd64> kernel.
 
 =method inbox_only_unsupported
 
 Why a GPU AMD supports only with the inbox driver (the Ryzen APUs) is not
-supported on this OS release and kernel, or C<undef>. Here: always a reason
--- AMD supports them only on Ubuntu (L</inbox_only_supported>).
+supported on this OS release and kernel, or C<undef>. Asked by
+L</plan_inbox> and by L<Rex::GPU::AMD/install_driver> for GPUs whose
+hardware rows disagree; host-read-only. Here: always a reason -- AMD
+supports them only on Ubuntu (L</inbox_only_supported>).
 
 =method inbox_only_supported
 

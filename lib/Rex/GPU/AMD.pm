@@ -118,7 +118,12 @@ C<gpus> to mean every AMD GPU.
 C<method =E<gt> 'auto'> follows L<Rex::GPU::AMD::Hardware>: the C<driver>
 of each GPU's gfx target row (C<inbox> for the Ryzen APUs, which AMD
 supports only with the inbox driver). GPUs whose rows disagree make it die
-(one C<amdgpu> drives every GPU of a host); for GPUs without a row it takes
+(one C<amdgpu> drives every GPU of a host), naming the way out:
+C<method =E<gt> 'inbox'> only where the inbox driver is supported for all
+of them on this host (neither L<Rex::GPU::AMD::Setup/inbox_only_unsupported>
+nor L<Rex::GPU::AMD::Setup/inbox_unsupported> gives a reason), else that
+reason and C<gpus> with only the C<amdgpu-dkms> ones -- on a Proxmox VE host
+the Proxmox reason instead; for GPUs without a row it takes
 C<inbox> if the running kernel has an C<amdgpu.ko> or can get one from the
 host's package sources, else C<dkms>. C<method =E<gt> 'dkms'> for a GPU
 AMD supports only with the inbox driver dies, also where the driver
@@ -231,10 +236,7 @@ sub _auto_method {
   my ( $class, $targets, $setup ) = @_;
   my %by;
   push @{ $by{ $_->{driver} } }, $class->gpu_label($_) for grep { defined $_->{driver} } @$targets;
-  die 'install_driver: AMD supports '.join(', ', @{ $by{inbox} })." only with the inbox driver and "
-    .join(', ', @{ $by{dkms} }).' with amdgpu-dkms, and one amdgpu drives every GPU of a host. '
-    ."Pass method => 'inbox' to drive all of them with the inbox driver. "
-    ."Nothing was changed on the host\n"
+  $class->_die_mixed_drivers($setup, join(', ', @{ $by{inbox} }), join(', ', @{ $by{dkms} }))
     if $by{inbox} && $by{dkms};
   return 'inbox' if $by{inbox};
   return 'dkms'  if $by{dkms};
@@ -243,6 +245,26 @@ sub _auto_method {
     .( $method eq 'inbox' ? '(the running kernel has or can get amdgpu.ko)'
                           : '(the running kernel has no amdgpu.ko and cannot get one)' ));
   return $method;
+}
+
+# Rows that disagree under auto (karr k85): the way out it names must not
+# die in turn. method => 'inbox' only where plan_inbox would let every GPU
+# through (the same checks, host-read-only, in its order), else gpus => with
+# the amdgpu-dkms GPUs only. On a host no driver may go to, that reason.
+sub _die_mixed_drivers {
+  my ( $class, $setup, $inbox, $dkms ) = @_;
+  if (my $why = $setup->host_unsupported) {
+    die 'install_driver: '.$why.". Nothing was changed on the host\n";
+  }
+  my $only = $setup->inbox_only_unsupported;
+  my $all  = $only ? undef : $setup->inbox_unsupported;
+  die 'install_driver: AMD supports '.$inbox.' only with the inbox driver and '.$dkms
+    .' with amdgpu-dkms, and one amdgpu drives every GPU of a host. '
+    .( $only ? "method => 'inbox' is no way out on this host for ".$inbox.': '.$only.'. '
+     : $all  ? "method => 'inbox' is no way out on this host: ".$all.'. '
+     :         "Pass method => 'inbox' to drive all of them with the inbox driver. " )
+    .( $only || $all ? 'Pass gpus => with '.$dkms.' only to leave '.$inbox.' out. ' : '' )
+    ."Nothing was changed on the host\n";
 }
 
 # After the install: load the module if it was not loaded, else (or if that
