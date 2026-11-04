@@ -5,8 +5,11 @@ Revision history for Rex-GPU
     auto|inbox|dkms, reboot =>) makes the distribution kernel's amdgpu
     usable (plus firmware or linux-modules-extra where missing) or installs
     amdgpu-dkms 31.60 from repo.radeon.com with a pinned key fingerprint, on
-    Ubuntu 22.04/24.04/26.04, Debian and RHEL-family 8/9/10. A working
-    driver is left alone ('present'); every refusal dies before any change.
+    Ubuntu 22.04/24.04/26.04, Debian 12/13 (inbox and dkms, only on the
+    release's own amd64 kernel) and RHEL-family 8/9/10. A working driver is
+    left alone ('present'); every refusal dies before any change, among them
+    a Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
+    would remove proxmox-ve and its kernel.
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
     =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
     (apt only). gpus => [] is refused.

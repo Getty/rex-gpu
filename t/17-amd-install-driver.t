@@ -26,7 +26,8 @@ use lib "$Bin/lib";
 #              (linux-modules-extra on kernel 7.0) is left out;
 #       inbox  Ubuntu 24.04: the firmware package alone for an APU whose
 #              kernel has amdgpu.ko; linux-modules-extra when the kernel has
-#              none;
+#              none; Debian 12 / 13 with the release's own kernel: the
+#              pve-firmware read first, then firmware-amd-graphics (k81);
 #   * the driver packages are installed with a direct `apt-get install` /
 #     `dnf install` and verified by `dpkg -l` / `rpm -q` -- never through
 #     Rex::Pkg (no `pkg:` line in any transcript, asserted for all of them);
@@ -40,7 +41,16 @@ use lib "$Bin/lib";
 #     Secure Boot on (dkms), non-amd64, an existing repo file with other
 #     content, an unsupported kernel (dkms; an APU on 24.04 kernel 6.8; an APU
 #     on Debian), `nomodeset` on the kernel command line, an amdgpu blacklist,
-#     a GPU bound to vfio-pci, an unsupported OS;
+#     a GPU bound to vfio-pci, an unsupported OS; and on Debian (k81): inbox
+#     on Debian 11 or testing/sid, inbox on a kernel that is not the release's
+#     own (a -pve one), and -- for inbox AND dkms, whatever kernel -- a host
+#     with pve-firmware on disk (Proxmox VE): `hold ok installed`, `install ok
+#     unpacked` and `install reinstreq half-installed` count, `deinstall ok
+#     config-files` (rc) does not; the Proxmox message wins over the kernel
+#     message; none of these runs apt-get or `systemctl stop`;
+#   * a working driver is answered with `present` before any Debian check: a
+#     Proxmox host with a working amdgpu gets only the state read (no
+#     pve-firmware query, no change);
 #   * these die with the first change already made but no driver installed:
 #     a key that is not the pinned one (a key directory is made and removed),
 #     a required package without a candidate (after apt-get update), and these
@@ -52,6 +62,18 @@ use lib "$Bin/lib";
 #   * whether amdgpu-dkms 31.60 builds on the kernel, whether the packages and
 #     the repository exist at those names today, whether the key AMD serves is
 #     the pinned one, whether apt/dnf accept the repository file;
+#   * the dpkg-query answers for pve-firmware (`install ok installed`, `hold ok
+#     installed`, ...) are the documented ${Status} format, not captured on a
+#     Proxmox VE host; 7.0.14-20-pve is the kernel string k81 read on a live
+#     PVE 9.2, the other kernels are invented in their shape; that apt would
+#     remove proxmox-ve for firmware-amd-graphics was read once by hand, not here;
+#   * that Debian 12/13 hosts have firmware-amd-graphics at that name and
+#     component today: the apt-cache policy answer is scripted per release
+#     (debian_install; 20250410-2 for trixie is what k81 read on a live PVE
+#     9.2, the bookworm version is a guess), because the base profile would
+#     answer with the NVIDIA candidate of Ubuntu 24.04 (580...); what a Debian
+#     host without a candidate does is not tested here (k86; the existing
+#     no-candidate golden is the Ubuntu one);
 #   * what the remote shell does with a command: the key download pipeline, the
 #     printf quoting, the `grep -rsHE` over modprobe.d, the dearmor chain, are
 #     recorded verbatim and never evaluated -- a wrong quote or flag in them
@@ -305,6 +327,130 @@ subtest 'dies BEFORE any change' => sub {
     # a few are also pinned as goldens: the die comes after exactly these reads
     golden_is(masked($rec), "amd/$name") if $name =~ /secure-boot|arm64|foreign-repo-file|apu-kernel|bound-to-vfio/;
   }
+};
+
+#### Debian inbox and Proxmox VE (k81)
+
+# pve-firmware as dpkg-query -W -f='${Status}\n' prints it
+sub pve_status {
+  my ( $status ) = @_;
+  return [ qr{^dpkg-query -W -f='\$\{Status\}\\n' pve-firmware 2>/dev/null$} => $status, 0 ];
+}
+sub pve_queries { my ( $rec ) = @_; return scalar grep { /dpkg-query/ } @{ $rec->{lines} } }
+
+# inbox install_driver on a Debian host; os_release replaces /etc/os-release
+sub debian_install {
+  my ( $os, %o ) = @_;
+  my $gpu = delete $o{gpu} // 'mi300x';
+  my $release = delete $o{os_release};
+  my $host = amd_host($os,
+    ( defined $o{kernel} ? ( kernel => $o{kernel} ) : () ),
+    state => [ fresh($gpu), working($gpu) ], module => 'inbox',
+    responses => [ @{ $o{responses} // [] },
+      # firmware-amd-graphics HAS a candidate, scripted: else the Ubuntu base
+      # profile's NVIDIA policy answer would stand in for it. 13: read on a
+      # live PVE 9.2 (trixie/non-free-firmware); 12: a plausible bookworm
+      # version, GUESSED.
+      [ 'LC_ALL=C apt-cache policy firmware-amd-graphics 2>/dev/null' =>
+        "firmware-amd-graphics:\n  Installed: (none)\n  Candidate: ".( $os eq 'debian-13' ? '20250410-2' : '20230210-5' )."\n  Version table:\n", 0 ],
+      ( defined $release ? [ 'cat /etc/os-release 2>/dev/null' => $release, 0 ] : () ) ]);
+  return install($host, gpus => [ $GPU{$gpu}->() ], method => 'inbox');
+}
+# firmware-amd-graphics not installed before the run, installed after it
+sub firmware_missing {
+  return [ qr{^dpkg -l firmware-amd-graphics 2>/dev/null \| grep -q '\^ii'$} => sequence([ '', 1 ], [ '', 0 ]), 0 ];
+}
+
+subtest 'inbox on Debian 12 and 13 with the release\'s own kernel: pve-firmware read, then firmware-amd-graphics (goldens)' => sub {
+  for my $os (qw( debian-12 debian-13 )) {
+    my ( $rec, $how ) = debian_install($os, responses => [ firmware_missing() ]);
+    is($rec->{error}, undef, "$os: lives");
+    is($how, 'inbox', '... returns inbox');
+    is(pve_queries($rec), 1, '... pve-firmware asked exactly once');
+    my ( $install ) = grep { /apt-get .* install -y / } @{ $rec->{lines} };
+    like($install, qr/ install -y firmware-amd-graphics\z/, '... firmware-amd-graphics alone');
+    ok(no_pkg($rec), '... no pkg: line');
+    ok(!( grep { /amdgpu-dkms|radeon\.com|amdgpu\.list/ } @{ $rec->{lines} }), '... no DKMS, no AMD repository');
+    my @l = @{ $rec->{lines} };
+    my ( $q ) = grep { $l[$_] =~ /dpkg-query/ } 0 .. $#l;
+    my ( $stop ) = grep { $l[$_] =~ /systemctl stop/ } 0 .. $#l;
+    ok($q < $stop, '... the pve-firmware read comes before the first mutating command');
+    golden_is(masked($rec), "amd/$os--inbox--mi300x--firmware");
+  }
+};
+
+subtest 'inbox on Debian: firmware already installed, nothing but modprobe' => sub {
+  my ( $rec, $how ) = debian_install('debian-13');
+  is($rec->{error}, undef, 'lives');
+  is($how, 'inbox', 'inbox');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [ 'run: modprobe amdgpu' ], 'the only change: modprobe amdgpu');
+};
+
+subtest 'Debian: dies before any change, runs no apt-get (goldens for the new messages)' => sub {
+  my $PVE = 'install ok installed';
+  my @case = (
+    [ 'debian-11--inbox', qr/the inbox amdgpu is supported on Debian 12 and 13 only, not Debian GNU\/Linux 11 \(bullseye\)/,
+      sub { debian_install('debian-12', kernel => '5.10.0-34-amd64', os_release => join("\n",
+              'PRETTY_NAME="Debian GNU/Linux 11 (bullseye)"', 'NAME="Debian GNU/Linux"', 'VERSION_ID="11"', 'ID=debian')) } ],
+    [ 'debian-testing--inbox', qr/the inbox amdgpu is supported on Debian 12 and 13 only, not Debian GNU\/Linux trixie\/sid/,
+      sub { debian_install('debian-13', os_release => join("\n",
+              'PRETTY_NAME="Debian GNU/Linux trixie/sid"', 'NAME="Debian GNU/Linux"', 'ID=debian')) } ],
+    [ 'debian-13--inbox--pve-kernel', qr/the inbox amdgpu is supported on Debian GNU\/Linux 13 \(trixie\) with Debian's own kernel 6\.12 \(6\.12\.N\+deb13-amd64\) only; this host runs 7\.0\.14-20-pve/,
+      sub { debian_install('debian-13', kernel => '7.0.14-20-pve') } ],
+    [ 'debian-12--inbox--cloud-kernel', qr/with Debian's own kernel 6\.1 .* only; this host runs 6\.1\.0-37-cloud-amd64/,
+      sub { debian_install('debian-12', kernel => '6.1.0-37-cloud-amd64') } ],
+    [ 'debian-13--inbox--proxmox-debian-kernel', qr/this is a Proxmox VE host \(pve-firmware is installed\): .*removing proxmox-ve and the Proxmox kernel/,
+      sub { debian_install('debian-13', responses => [ pve_status($PVE) ]) } ],
+    [ 'debian-13--dkms--proxmox-debian-kernel', qr/this is a Proxmox VE host \(pve-firmware is installed\)/,
+      sub { my ( $rec ) = dkms_case('x', 'debian-13', 'mi300x', responses => [ pve_status($PVE) ]); $rec } ],
+    [ 'debian-12--dkms--proxmox-debian-kernel', qr/this is a Proxmox VE host \(pve-firmware is installed\)/,
+      sub { my ( $rec ) = dkms_case('x', 'debian-12', 'mi300x', responses => [ pve_status($PVE) ]); $rec } ],
+    [ 'debian-13--inbox--proxmox-pve-kernel', qr/\Ainstall_driver: this is a Proxmox VE host/,
+      sub { debian_install('debian-13', kernel => '7.0.14-20-pve', responses => [ pve_status($PVE) ]) } ],
+    [ 'debian-13--inbox--proxmox-hold', qr/this is a Proxmox VE host/,
+      sub { debian_install('debian-13', responses => [ pve_status('hold ok installed') ]) } ],
+    [ 'debian-13--inbox--proxmox-unpacked', qr/this is a Proxmox VE host/,
+      sub { debian_install('debian-13', responses => [ pve_status('install ok unpacked') ]) } ],
+    [ 'debian-13--inbox--proxmox-half-installed', qr/this is a Proxmox VE host/,
+      sub { debian_install('debian-13', responses => [ pve_status('install reinstreq half-installed') ]) } ],
+  );
+  my %golden = map { $_ => 1 } qw( debian-11--inbox debian-13--inbox--pve-kernel
+    debian-13--inbox--proxmox-debian-kernel debian-13--dkms--proxmox-debian-kernel debian-13--inbox--proxmox-pve-kernel );
+  for my $c (@case) {
+    my ( $name, $re, $code ) = @$c;
+    my ( $rec ) = $code->();
+    like($rec->{error}, $re, "$name: dies with the reason");
+    like($rec->{error}, qr/Nothing was changed on the host/, '... "Nothing was changed on the host"');
+    is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... no command that changes the host ran');
+    ok(!( grep { /apt-get|systemctl stop|dnf/ } @{ $rec->{lines} }), '... no apt-get, no systemctl stop');
+    ok(!$rec->{trapped}, '... no unmocked Rex function reached');
+    golden_is(masked($rec), "amd/$name") if $golden{$name};
+  }
+  # the Proxmox message wins over the kernel message
+  my ( $rec ) = debian_install('debian-13', kernel => '7.0.14-20-pve', responses => [ pve_status($PVE) ]);
+  unlike($rec->{error}, qr/Debian's own kernel/, 'pve-firmware with a -pve kernel: the Proxmox message, not the kernel one');
+};
+
+subtest 'pve-firmware removed but config left (rc): not a Proxmox host' => sub {
+  my ( $rec, $how ) = debian_install('debian-13', responses => [ pve_status('deinstall ok config-files'), firmware_missing() ]);
+  is($rec->{error}, undef, 'lives');
+  is($how, 'inbox', 'inbox');
+  is(pve_queries($rec), 1, 'asked once');
+  ok(( grep { /apt-get .* install -y firmware-amd-graphics$/ } @{ $rec->{lines} } ), 'firmware-amd-graphics installed');
+  ( $rec ) = debian_install('debian-13', responses => [ pve_status('unknown ok not-installed'), firmware_missing() ]);
+  is($rec->{error}, undef, 'not-installed: lives too');
+};
+
+subtest 'a working amdgpu on Proxmox is answered with present: state read only (golden)' => sub {
+  my $host = amd_host('debian-13', kernel => '7.0.14-20-pve', state => [ working('mi300x') ], module => 'inbox',
+    responses => [ pve_status('install ok installed') ]);
+  my ( $rec, $how ) = install($host, gpus => [ gpu_mi300x() ]);
+  is($rec->{error}, undef, 'lives');
+  is($how, 'present', 'present');
+  is(pve_queries($rec), 0, 'pve-firmware not even asked');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], 'no change');
+  ok(!( grep { /apt-get|dpkg/ } @{ $rec->{lines} }), 'no apt, no dpkg');
+  golden_is(masked($rec), 'amd/debian-13--present--proxmox');
 };
 
 #### dies with a change made, no driver installed

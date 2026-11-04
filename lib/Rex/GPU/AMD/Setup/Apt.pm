@@ -50,6 +50,13 @@ C<(none)>. Read-only.
 
 C<dpkg -l PKG | grep -q '^ii'>. Read-only.
 
+=method package_on_disk
+
+C<dpkg-query -W -f='${Status}\n' PKG>: true when dpkg knows the package in
+any state but C<not-installed> and C<config-files> -- unlike
+L</package_installed>, held, unpacked, half-configured and half-installed
+count too. Read-only.
+
 =method install_helpers
 
 C<curl> and C<gpg>, only if C<command -v> does not find them: after an
@@ -97,6 +104,15 @@ sub package_installed {
   my ( $self, $package ) = @_;
   $self->run_cmd("dpkg -l $package 2>/dev/null | grep -q '^ii'");
   return $? == 0 ? 1 : 0;
+}
+
+# ${Status} is "WANT EFLAG STATUS" (hold ok installed, install reinstreq
+# half-installed, ...); a package dpkg never had prints nothing.
+sub package_on_disk {
+  my ( $self, $package ) = @_;
+  my $out = $self->run_cmd(q{dpkg-query -W -f='${Status}\n' }.$package.' 2>/dev/null') // '';
+  return ( grep { /\A\S+ \S+ (\S+)\s*\z/ && $1 ne 'not-installed' && $1 ne 'config-files' }
+    split /\r?\n/, $out ) ? 1 : 0;
 }
 
 sub install_helpers {

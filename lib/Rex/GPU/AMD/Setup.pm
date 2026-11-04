@@ -114,16 +114,19 @@ sub install {
 
 =method plan_inbox
 
-Host-read-only. L</preflight>; for GPUs whose hardware row says C<driver
-=E<gt> 'inbox'> (AMD supports them with the inbox driver only) dies unless
-L</inbox_only_unsupported> is empty; then what is missing: the
+Host-read-only. Dies for a L</host_unsupported> reason first, then
+L</preflight>; for GPUs whose hardware row says C<driver =E<gt> 'inbox'>
+(AMD supports them with the inbox driver only) dies unless
+L</inbox_only_unsupported> is empty, then for any GPU unless
+L</inbox_unsupported> is; then what is missing: the
 L</inbox_module_packages> when the running kernel has no C<amdgpu.ko>
 (dies if there are none), the first of L</firmware_packages> when none of
 them is installed. C<needed> is C<0> when nothing is.
 
 =method plan_dkms
 
-Host-read-only. L</preflight>, then dies for an architecture other than
+Host-read-only. Dies for a L</host_unsupported> reason first, then
+L</preflight>, then dies for an architecture other than
 L</supported_arch>, a L</dkms_unsupported> reason, Secure Boot
 (L</secure_boot_enabled>) and an existing L</dkms_repo> file of other
 content. C<needed> is C<0> when C<dkms status> already shows C<amdgpu>
@@ -135,10 +138,16 @@ L</optional_packages> that have a candidate.
 
 sub plan_inbox {
   my ( $self ) = @_;
+  if (my $why = $self->host_unsupported) {
+    die 'install_driver: '.$why.". Nothing was changed on the host\n";
+  }
   $self->preflight;
   my @only = grep { ( $_->{driver} // '' ) eq 'inbox' } @{ $self->gpus };
   if (@only and my $why = $self->inbox_only_unsupported) {
     die 'install_driver: '.$self->_labels(@only).': '.$why.". Nothing was changed on the host\n";
+  }
+  if (my $why = $self->inbox_unsupported) {
+    die 'install_driver: '.$why.". Nothing was changed on the host\n";
   }
   my $plan = { method => 'inbox', packages => [], optional => [] };
   unless (defined $self->amd->module_source(kernel => $self->kernel)) {
@@ -157,6 +166,9 @@ sub plan_inbox {
 
 sub plan_dkms {
   my ( $self ) = @_;
+  if (my $why = $self->host_unsupported) {
+    die 'install_driver: '.$why.". Nothing was changed on the host\n";
+  }
   $self->preflight;
   die 'install_driver: amdgpu-dkms is built for '.$self->supported_arch.' only; this host is '
     .$self->arch.". Nothing was changed on the host\n"
@@ -499,10 +511,25 @@ with C<path> from L</amdgpu_key_path>.
 
 The C<amdgpu-dkms> repository for this OS. Per OS class.
 
+=method host_unsupported
+
+Why no AMD driver may be installed on this host at all, whatever the
+method, or C<undef>: L</plan_inbox> and L</plan_dkms> ask it before any
+other check. Here: C<undef>, without a host command;
+L<Rex::GPU::AMD::Setup::Debian> refuses a Proxmox VE host. Host-read-only.
+
 =method dkms_unsupported
 
 Why C<amdgpu-dkms> is not supported on this OS release and kernel, or
 C<undef> when it is. Here: always a reason.
+
+=method inbox_unsupported
+
+Why the inbox driver is not supported on this OS release and kernel, or
+C<undef> when it is -- for every GPU, asked by L</plan_inbox> after
+L</inbox_only_unsupported>. Here: C<undef>, nothing checked;
+L<Rex::GPU::AMD::Setup::Debian> binds it to Debian 12 and 13 with Debian's
+own C<amd64> kernel.
 
 =method inbox_only_unsupported
 
@@ -556,10 +583,14 @@ sub amdgpu_key {
 
 sub dkms_repo { die ref($_[0])." has no dkms_repo\n" }
 
+sub host_unsupported { return }
+
 sub dkms_unsupported {
   my ( $self ) = @_;
   return 'amdgpu-dkms is not supported on '.$self->os_label;
 }
+
+sub inbox_unsupported { return }
 
 sub inbox_only_supported {
   'Ubuntu 26.04 (GA kernel 7.0) and Ubuntu 24.04 (HWE kernel 7.0), per the ROCm 10.1 compatibility matrix'

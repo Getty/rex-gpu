@@ -15,6 +15,11 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #     linux-headers-$K.
 #   Debian's firmware for amdgpu: firmware-amd-graphics (component
 #     non-free-firmware).
+#   Proxmox VE 9.2 (read-only on a live host, 2026-11-04, k81): os-release
+#     ID=debian VERSION_ID=13, kernel 7.0.14-20-pve with amdgpu.ko under
+#     kernel/; pve-firmware Conflicts and Replaces firmware-amd-graphics, and
+#     apt-get -s install firmware-amd-graphics removes proxmox-ve,
+#     proxmox-default-kernel, proxmox-kernel-7.0 and pve-firmware.
 my %RELEASE = (
   '13' => { suite => 'noble', kernel => qr/\A6\.12\.\d+\+deb13(?:u\d+)?-amd64\z/,
             kernel_text => '6.12 (6.12.N+deb13-amd64)', rocm => 'debian13' },
@@ -29,12 +34,50 @@ for another one: the C<amdgpu-dkms> suite (C<noble>, C<jammy>), the kernel
 it is installed on (AMD's 6.12 and 6.1, as the release's own kernel of the
 flavour C<amd64>: C<6.12.N+deb13-amd64>, C<6.1.0-N-amd64> -- not
 C<cloud-amd64>, C<rt-amd64> or a backports kernel), the ROCm repository
-(C<debian13>, C<debian12>). Only the C<amdgpu-dkms> path and
-L<Rex::GPU::AMD/install_rocm> read it; the inbox path does not.
+(C<debian13>, C<debian12>). Read by the C<amdgpu-dkms> path, the inbox
+path (L</inbox_unsupported>: the same releases and kernels) and
+L<Rex::GPU::AMD/install_rocm>.
+
+=method host_unsupported
+
+A reason when C<pve-firmware> is on disk
+(L<Rex::GPU::AMD::Setup::Apt/package_on_disk>: one C<dpkg-query>), else
+C<undef>: a Proxmox VE host, which reports itself as Debian (C<ID=debian>,
+C<VERSION_ID=13>). Both paths die on it before any change, also with a
+Debian kernel booted -- the package decides, not the kernel's name.
+C<pve-firmware> brings the amdgpu firmware itself and conflicts with
+C<firmware-amd-graphics>; apt would remove C<proxmox-ve> and the Proxmox
+kernel to install that.
+
+=method inbox_unsupported
+
+Why the inbox driver is not supported here, or C<undef>: as
+L<Rex::GPU::AMD::Setup/dkms_unsupported> does for C<amdgpu-dkms>, only
+Debian 12 and 13 (L</release_data>; not Debian 11, not testing or sid,
+which have no C<VERSION_ID>) with the release's own C<amd64> kernel (not
+C<cloud-amd64>, C<rt-amd64>, a backports or a Proxmox kernel).
 
 =cut
 
 sub release_data { $RELEASE{ $_[0]->os_version } }
+
+sub host_unsupported {
+  my ( $self ) = @_;
+  return unless $self->package_on_disk('pve-firmware');
+  return 'this is a Proxmox VE host (pve-firmware is installed): pve-firmware brings the amdgpu '
+    .'firmware itself and conflicts with firmware-amd-graphics, which apt would install only by '
+    .'removing proxmox-ve and the Proxmox kernel, so install_driver installs no AMD driver on '
+    .'Proxmox VE (a working amdgpu of the Proxmox kernel is answered with present)';
+}
+
+sub inbox_unsupported {
+  my ( $self ) = @_;
+  my $row = $self->release_data
+    or return 'the inbox amdgpu is supported on Debian 12 and 13 only, not '.$self->os_label;
+  return if $self->kernel =~ $row->{kernel};
+  return 'the inbox amdgpu is supported on '.$self->os_label." with Debian's own kernel "
+    .$row->{kernel_text}.' only; this host runs '.$self->kernel;
+}
 
 sub dkms_suite {
   my ( $self ) = @_;
@@ -73,17 +116,24 @@ B<Experimental.> The AMD driver on Debian:
 C<repo.radeon.com/amdgpu/31.60/ubuntu> with C<linux-headers-$(uname -r)>,
 on the release's own C<amd64> kernel only.
 
-=item * B<inbox>, which checks neither the release nor the kernel series
-(L</release_data> is not read): the kernel's own C<amdgpu>, plus
-C<firmware-amd-graphics> when it is not installed (on Debian 12 and 13 it
-is in the C<non-free-firmware> component; it dies, before installing
-anything, if apt has no candidate). No package is known that adds a
+=item * B<inbox> on Debian 12 and 13, on the release's own C<amd64> kernel
+only -- the same releases and kernels as C<amdgpu-dkms>, per
+L</release_data> (L</inbox_unsupported>): Debian 11, testing and sid, and
+any other kernel die before any change. The kernel's own C<amdgpu>, plus
+C<firmware-amd-graphics> when it is not installed (in the
+C<non-free-firmware> component; it dies, before installing anything, if
+apt has no candidate). No package is known that adds a
 missing C<amdgpu.ko> (Debian's C<amd64> kernel carries it): it dies then,
 before any change. The GPUs AMD supports only with the inbox driver (the
 Ryzen APUs, rows with C<driver =E<gt> 'inbox'>) are not supported on
 Debian: L<Rex::GPU::AMD/install_driver> dies before any change for them,
 unless their driver already works, which it answers with C<present>
 (C<method =E<gt> 'dkms'> dies then too).
+
+=item * B<Not on Proxmox VE> (L</host_unsupported>): with C<pve-firmware>
+installed both paths die before any change, also on a Debian kernel. A
+working C<amdgpu> of the Proxmox kernel is answered with C<present>, as
+everywhere.
 
 =back
 

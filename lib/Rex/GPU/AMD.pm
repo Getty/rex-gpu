@@ -96,7 +96,8 @@ only what is missing is installed (the firmware package if none of
 L<Rex::GPU::AMD::Setup/firmware_packages> is installed, the module package
 if the running kernel has no C<amdgpu.ko> -- where
 L<Rex::GPU::AMD::Setup/inbox_module_packages> has none, as on Debian, it
-dies before any change), nothing if nothing is missing.
+dies before any change), nothing if nothing is missing. On Debian only on
+12 and 13 with the release's own C<amd64> kernel, as C<dkms>.
 
 =item C<dkms> -- AMD's C<amdgpu-dkms> 31.60 was installed from
 C<repo.radeon.com> with the running kernel's headers, its signing key
@@ -134,12 +135,14 @@ dies; without it a warning says so and the method is returned.
 Dies -- B<before anything is changed on the host> -- for an unknown option,
 a malformed or empty C<gpus>, a GPU that is not on the host, a host
 without an AMD GPU, a state that could not be read; and, unless the driver
-already works (C<present>), for an unsupported OS, an unsupported release
-or kernel for C<dkms> or for a GPU AMD supports only with the inbox driver
-(the per-OS matrix is in L<Rex::GPU::AMD::Setup::Ubuntu>,
-L<Rex::GPU::AMD::Setup::Debian> and L<Rex::GPU::AMD::Setup::RHEL>; C<inbox>
-for any other GPU checks neither the release nor the kernel series), a
-kernel command line with C<nomodeset>, C<amdgpu.modeset=0> or a module
+already works (C<present>), for an unsupported OS, a Proxmox VE host
+(C<pve-firmware> installed; whatever the method), an unsupported release
+or kernel for C<dkms>, for a GPU AMD supports only with the inbox driver,
+and on Debian for C<inbox> too (the per-OS matrix is in
+L<Rex::GPU::AMD::Setup::Ubuntu>, L<Rex::GPU::AMD::Setup::Debian> and
+L<Rex::GPU::AMD::Setup::RHEL>; on Ubuntu and RHEL C<inbox> for any other
+GPU checks neither the release nor the kernel series), a kernel command
+line with C<nomodeset>, C<amdgpu.modeset=0> or a module
 blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
 non-x86_64 host, Secure Boot enabled (the DKMS module would need a MOK
