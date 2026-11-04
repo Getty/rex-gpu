@@ -1,0 +1,23 @@
+---
+class: standard
+completed: 2026-11-04T01:25:29Z
+created: 2026-11-04T00:50:08Z
+id: 80
+priority: low
+started: 2026-11-04T01:25:29Z
+status: done
+tags:
+- amd
+- docs
+- pod
+title: 'AMD-POD: Debian-Angaben gegen Rex::GPU::AMD::Setup::Debian abgleichen'
+updated: 2026-11-04T01:25:29Z
+---
+
+Rest aus dem Merge von k1 (main 6e21d6b, 2026-11-03): Das Release-Audit war ohne Befund, hat aber die Debian-Angaben in der POD von Rex::GPU::AMD (unterstützte Versionen Debian 12 und 13, Paketquellen, Treiberweg inbox oder amdgpu-dkms, ROCm) nicht einzeln gegen lib/Rex/GPU/AMD/Setup/Debian.pm geprüft.
+
+Fertig heißt: Jede Debian-Aussage in der POD von Rex::GPU::AMD und Rex::GPU::AMD::Setup::Debian stimmt mit dem Code überein. Abweichungen sind im Text oder im Code behoben, mit Test, falls sich Verhalten ändert. Offline prüfen, keine Live-Läufe.
+
+Abgeholt (Hub-Auftrag perl-developer-a8). Branch fix/k80-amd-debian-pod vom lokalen main 6e21d6b, Worktree .claude/worktrees/k80-amd-debian-pod. Abgleich POD↔Code an rex-gpu-worker.
+
+Erledigt in 5884e0956f20684d234f930f68ddb69e47b9169a (main ff-only vorgespult, nicht gepusht). Nur POD, kein Verhalten: install_driver-Abbrüche zu OS/Release/Kernel greifen nur ohne funktionierenden Treiber (present zuerst), Release/Kernel nur für dkms und inbox-only-GPUs; inbox liest release_data nicht; Debian: kein Modulpaket → stirbt vor jeder Änderung, non-free-firmware nur 12/13, Kernel-Flavour amd64 (nicht cloud/rt/bpo), APUs: present vor dem Abbruch, method => dkms stirbt immer. prove -lr t/: Files=42, Tests=1852, Result: PASS (nur Kompilierung/Goldens, nichts auf Hardware). Folgekarten im Backlog: k81 (inbox ohne Release-Prüfung, Proxmox-Risiko), k82 (Radeon außerhalb AMD-Matrix), k83 (Doku Ubuntu/RHEL/README), k84 (Header nicht vorab geprüft), k85 (auto-Meldung APU+dGPU), k86 (Debian-inbox-Goldens), k87 (rocm-core-Annahme).
