@@ -1,0 +1,40 @@
+---
+claimed_at: 2026-11-04T02:30:57Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:30:42Z
+created: 2026-11-04T01:24:19Z
+id: 87
+priority: medium
+started: 2026-11-04T01:46:32Z
+status: done
+tags:
+- amd
+- rocm
+- verify
+title: 'AMD install_rocm: stirbt am rocm-core-Check, falls ROCm 10.1 selbst rocm-core
+  mitbringt (zweiter Lauf)'
+updated: 2026-11-04T02:30:57Z
+---
+
+Fund aus k80, offline nicht prüfbar.
+
+Ist: Setup::Apt::install_rocm prüft rocm-core vor dem present-Check und stirbt, wenn es installiert ist ("AMD requires removing ROCm 7.2.4 or older"). Das setzt voraus, dass die amdrocm10.1-*-Pakete von stable.repo.amd.com kein Paket namens rocm-core installieren. Tun sie es (direkt oder als Abhängigkeit), stirbt jeder zweite Lauf von install_rocm statt present zu liefern.
+
+Prüfen (mit Netz): Packages-Dateien von stable.repo.amd.com/rocm/core/packages/{ubuntu2204,ubuntu2404,ubuntu2604,debian12,debian13} auf Depends/Provides rocm-core; dabei auch, ob die Zielliste in rocm_releases für debian12/13 dieselbe ist wie für Ubuntu. Falls ja: den Altlinien-Check an die Version koppeln (rocm-core < 10) statt am Namen. Verhaltensänderung → Test.
+
+Befund (rex-gpu-worker, nur lesend, 2026-11-04): ROCm 10.1 bringt KEIN Paket rocm-core mit -> kein Code, Karte done ohne Commit.
+Quellen: https://stable.repo.amd.com/rocm/core/packages/{ubuntu2204,ubuntu2404,ubuntu2604,debian12,debian13}/dists/stable/main/binary-amd64/Packages (alle fünf identisch, Checksummen gleich, SHA256 wie in .../dists/stable/Release; Release: Origin/Label AMD ROCm, Suite stable, Date Wed, 30 Sep 2026 22:57:36 +0000). 944 Pakete, alle amdrocm*, Versionen 10.0.0-4 und 10.1.0-3.
+- Kein Paket rocm-core; kein Provides/Conflicts/Breaks/Replaces/Pre-Depends-Feld im ganzen Packages; Recommends nur bei amdrocm-llvm10.x (gcc, g++, multilib).
+- Abhängigkeitshülle von allen 25 amdrocm10.1-gfx* + libatomic1 + libquadmath0 (Depends+Recommends, alle Alternativen): 267 Namen, 242 im Repo (alle ...10.1... @ 10.1.0-3), 25 aus der Distribution; rocm-core: 0 Treffer. Kette z. B. amdrocm10.1-gfx1151 -> amdrocm-core10.1-gfx1151 (= 10.1.0-3) -> amdrocm-base10.1, -sysdeps10.1, -llvm10.1, -runtime10.1, -amdsmi10.1.
+- rocm-core ist in 10.1 eine Dateigruppe in amdrocm-base10.1 (…/ubuntu2404/pool/main/amdrocm-base10.1_10.1.0-3_amd64.deb: Depends libgcc-s1, libstdc++6, python3, libc6, amdrocm-runtime10.1; kein Provides; Dateien /opt/rocm/core-10.1/lib/librocm-core.so.1.0.100100 u. a.). dpkg-query -W rocm-core sieht nur Paketnamen -> der Check feuert darauf nicht; zweiter Lauf ergibt present (10.1.0-3 beginnt mit '10.1.').
+- Zielliste: die 25 amdrocm10.1-gfx* sind in allen fünf Verzeichnissen genau rocm_releases.targets -> keine Änderung.
+- Altlinie (https://repo.radeon.com/rocm/apt/<ver>/dists/{jammy,noble}/main/binary-amd64/Packages): rocm-core 7.2.4.70204-93~22.04/~24.04, 7.2.0.70200-43, 7.1.1.70101-38, 7.0.2.70002-56, 6.4.4.60404-129; falls je nötig: dpkg --compare-versions "$v" lt 10~.
+Nicht geprüft: echte apt-Auflösung mit zusätzlichen Quellen (repo.radeon.com amdgpu / ROCm 7.x); InRelease gegen den gepinnten Key. Auf einem Host bestätigen: nach install_rocm 'dpkg-query -W rocm-core' (leer) und 'apt-cache rdepends rocm-core'.
+Nebenfund -> eigene Karte: _dpkg_status zählt nur 'install ok installed'.
+
+Recherche abgeschlossen, Ergebnis (a): kein Code nötig, Befund mit Quellen oben. Kein Commit; done nach Reihenfolge des Auftrags (nach k84).
+
+Kein Code: rocm-core kommt mit amdrocm10.1-* nicht mit, Altlinien-Check bleibt am Namen. Befund s. o. main = 1551c20.
+
+Nebenfund _dpkg_status -> eigene Karte k89 (bereits angelegt).
