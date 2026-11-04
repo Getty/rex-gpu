@@ -119,23 +119,34 @@ sub rocm_repo_dir {
 
 =head1 DESCRIPTION
 
-B<Experimental.> The AMD driver on Ubuntu, per L</release_data>:
+B<Experimental.> The AMD driver on Ubuntu:
 
 =over
 
-=item * B<amdgpu-dkms> from C<repo.radeon.com/amdgpu/31.60/ubuntu> (suite
-C<resolute>, C<noble>, C<jammy>) with C<linux-headers-$(uname -r)>, and on
-24.04 and 22.04 C<linux-modules-extra-$(uname -r)> where apt has it -- the
-7.0 kernels have none (C<amdgpu.ko> is in C<linux-modules>). Never the
+=item * B<amdgpu-dkms> on 22.04, 24.04 and 26.04 with a C<-generic> kernel
+of AMD's matrix, per L</release_data>: from
+C<repo.radeon.com/amdgpu/31.60/ubuntu> (suite C<resolute>, C<noble>,
+C<jammy>) with C<linux-headers-$(uname -r)>, and on 24.04 and 22.04
+C<linux-modules-extra-$(uname -r)> where apt has it -- the 7.0 kernels have
+none (C<amdgpu.ko> is in C<linux-modules>). Never the
 C<linux-headers-generic> metapackage, which pulls a new kernel.
 
-=item * B<inbox>: the kernel's own C<amdgpu>, plus
-C<linux-firmware-amd-graphics> when neither it nor C<linux-firmware> is
-installed, and C<linux-modules-extra-$(uname -r)> when the kernel has no
-C<amdgpu.ko> (24.04, 22.04). The Ryzen APUs (rows with C<driver =E<gt>
-'inbox'>) only on 26.04 and on 24.04 with the HWE kernel 7.0: on the 24.04
-GA kernel 6.8 it dies, before any change, naming the kernel to boot -- no
-kernel is installed.
+=item * B<inbox>: the kernel's own C<amdgpu>. For any GPU but the Ryzen
+APUs this checks neither the release nor the kernel series;
+L</release_data> only names the packages added when missing: on 26.04
+and 24.04, when neither C<linux-firmware-amd-graphics> nor
+C<linux-firmware> is installed, the first of them apt has a candidate for;
+on 22.04 C<linux-firmware> when it is not installed; on 24.04 and 22.04
+C<linux-modules-extra-$(uname -r)> when the kernel has no C<amdgpu.ko>. It
+dies, before installing anything, if apt has no candidate. On another
+release no firmware package is checked or installed, and a kernel without
+C<amdgpu.ko> dies before any change, as on 26.04. The Ryzen APUs (rows with
+C<driver =E<gt> 'inbox'>) only on 26.04 (GA kernel 7.0) and on 24.04 with
+the HWE kernel 7.0, both C<-generic>; no kernel is installed. On any other
+release or kernel (on the 24.04 GA kernel 6.8 the message names the kernel
+to boot) L<Rex::GPU::AMD/install_driver> dies before any change for them,
+unless their driver already works, which it answers with C<present>
+(C<method =E<gt> 'dkms'> dies then too).
 
 =back
 

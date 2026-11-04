@@ -169,22 +169,26 @@ sub place_key {
 
 =head1 DESCRIPTION
 
-B<Experimental.> The AMD driver on RHEL, Rocky Linux and AlmaLinux, per
-L</release_data>:
+B<Experimental.> The AMD driver on RHEL, Rocky Linux and AlmaLinux:
 
 =over
 
-=item * B<amdgpu-dkms> from C<repo.radeon.com/amdgpu/31.60/el/MAJOR> with
-the running kernel's C<kernel-headers>, C<kernel-devel> and (9, 10)
-C<kernel-devel-matched>, on the kernel builds of AMD's matrix only. The
-repository's signing key is checked against its pinned fingerprint and
-imported into rpm.
+=item * B<amdgpu-dkms> on 8, 9 and 10, per L</release_data>: from
+C<repo.radeon.com/amdgpu/31.60/el/MAJOR> with the running kernel's
+C<kernel-headers>, C<kernel-devel> and (9, 10) C<kernel-devel-matched>, on
+the kernel builds of AMD's matrix only. The repository's signing key is
+checked against its pinned fingerprint and imported into rpm.
 
-=item * B<inbox>: the kernel's own C<amdgpu>, plus the firmware package
-(C<amd-gpu-firmware> on 10, C<linux-firmware> on 9 and 8) when it is not
-installed. No package is known that adds a missing C<amdgpu.ko>: it dies
-then. The GPUs AMD supports only with the inbox driver (the Ryzen APUs) are
-not supported on RHEL: it dies before any change.
+=item * B<inbox>, which checks neither the release nor the kernel;
+L</release_data> only names the firmware package: the kernel's own
+C<amdgpu>, plus the firmware package (C<amd-gpu-firmware> on 10,
+C<linux-firmware> on 9 and 8) when it is not installed -- on another major
+release none is checked or installed. No package is known that adds a
+missing C<amdgpu.ko>: it dies then, before any change. The GPUs AMD
+supports only with the inbox driver (the Ryzen APUs) are not supported on
+RHEL: L<Rex::GPU::AMD/install_driver> dies before any change for them,
+unless their driver already works, which it answers with C<present>
+(C<method =E<gt> 'dkms'> dies then too).
 
 =back
 
