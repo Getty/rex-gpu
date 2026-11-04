@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-11-04T02:30:28Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:30:28Z
+created: 2026-11-04T01:24:03Z
+id: 84
+priority: medium
+started: 2026-11-04T01:46:18Z
+status: done
+tags:
+- amd
+- dkms
+- behavior
+title: 'AMD plan_dkms: linux-headers-$(uname -r) und amdgpu-dkms vor der Installation
+  nicht auf Kandidat geprüft'
+updated: 2026-11-04T02:30:28Z
+---
+
+Fund aus k80.
+
+Ist: Setup::plan_dkms legt kernel_header_packages und amdgpu-dkms direkt in packages (Setup.pm Z. ~183), nicht in required; resolve_plan prüft nur required/optional/firmware. Läuft ein Kernel mit altem ABI, dessen Header nicht mehr im Mirror sind (Debian 6.1.0-N nach ABI-Bump, Ubuntu nach Kernel-Update ohne Reboot), scheitert apt-get erst nach Schlüssel, Repo-Datei und apt-get update; verify_packages stirbt danach. Gilt für alle OS-Klassen.
+
+Empfehlung: Header und amdgpu-dkms nach required, damit resolve_plan vor jeder Installation stirbt (Meldung: Kernel K hat keine Header mehr im Mirror → Kernel aktualisieren und neu starten). Verhaltensänderung → Golden/Test (test-writer).
+
+k84 umgesetzt. worker (lib/): plan_dkms -> required [kernel_header_packages, amdgpu-dkms] + headers; resolve_plan: eigene Header-Meldung (Kernel aktualisieren, neu starten), Zustand ehrlich (Repo-Datei+Schlüssel stehen, kein Treiberpaket installiert); RHEL bekommt echtes has_candidate (rpm -q, sonst dnf -q repoquery --available; dnf-Fehler -> eigene Meldung), wirkt auch für RHEL-inbox-Firmware. test-writer (t/): 14 dkms-Goldens um die Lesezeilen ergänzt (nur hinzugefügte Zeilen), 7 neue Goldens (Header ohne Kandidat Ubuntu/Debian/RHEL, amdgpu-dkms ohne Kandidat, repoquery-Fehler, RHEL-inbox-Firmware ohne Kandidat, Header installiert aber nicht im Mirror -> geht durch), Golden.pm: repoquery als read-only. Hauptagent: README-Satz. Rot gegen lib 0965681: 'Failed tests: 1, 3, 15, 18-23, 26-27' in t/17. prove -lr t/: Files=42, Tests=1869, Result: PASS. Geratene Strings: RHEL-NEVRA-Epochen/Versionen, dnf-Fehlertext. Nicht gegen Hardware geprüft.
+
+Commit 1551c20, main ff auf 1551c20
