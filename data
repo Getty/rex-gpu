@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-04T02:00:22Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:00:22Z
+created: 2026-11-04T01:24:14Z
+id: 86
+priority: low
+started: 2026-11-04T01:46:27Z
+status: done
+tags:
+- amd
+- debian
+- tests
+title: 'Tests: Debian-Goldens für den AMD-inbox-Pfad (firmware-amd-graphics, kein
+  Kandidat, kein amdgpu.ko)'
+updated: 2026-11-04T02:00:22Z
+---
+
+Fund aus k80: Für Debian gibt es nur dkms-Goldens (debian-12/13--dkms--mi300x) und den APU-Abbruch (debian-13--inbox--apu). Die in k80 präzisierten POD-Aussagen sind für Debian ungepinnt:
+- inbox installiert firmware-amd-graphics, wenn es fehlt (nach apt-Timer-Stopp und apt-get update);
+- ohne Kandidat für firmware-amd-graphics stirbt es vor jeder Installation;
+- ohne amdgpu.ko stirbt es vor jeder Änderung (kein Modulpaket bekannt), auto fällt dann auf dkms zurück;
+- inbox prüft das Release nicht (z. B. Debian 11 läuft durch) — erst nach der Entscheidung zur Release-Bindung-Karte pinnen.
+Lane: rex-gpu-test-writer.
+
+Teilweise mit k81 erledigt (Karte bleibt offen): neue Goldens in t/17-amd-install-driver.t pinnen jetzt (1) inbox installiert firmware-amd-graphics, wenn es fehlt, auf Debian 12 und 13 (debian-12/13--inbox--mi300x--firmware: pve-firmware-Abfrage, apt-Timer-Stopp, apt-get update, apt-cache policy, install -y, dpkg -l, modprobe; Kandidat ausdrücklich gescriptet); (4) die Release-Bindung ist entschieden und gepinnt (debian-11--inbox, testing/sid, -pve- und cloud-Kernel sterben vor jeder Änderung; Proxmox über pve-firmware). Weiter offen: (2) Debian ohne Kandidat für firmware-amd-graphics stirbt vor der Installation – nur das Ubuntu-Golden no-candidate existiert; (3) Debian-Kernel ohne amdgpu.ko stirbt vor jeder Änderung, auto fällt auf dkms zurück – ungepinnt. Harness-Hinweis: die Debian-AMD-Hosts erben das Basisprofil ubuntu-24.04, dessen apt-cache-policy-Regel die NVIDIA-Antwort (Candidate 580…) liefert; Debian-Fälle müssen ihre Policy-Antwort selbst scripten.
+
+Test-writer: 3 neue Goldens in t/17-amd-install-driver.t: debian-13--inbox--mi300x--no-firmware-candidate (stirbt nach Timer-Stopp + apt-get update, kein install), debian-13--inbox--mi300x--no-module (stirbt vor jeder Änderung), debian-13--auto--unknown-gpu--dkms-fallback (auto ohne Hardware-Zeile, kein amdgpu.ko -> dkms). Release-Bindung (Punkt 4) war schon mit k81 gepinnt. Kein Verhalten geändert; Mutationsbeleg in Scratch-Kopie: je Mutation (resolve_plan ohne Firmware-Die, fallback_method -> inbox, plan_inbox ohne Modul-Die) wird der passende neue Test rot. prove -lr t/: Files=42, Tests=1860, Result: PASS.
+
+Committed 8ff490e (Pin the Debian AMD inbox failures and the dkms fallback in goldens), main ff. Reine Tests, kein Verhalten.
