@@ -489,6 +489,9 @@ my @READ_ONLY = (
   qr{${RUN}rpm -qa },
   qr{${RUN}LC_ALL=C apt-get -o DPkg::Lock::Timeout=\d+ -s install },
   qr{${RUN}dnf -q list --showduplicates --available },
+  # k84: Rex::GPU::AMD::Setup::RHEL->has_candidate's lookup of a package no
+  # enabled repository may carry -- reads the repo metadata, installs nothing
+  qr{${RUN}dnf -q repoquery --available \S+ 2>&1$},
   # karr #56: the HGX B200/B300 Fabric State read
   qr{${RUN}nvidia-smi -q 2>&1$},
   # k1: Rex::GPU::AMD's driver state read -- ONE command, shell builtins that

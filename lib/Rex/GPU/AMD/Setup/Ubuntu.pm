@@ -129,7 +129,13 @@ C<repo.radeon.com/amdgpu/31.60/ubuntu> (suite C<resolute>, C<noble>,
 C<jammy>) with C<linux-headers-$(uname -r)>, and on 24.04 and 22.04
 C<linux-modules-extra-$(uname -r)> where apt has it -- the 7.0 kernels have
 none (C<amdgpu.ko> is in C<linux-modules>). Never the
-C<linux-headers-generic> metapackage, which pulls a new kernel.
+C<linux-headers-generic> metapackage, which pulls a new kernel. Without an
+apt candidate for the headers or C<amdgpu-dkms> it dies after C<apt-get
+update>, before any package is installed, with the repository and its key
+in place. Installed headers count; the running kernel's headers that are
+not installed are gone from the archive once it has moved on to a newer
+kernel (a kernel update the host was not rebooted into) -- then the
+message says to upgrade the kernel and reboot first.
 
 =item * B<inbox>: the kernel's own C<amdgpu>. For any GPU but the Ryzen
 APUs this checks neither the release nor the kernel series;

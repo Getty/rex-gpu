@@ -114,7 +114,11 @@ B<Experimental.> The AMD driver on Debian:
 
 =item * B<amdgpu-dkms> on Debian 12 and 13, per L</release_data>: from
 C<repo.radeon.com/amdgpu/31.60/ubuntu> with C<linux-headers-$(uname -r)>,
-on the release's own C<amd64> kernel only.
+on the release's own C<amd64> kernel only. Without an apt candidate for
+either -- after an ABI bump the mirror no longer carries the running
+kernel's headers -- it dies after C<apt-get update>, before any package is
+installed, with the repository and its key in place; for the headers the
+message says to upgrade the kernel and reboot first.
 
 =item * B<inbox> on Debian 12 and 13, on the release's own C<amd64> kernel
 only -- the same releases and kernels as C<amdgpu-dkms>, per

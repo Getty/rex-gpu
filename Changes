@@ -9,7 +9,11 @@ Revision history for Rex-GPU
     release's own amd64 kernel) and RHEL-family 8/9/10. A working driver is
     left alone ('present'); every refusal dies before any change, among them
     a Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
-    would remove proxmox-ve and its kernel. With an APU next to a dGPU,
+    would remove proxmox-ve and its kernel. For dkms the running kernel's
+    headers and amdgpu-dkms need an installation candidate (installed or
+    offered by the sources; on RHEL checked with dnf repoquery), else it
+    dies before any package install, for headers gone from the mirror with
+    the advice to upgrade the kernel and reboot. With an APU next to a dGPU,
     method => 'auto' names method => 'inbox' only where the inbox driver
     is supported for the APU, else the reason and gpus => with the dGPUs.
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release

@@ -89,7 +89,8 @@ The fixed sequence, each step a method a subclass can override:
   -- returns 0 here when the plan needs nothing --
   prepare_host($plan)
   prepare_source($plan)   -> signing key and repository file (dkms), index refresh
-  resolve_plan($plan)     -> packages that need a candidate; dies before any install
+  resolve_plan($plan)     -> packages that need a candidate (dkms: the kernel
+                             headers, amdgpu-dkms); dies before any install
   install_packages($plan)
   verify_packages($plan)
   post_install($plan)     -> the module must be there (dkms: built for the kernel)
@@ -130,9 +131,12 @@ L</preflight>, then dies for an architecture other than
 L</supported_arch>, a L</dkms_unsupported> reason, Secure Boot
 (L</secure_boot_enabled>) and an existing L</dkms_repo> file of other
 content. C<needed> is C<0> when C<dkms status> already shows C<amdgpu>
-installed for the running kernel; else the plan installs
-L</kernel_header_packages> and C<amdgpu-dkms>, plus those of
-L</optional_packages> that have a candidate.
+installed for the running kernel; else the plan requires
+L</kernel_header_packages> (also listed under C<headers>, for
+L</resolve_plan>'s message) and C<amdgpu-dkms> -- neither is looked up
+yet: AMD's repository and a fresh index exist only after
+L</prepare_source> -- plus those of L</optional_packages> that have a
+candidate.
 
 =cut
 
@@ -189,10 +193,13 @@ sub plan_dkms {
       unless _trim($current) eq _trim($repo->{content});
     $repo->{present} = 1;
   }
+  my @headers = $self->kernel_header_packages;
   return {
     method   => 'dkms',
     needed   => $self->dkms_built ? 0 : 1,
-    packages => [ $self->kernel_header_packages, 'amdgpu-dkms' ],
+    packages => [],
+    required => [ @headers, 'amdgpu-dkms' ],
+    headers  => \@headers,
     optional => [ $self->optional_packages ],
     repo     => $repo,
   };
@@ -267,6 +274,18 @@ Adds to the plan's packages the required ones (dies, before any install,
 for one without a candidate), the optional ones that have a candidate, and
 the first firmware package with a candidate (dies if none has).
 
+A required package of the plan's C<headers> without a candidate dies with
+its own message: the package sources do not (or no longer) carry the
+running kernel's headers -- usually they have moved on to a newer kernel
+the host was not upgraded to or rebooted into (Ubuntu after a kernel update
+without a reboot, Debian after an ABI bump, a RHEL-family mirror past the
+running build): upgrade the kernel, reboot into it, run again. With a
+repository in the plan (C<dkms>) every one of these messages says that no
+driver package was installed and that the repository file and its signing
+key are in place (a re-run accepts them); else C<Nothing was installed>.
+L</has_candidate> may die by itself before that
+(L<Rex::GPU::AMD::Setup::RHEL/has_candidate>: dnf could not run).
+
 =cut
 
 sub prepare_host { }
@@ -284,21 +303,39 @@ sub prepare_source {
 
 sub resolve_plan {
   my ( $self, $plan ) = @_;
+  my %header = map { $_ => 1 } @{ $plan->{headers} || [] };
   for my $package (@{ $plan->{required} || [] }) {
-    die "install_driver: $package cannot be installed from the host's package sources (no "
-      ."candidate). Nothing was installed\n"
-      unless $self->has_candidate($package);
+    unless ($self->has_candidate($package)) {
+      die 'install_driver: '.$package.', a header package of the running kernel '.$self->kernel
+        ." that amdgpu-dkms is built against, cannot be installed from the host's package sources "
+        ."(no candidate): they do not (or no longer) carry this kernel's headers, usually because "
+        .'they have moved on to a newer kernel the host was not upgraded to or rebooted into. '
+        .'Upgrade the kernel, reboot into it and run install_driver again. '
+        .$self->_unresolved_note($plan)."\n"
+        if $header{$package};
+      die "install_driver: $package cannot be installed from the host's package sources (no "
+        .'candidate). '.$self->_unresolved_note($plan)."\n";
+    }
     push @{ $plan->{packages} }, $package;
   }
   push @{ $plan->{packages} }, grep { $self->has_candidate($_) } @{ $plan->{optional} || [] };
   if (my $firmware = $plan->{firmware}) {
     my ( $package ) = grep { $self->has_candidate($_) } @$firmware;
     die 'install_driver: none of the amdgpu firmware packages ('.join(', ', @$firmware)
-      .") can be installed from the host's package sources. Nothing was installed\n"
+      .") can be installed from the host's package sources. ".$self->_unresolved_note($plan)."\n"
       unless defined $package;
     push @{ $plan->{packages} }, $package;
   }
   return;
+}
+
+# What resolve_plan leaves behind when it dies: prepare_source has already
+# written the repository file and the key (dkms), but no package went in.
+sub _unresolved_note {
+  my ( $self, $plan ) = @_;
+  my $repo = $plan->{repo} or return 'Nothing was installed';
+  return 'No driver package was installed; the amdgpu repository '.$repo->{file}
+    .' and its signing key '.$repo->{key}{path}.' are in place, and a re-run accepts them';
 }
 
 =method post_install
@@ -476,7 +513,8 @@ C<x86_64> (C<amd64> in L<Rex::GPU::AMD::Setup::Apt>).
 
 The packaging layer, implemented by L<Rex::GPU::AMD::Setup::Apt> and
 L<Rex::GPU::AMD::Setup::RHEL>: refresh the package index, does a package
-have an installation candidate (here: assumed yes), is it installed,
+have an installation candidate -- already installed, or installable from
+the host's package sources (here: assumed yes) --, is it installed,
 install C<curl> and C<gpg> when missing, install the plan's packages
 (directly, never through L<Rex::Commands::Pkg>) and verify every one of
 them installed (dies otherwise).

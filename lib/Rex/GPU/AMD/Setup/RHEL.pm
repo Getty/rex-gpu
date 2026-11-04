@@ -96,6 +96,21 @@ sub firmware_packages {
   return @{ $row->{firmware} };
 }
 
+=method has_candidate
+
+True when the package is installed (L</package_installed>), else when
+C<dnf -q repoquery --available PKG> lists it from an enabled repository --
+the same answer C<apt-cache policy> gives on apt, where an installed
+package is its own candidate. C<refresh_index> does nothing here: dnf
+fetches the metadata it lacks (the just written C<amdgpu.repo>) or that has
+expired itself, as C<dnf install> would; C<repoquery> applies the excludes
+of C<dnf.conf> as C<dnf install> does. A package spec with version
+(C<kernel-devel-$(uname -r)>) is matched as C<rpm -q> and C<dnf install>
+match it. Dies, with dnf's last line, when C<repoquery> fails (a repository
+whose metadata cannot be downloaded): no package was installed by then.
+Read-only. Written for the dnf 4 of RHEL 8, 9 and 10; dnf 5's
+C<repoquery> has the same options and also exits C<0> on no match.
+
 =method package_installed
 
 C<rpm -q PKG>. Read-only.
@@ -123,6 +138,24 @@ The checked armored key to C<path> (mode 0644), then C<rpm --import> of
 it; the repository's C<gpgkey> points at that file.
 
 =cut
+
+# repoquery prints one NEVRA per match (name-epoch:version-release.arch, dnf
+# 4 and 5 alike) and exits 0 also when nothing matches; it exits non-zero
+# only when it could not run, e.g. metadata that cannot be downloaded --
+# which must not read as "no candidate". Other output (warnings, with 2>&1)
+# has spaces and is no NEVRA.
+sub has_candidate {
+  my ( $self, $package ) = @_;
+  return 1 if $self->package_installed($package);
+  my $out = $self->run_cmd("dnf -q repoquery --available $package 2>&1") // '';
+  if ($? != 0) {
+    my ( $why ) = reverse grep { /\S/ } split /\r?\n/, $out;
+    $why = defined $why ? $why =~ s/\A\s+|\s+\z//gr : 'no output';
+    die "install_driver: looking up $package with dnf failed ($why). No driver package was "
+      ."installed\n";
+  }
+  return ( grep { /\A\s*\S+-\d+:\S+\s*\z/ } split /\r?\n/, $out ) ? 1 : 0;
+}
 
 sub package_installed {
   my ( $self, $package ) = @_;
@@ -177,13 +210,20 @@ B<Experimental.> The AMD driver on RHEL, Rocky Linux and AlmaLinux:
 C<repo.radeon.com/amdgpu/31.60/el/MAJOR> with the running kernel's
 C<kernel-headers>, C<kernel-devel> and (9, 10) C<kernel-devel-matched>, on
 the kernel builds of AMD's matrix only. The repository's signing key is
-checked against its pinned fingerprint and imported into rpm.
+checked against its pinned fingerprint and imported into rpm. After the
+repository is written each of these packages must be installed or offered
+by an enabled repository (L</has_candidate>), else it dies before any
+package is installed -- for a header package with the advice to upgrade
+the kernel and reboot (Rocky and Alma move a superseded minor release's
+builds to their vault); the re-run checks the new kernel against AMD's
+matrix again.
 
 =item * B<inbox>, which checks neither the release nor the kernel;
 L</release_data> only names the firmware package: the kernel's own
 C<amdgpu>, plus the firmware package (C<amd-gpu-firmware> on 10,
-C<linux-firmware> on 9 and 8) when it is not installed -- on another major
-release none is checked or installed. No package is known that adds a
+C<linux-firmware> on 9 and 8) when it is not installed (it dies, before
+installing anything, if no enabled repository offers it) -- on another
+major release none is checked or installed. No package is known that adds a
 missing C<amdgpu.ko>: it dies then, before any change. The GPUs AMD
 supports only with the inbox driver (the Ryzen APUs) are not supported on
 RHEL: L<Rex::GPU::AMD/install_driver> dies before any change for them,

@@ -152,6 +152,15 @@ blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
 non-x86_64 host, Secure Boot enabled (the DKMS module would need a MOK
 enrolled at the console), or an existing repository file of other content.
+Dies before any package is installed, but after the apt timers are stopped
+and C<apt-get update> ran (apt) and, for C<dkms>, with AMD's signing key
+and repository file in place (a re-run accepts them), when a package the
+install needs has no candidate -- neither installed nor offered by the
+host's package sources: for C<dkms> the running kernel's headers (the
+message then says to upgrade the kernel and reboot: usually the mirror has
+moved on to a newer kernel than the running one) and C<amdgpu-dkms>; for
+C<inbox> the module package or every firmware package; on RHEL also when
+C<dnf repoquery> itself fails (metadata that cannot be downloaded).
 Dies after the install when a package is not installed afterwards (a failed
 DKMS build leaves C<amdgpu-dkms> half-configured, so C<dpkg -l> does not show
 it C<ii>; an RPM whose C<%post> build failed is caught by the C<dkms status>

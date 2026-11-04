@@ -63,7 +63,24 @@ use lib "$Bin/lib";
 #     a key that is not the pinned one (a key directory is made and removed),
 #     a required package without a candidate (after apt-get update), and these
 #     die AFTER the install: a package not installed afterwards (a half-built
-#     DKMS), dkms status without the module for the running kernel.
+#     DKMS), dkms status without the module for the running kernel;
+#   * dkms (k84): a package without a candidate dies in resolve_plan, AFTER
+#     the key and the repository file are in place and BEFORE any install,
+#     with no `apt-get install` / `dnf install` in the transcript (asserted,
+#     and pinned as goldens): the running kernel's headers (Ubuntu 24.04,
+#     Debian 13, RHEL 9 kernel-devel) with the message that says to upgrade
+#     the kernel and reboot; amdgpu-dkms (Ubuntu 24.04) with the plain
+#     message; both end in "No driver package was installed; the amdgpu
+#     repository ... and its signing key ... are in place, and a re-run
+#     accepts them";
+#   * RHEL (k84): a candidate is `rpm -q` exit 0, else a NEVRA line of `dnf -q
+#     repoquery --available`; a repoquery that exits non-zero dies with dnf's
+#     last line (not the header message, not "no candidate"); inbox: no
+#     enabled repository offers the firmware package -> dies before `dnf
+#     install`;
+#   * Ubuntu (k84): a header package that is installed but gone from the
+#     mirror (`Installed: X` and `Candidate: X`) is a candidate: the install
+#     goes through (golden).
 #
 # NOT covered -- scripted host, hand-written output (see Test::RexGPU::AMD for
 # the real host each canned answer imitates and the strings that are guesses):
@@ -84,6 +101,14 @@ use lib "$Bin/lib";
 #     it assumes, not captured on a Debian host (k86); the dkms fallback
 #     golden shows the Ubuntu `noble` AMD repository line on Debian, as the
 #     existing Debian dkms goldens do -- whether that is right is not judged here;
+#   * what the RHEL candidate answers look like on a real host: the NEVRA
+#     lines of `dnf -q repoquery` (kernel-devel-0:5.14.0-570.12.1.el9_6.x86_64,
+#     amdgpu-dkms-1:6.16.13-2255209.el9.noarch) and the "Failed to download
+#     metadata" error text are GUESSED in dnf's shape, as are the epochs and
+#     the amdgpu-dkms version; an apt `Candidate: (none)` for a kernel's
+#     headers is likewise the format assumed, not captured. Whether a real
+#     mirror drops the headers of the running kernel, and whether `dnf
+#     repoquery` applies the excludes and modules of that host, is not tested;
 #   * what the remote shell does with a command: the key download pipeline, the
 #     printf quoting, the `grep -rsHE` over modprobe.d, the dearmor chain, are
 #     recorded verbatim and never evaluated -- a wrong quote or flag in them
@@ -154,6 +179,34 @@ sub dkms_status {
     [ "amdgpu/6.16.13-2255209.24.04, $kernel, x86_64: installed", 0 ]), 0 ];
 }
 
+# RHEL: the dkms packages are NOT installed before the run, the repositories
+# (the amdgpu one is written by the run) offer them. rpm -q answers "not
+# installed" (exit 1) until the dnf install, then the package; `dnf -q
+# repoquery --available` prints a NEVRA line. GUESSED strings, see the header.
+#   missing  => { PKG => 1 }  no repository offers PKG (empty repoquery, exit 0)
+#   dnf_fail => 'text'        repoquery itself fails (exit 1) with that text
+sub rhel_packages {
+  my ( $kernel, %o ) = @_;
+  my @pkg = ( ( map { $_.'-'.$kernel } qw( kernel-headers kernel-devel ),
+                ( $kernel =~ /\.el8/ ? () : 'kernel-devel-matched' ) ), 'amdgpu-dkms' );
+  my @r;
+  for my $pkg (@pkg) {
+    my $nevra = $pkg eq 'amdgpu-dkms' ? 'amdgpu-dkms-1:6.16.13-2255209.el9.noarch'
+      : $pkg =~ s/-\Q$kernel\E\z/-0:$kernel/r;
+    push @r,
+      [ qr{^rpm -q \Q$pkg\E 2>&1$} => sequence([ 'package '.$pkg.' is not installed', 1 ], [ $pkg, 0 ]), 0 ],
+      [ 'dnf -q repoquery --available '.$pkg.' 2>&1' =>
+          ( defined $o{dnf_fail} ? ( $o{dnf_fail}, 1 ) : ( $o{missing}{$pkg} ? '' : $nevra, 0 ) ) ];
+  }
+  return @r;
+}
+# apt-cache policy for a package no source carries
+sub policy_none {
+  my ( $pkg ) = @_;
+  return [ "LC_ALL=C apt-cache policy $pkg 2>/dev/null" =>
+    "$pkg:\n  Installed: (none)\n  Candidate: (none)\n  Version table:\n", 0 ];
+}
+
 # install_driver on a host; returns ( $rec, $return )
 sub install {
   my ( $host, %args ) = @_;
@@ -198,7 +251,8 @@ subtest 'dkms install, per OS (goldens)' => sub {
   );
   for my $c (@case) {
     my ( $name, $os, $gpu ) = @$c;
-    my ( $rec, $how ) = dkms_case($name, $os, $gpu);
+    my ( $rec, $how ) = dkms_case($name, $os, $gpu,
+      ( $os =~ /^(?:rhel|rocky)/ ? ( responses => [ rhel_packages(os_kernel($os)) ] ) : () ));
     is($rec->{error}, undef, "$name: lives");
     is($how, 'dkms', '... returns dkms');
     ok(no_pkg($rec), '... no Rex::Pkg call (no pkg: line)');
@@ -544,6 +598,103 @@ subtest 'a required package without a candidate: dies after apt-get update, befo
   golden_is(masked($rec), 'amd/ubuntu-24.04--inbox--mi300x--no-candidate');
 };
 
+#### dkms: a package without a candidate dies before any install (k84)
+
+# Everything a "no candidate" die must have in common: key and repository file
+# are in place, no package went in, nothing was loaded.
+sub no_install_but_repo {
+  my ( $rec, $repo_re ) = @_;
+  ok(!( grep { /apt-get .* install |dnf install / } @{ $rec->{lines} }), '... no apt-get install, no dnf install');
+  ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} }), '... no modprobe');
+  ok(( grep { /$repo_re/ } @{ $rec->{lines} }), '... the repository file was written (a re-run accepts it)');
+  ok(no_pkg($rec), '... no pkg: line');
+  ok(!$rec->{trapped}, '... no unmocked Rex function reached');
+}
+
+subtest 'dkms, the running kernel\'s headers without a candidate: dies before any install, says upgrade and reboot (goldens)' => sub {
+  my $APT_REPO = qr{mv -f /etc/apt/sources\.list\.d/amdgpu\.list\.tmp /etc/apt/sources\.list\.d/amdgpu\.list};
+  my @case = (
+    [ 'ubuntu-24.04--dkms--mi300x--no-headers-candidate', 'ubuntu-24.04', '6.8.0-85-generic', 'linux-headers-6.8.0-85-generic',
+      [ policy_none('linux-headers-6.8.0-85-generic') ],
+      '/etc/apt/sources.list.d/amdgpu.list', '/etc/apt/keyrings/rocm.gpg', $APT_REPO ],
+    # a Debian host needs its own policy answers: the ubuntu-24.04 base profile
+    # answers EVERY apt-cache policy with the NVIDIA candidate
+    [ 'debian-13--dkms--mi300x--no-headers-candidate', 'debian-13', '6.12.48+deb13-amd64', 'linux-headers-6.12.48+deb13-amd64',
+      [ policy_none('linux-headers-6.12.48+deb13-amd64') ],
+      '/etc/apt/sources.list.d/amdgpu.list', '/etc/apt/keyrings/rocm.gpg', $APT_REPO ],
+    [ 'rhel-9--dkms--mi300x--no-kernel-devel-candidate', 'rhel-9', '5.14.0-570.12.1.el9_6.x86_64', 'kernel-devel-5.14.0-570.12.1.el9_6.x86_64',
+      [ rhel_packages('5.14.0-570.12.1.el9_6.x86_64', missing => { 'kernel-devel-5.14.0-570.12.1.el9_6.x86_64' => 1 }) ],
+      '/etc/yum.repos.d/amdgpu.repo', '/etc/pki/rpm-gpg/RPM-GPG-KEY-rocm', qr{mv -f /etc/yum\.repos\.d/amdgpu\.repo\.tmp /etc/yum\.repos\.d/amdgpu\.repo} ],
+  );
+  for my $c (@case) {
+    my ( $name, $os, $kernel, $pkg, $responses, $file, $key, $repo_re ) = @$c;
+    my ( $rec ) = dkms_case($name, $os, 'mi300x', kernel => $kernel, responses => $responses);
+    is($rec->{error},
+      'install_driver: '.$pkg.', a header package of the running kernel '.$kernel.' that amdgpu-dkms is built against, '
+      ."cannot be installed from the host's package sources (no candidate): they do not (or no longer) carry this "
+      .'kernel\'s headers, usually because they have moved on to a newer kernel the host was not upgraded to or '
+      .'rebooted into. Upgrade the kernel, reboot into it and run install_driver again. No driver package was '
+      .'installed; the amdgpu repository '.$file.' and its signing key '.$key.' are in place, and a re-run accepts them',
+      "$name: the header message, naming the package, the kernel, the repository file and the key");
+    no_install_but_repo($rec, $repo_re);
+    golden_is(masked($rec), "amd/$name");
+  }
+};
+
+subtest 'dkms, amdgpu-dkms without a candidate: dies before any install with the plain message (golden)' => sub {
+  my ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ policy_none('amdgpu-dkms') ]);
+  is($rec->{error},
+    "install_driver: amdgpu-dkms cannot be installed from the host's package sources (no candidate). "
+    .'No driver package was installed; the amdgpu repository /etc/apt/sources.list.d/amdgpu.list and its signing key '
+    .'/etc/apt/keyrings/rocm.gpg are in place, and a re-run accepts them',
+    'the plain message, not the header one');
+  unlike($rec->{error}, qr/header package|Upgrade the kernel/, '... no advice to upgrade the kernel');
+  no_install_but_repo($rec, qr{mv -f /etc/apt/sources\.list\.d/amdgpu\.list\.tmp /etc/apt/sources\.list\.d/amdgpu\.list});
+  ok(( grep { /apt-cache policy linux-headers-6\.8\.0-85-generic/ } @{ $rec->{lines} }), '... the headers were asked first (they have a candidate)');
+  golden_is(masked($rec), 'amd/ubuntu-24.04--dkms--mi300x--no-dkms-candidate');
+};
+
+subtest 'dkms on Ubuntu, headers installed but gone from the mirror: that is a candidate, the install goes through (golden)' => sub {
+  my $K = '6.8.0-85-generic';
+  my ( $rec, $how ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [
+    [ "LC_ALL=C apt-cache policy linux-headers-$K 2>/dev/null" =>
+      "linux-headers-$K:\n  Installed: 6.8.0-85.85\n  Candidate: 6.8.0-85.85\n  Version table:\n"
+      ." *** 6.8.0-85.85 100\n        100 /var/lib/dpkg/status\n", 0 ] ]);
+  is($rec->{error}, undef, 'lives');
+  is($how, 'dkms', 'dkms');
+  my ( $install ) = grep { /apt-get .* install -y .*amdgpu-dkms/ } @{ $rec->{lines} };
+  like($install, qr/ install -y linux-headers-\Q$K\E amdgpu-dkms(?: linux-modules-extra-\Q$K\E)?\z/, "the install command is emitted: the headers, amdgpu-dkms");
+  ok(no_pkg($rec), 'no pkg: line');
+  golden_is(masked($rec), 'amd/ubuntu-24.04--dkms--mi300x--headers-installed-not-in-mirror');
+};
+
+subtest 'RHEL, dnf repoquery fails: the dnf message, not the header one; nothing installed (golden)' => sub {
+  my $K = os_kernel('rhel-9');
+  my $text = "Error: Failed to download metadata for repo 'amdgpu': Cannot download repomd.xml: Cannot download repodata/repomd.xml: All mirrors were tried";
+  my ( $rec ) = dkms_case('x', 'rhel-9', 'mi300x', responses => [
+    rhel_packages($K, dnf_fail => "Errors during downloading metadata for repository 'amdgpu':\n  - Curl error (6): Couldn't resolve host name\n".$text) ]);
+  is($rec->{error}, 'install_driver: looking up kernel-headers-'.$K.' with dnf failed ('.$text.'). No driver package was installed',
+    'dnf\'s last line, the package, and that nothing was installed');
+  unlike($rec->{error}, qr/header package|no candidate|Upgrade the kernel/, '... not the header message, not "no candidate"');
+  no_install_but_repo($rec, qr{mv -f /etc/yum\.repos\.d/amdgpu\.repo\.tmp /etc/yum\.repos\.d/amdgpu\.repo});
+  golden_is(masked($rec), 'amd/rhel-9--dkms--mi300x--repoquery-failed');
+};
+
+subtest 'inbox on RHEL 9, linux-firmware offered by no repository: dies before dnf install (golden)' => sub {
+  my $host = amd_host('rhel-9', state => [ fresh('mi300x') ], module => 'inbox',
+    responses => [
+      [ qr{^rpm -q linux-firmware 2>&1$} => 'package linux-firmware is not installed', 1 ],
+      [ 'dnf -q repoquery --available linux-firmware 2>&1' => '', 0 ] ]);
+  my ( $rec ) = install($host, gpus => [ gpu_mi300x() ], method => 'inbox');
+  is($rec->{error}, "install_driver: none of the amdgpu firmware packages (linux-firmware) can be installed from the host's package sources. Nothing was installed",
+    'dies naming the firmware package');
+  ok(!( grep { /dnf install/ } @{ $rec->{lines} }), 'no dnf install');
+  ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} }), 'no modprobe');
+  ok(no_pkg($rec), 'no pkg: line');
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  golden_is(masked($rec), 'amd/rhel-9--inbox--mi300x--no-firmware-candidate');
+};
+
 #### dies after the install
 
 subtest 'a package not installed afterwards (half-configured DKMS): dies, naming the package (golden)' => sub {
@@ -555,9 +706,13 @@ subtest 'a package not installed afterwards (half-configured DKMS): dies, naming
   ok(no_pkg($rec), 'verified by dpkg, not Rex::Pkg');
   golden_is(masked($rec), 'amd/ubuntu-24.04--dkms--mi300x--verify-failed');
 
+  # the repository offers amdgpu-dkms (a repoquery NEVRA), so it IS installed;
+  # rpm -q still says it is not afterwards
   ( $rec ) = dkms_case('x', 'rhel-9', 'mi300x', responses => [
-    [ qr{^rpm -q amdgpu-dkms 2>&1$} => 'package amdgpu-dkms is not installed', 1 ] ]);
+    [ qr{^rpm -q amdgpu-dkms 2>&1$} => 'package amdgpu-dkms is not installed', 1 ],
+    rhel_packages(os_kernel('rhel-9')) ]);
   like($rec->{error}, qr/\Aamdgpu-dkms not installed after dnf install -- check the dnf output/, 'RHEL: the same, by rpm -q');
+  ok(( grep { /^run: dnf install -y .* amdgpu-dkms$/ } @{ $rec->{lines} }), '... after the dnf install (the repoquery found a candidate)');
   ok(no_pkg($rec), '... verified by rpm, not Rex::Pkg');
   golden_is(masked($rec), 'amd/rhel-9--dkms--mi300x--verify-failed');
 };

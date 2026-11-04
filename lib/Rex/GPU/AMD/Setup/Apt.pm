@@ -44,7 +44,8 @@ that are no failure; a missing package shows in the next step.
 =method has_candidate
 
 C<LC_ALL=C apt-cache policy PKG> lists a C<Candidate> other than
-C<(none)>. Read-only.
+C<(none)> -- an installed package is its own candidate, also when no
+source carries it any more. Read-only.
 
 =method package_installed
 

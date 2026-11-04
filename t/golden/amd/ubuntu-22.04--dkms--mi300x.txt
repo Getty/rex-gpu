@@ -21,6 +21,8 @@ run: test -s /etc/apt/keyrings/rocm.gpg
 run: printf '%s' 'deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/31.60/ubuntu jammy main
 ' > /etc/apt/sources.list.d/amdgpu.list.tmp && chmod 0644 /etc/apt/sources.list.d/amdgpu.list.tmp && mv -f /etc/apt/sources.list.d/amdgpu.list.tmp /etc/apt/sources.list.d/amdgpu.list
 run: apt-get -o DPkg::Lock::Timeout=120 update -q
+run: LC_ALL=C apt-cache policy linux-headers-5.15.0-151-generic 2>/dev/null
+run: LC_ALL=C apt-cache policy amdgpu-dkms 2>/dev/null
 run: LC_ALL=C apt-cache policy linux-modules-extra-5.15.0-151-generic 2>/dev/null
 run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-5.15.0-151-generic amdgpu-dkms linux-modules-extra-5.15.0-151-generic
 run: dpkg -l linux-headers-5.15.0-151-generic 2>/dev/null | grep -q '^ii'
