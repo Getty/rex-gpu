@@ -1,0 +1,50 @@
+---
+claimed_at: 2026-11-04T01:48:10Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T01:48:10Z
+created: 2026-11-04T01:23:49Z
+id: 81
+priority: high
+started: 2026-11-04T01:29:29Z
+status: done
+tags:
+- amd
+- debian
+- risk
+- decision
+title: 'AMD inbox auf Debian ohne Release-Prüfung: firmware-amd-graphics auch auf
+  Debian 11, testing und Proxmox VE'
+updated: 2026-11-04T01:50:46Z
+---
+
+Fund aus k80 (Abgleich der AMD-Debian-POD, nur Text geändert).
+
+Ist: Setup::Debian liefert firmware_packages (firmware-amd-graphics) ohne Bedingung; plan_inbox und fallback_method lesen release_data nicht. Jeder Host mit ID=debian bekommt im inbox-Pfad firmware-amd-graphics: Debian 11 (dort in non-free, nicht non-free-firmware), testing/sid (kein VERSION_ID) und Proxmox VE (-pve-Kernel, amdgpu.ko unter kernel/ → inbox). Ubuntu und RHEL liefern Firmware nur mit Release-Zeile.
+
+Verdacht, offline nicht geprüft: pve-firmware steht in Konflikt mit Debians firmware-*-Paketen. Dann entfernt "apt-get install -y firmware-amd-graphics" pve-firmware, und NICs ohne Firmware fallen nach dem nächsten Boot aus — auf einem Hypervisor.
+
+Empfehlung: inbox auf Debian an release_data und den eigenen amd64-Kernel binden (analog dkms_unsupported), oder mindestens Proxmox (pve-firmware installiert / -pve-Kernel) vor jeder Änderung ablehnen. Entscheidung Maintainer (Support-Matrix). Danach Test (test-writer).
+
+Prüfen auf echtem Host: Proxmox VE 8/9 "apt-get -s install firmware-amd-graphics"; Debian 11 "apt-cache policy firmware-amd-graphics".
+
+2026-11-04 01:29 Go: Getty (2026-11-04: "k81 nach todo, setz direkt einen Agenten drauf"). Umsetzungsvariante hat der Hub gewählt.
+
+Live geprüft (Hub, nur lesend, kaiser: Proxmox VE 9.2, /etc/os-release Debian 13 VERSION_ID=13, Kernel 7.0.14-20-pve, amdgpu.ko im pve-Kernel vorhanden):
+- pve-firmware 3.18-x: Conflicts und Replaces firmware-amd-graphics (dazu firmware-linux-nonfree, firmware-misc-nonfree u. a.).
+- firmware-amd-graphics hat dort einen Kandidaten (20250410-2, trixie/non-free-firmware).
+- apt-get -s install firmware-amd-graphics: Remv proxmox-ve, proxmox-default-kernel, proxmox-kernel-7.0, pve-firmware.
+Eine Release-Prüfung allein fängt Proxmox nicht (ID=debian, VERSION_ID=13).
+
+Umsetzung:
+1. inbox auf Debian an release_data (12/13) und an Debians eigenen amd64-Kernel binden, wie dkms_unsupported; andere Releases und Kernel sterben vor jeder Änderung (außer der Treiber läuft schon: present).
+2. Ist pve-firmware installiert, stirbt jeder Debian-Pfad vor jeder Änderung, auch mit einem Debian-Kernel, mit klarer Meldung (Proxmox-Host, pve-firmware bringt die AMD-Firmware und kollidiert mit firmware-amd-graphics).
+3. Tests über den test-writer, POD in Rex::GPU::AMD und Setup::Debian nachziehen.
+
+Worker: nur lib/ geändert, commit-ready, nicht committet. Neue Hooks in Setup: host_unsupported (zuerst in plan_inbox und plan_dkms), inbox_unsupported (nach preflight und APU-Check). Debian: pve-firmware auf der Platte (Setup::Apt::package_on_disk, dpkg-query -W -f='${Status}\n' pve-firmware; jeder Zustand außer not-installed/config-files zählt) weist beide Pfade ab. inbox an release_data + Kernel-Regex der Zeile gebunden. POD in AMD.pm, Setup.pm, Apt.pm, Debian.pm. fallback_method und install_rocm unverändert. prove: nur Goldens amd/debian-12--dkms--mi300x und amd/debian-13--dkms--mi300x rot (neue Zeile 3) -> test-writer. Nicht gegen Hardware gelaufen. Nebenfund: install_rocm und NVIDIA::Setup::Debian ohne Proxmox-Schutz (ungeprüft); README nennt Proxmox nicht.
+
+Test-writer: t/17-amd-install-driver.t + 8 neue Goldens (debian-11--inbox, debian-12/13--inbox--mi300x--firmware, debian-13--inbox--pve-kernel, debian-13--{inbox,dkms}--proxmox-debian-kernel, debian-13--inbox--proxmox-pve-kernel, debian-13--present--proxmox), 2 dkms-Goldens um die pve-firmware-Abfrage ergänzt. Rot gegen altes lib (5884e09): Failed 4/22 subtests in t/17; present-auf-Proxmox und 'Firmware schon da' sind Pins (gegen alt grün). prove -lr t/: Files=42, Tests=1857, Result: PASS. Nicht gegen Hardware gelaufen. Commit-ready, an release-manager.
+
+2026-11-04 01:48 Committed 91d1c42 (Refuse Proxmox VE and bind the Debian AMD inbox path to 12/13 and their kernel), main ff auf 91d1c42. Nicht gegen Hardware gelaufen; auf einem echten Knoten pruefen: dpkg-query -W -f='${Status}\n' pve-firmware auf PVE, install_driver(method => 'inbox') auf PVE stirbt ohne Aenderung, auf Debian 13 mit amd64-Kernel installiert es firmware-amd-graphics, auf Debian 11 stirbt es.
+
+2026-11-04 01:50 Live geprüft (Hub, 2026-11-04, kaiser = Proxmox VE 9.2, Kernel 7.0.14-20-pve, über Rex::LibSSH, nur lesend): setup_for liefert Setup::Debian, package_on_disk(pve-firmware) = 1, host_unsupported liefert die Proxmox-Meldung, inbox_unsupported weist den -pve-Kernel ab. install_driver nicht ausgeführt. main 91d1c42 gepusht.
