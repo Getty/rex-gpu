@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-04T02:00:32Z
+claimed_by: main-agent
+class: standard
+completed: 2026-11-04T02:00:32Z
+created: 2026-11-04T01:23:58Z
+id: 83
+priority: low
+started: 2026-11-04T01:46:13Z
+status: done
+tags:
+- amd
+- docs
+- pod
+title: AMD-Doku Ubuntu/RHEL/README an die k80-Präzisierungen angleichen
+updated: 2026-11-04T02:00:32Z
+---
+
+Fund aus k80 (dort nur AMD.pm und Setup/Debian.pm korrigiert).
+
+- Setup/Ubuntu.pm POD (Z. ~135-138) und Setup/RHEL.pm POD (Z. ~186-187): "dies before any change" für die Ryzen-APUs ohne den Vorbehalt, dass ein funktionierender Treiber vorher present ergibt (und method => dkms trotzdem stirbt) — gleiche Korrektur wie in Setup/Debian.pm.
+- Setup/Ubuntu.pm DESCRIPTION "per release_data" (Z. ~122): der inbox-Pfad prüft weder Release noch Kernel-Serie (release_data bestimmt nur Firmware- und modules-extra-Pakete).
+- README.md Z. 82: "Anything else ... dies before any change" stimmt für inbox auf nicht gelisteten Releases nicht, und present hat Vorrang.
+- README.md Z. 84: "apt only: Ubuntu, Debian" → Ubuntu 22.04/24.04/26.04 und Debian 12/13 (amd64).
+
+POD unter lib/ → rex-gpu-worker; README ist Prosa. Kein Verhalten.
+
+Worker: nur POD (Setup/Ubuntu.pm, Setup/RHEL.pm DESCRIPTION) und README AMD-Abschnitt; kein Code, kein Changes. APU-Vorbehalt present (dkms stirbt trotzdem) in Ubuntu/RHEL; inbox prüft auf Ubuntu/RHEL weder Release noch Kernel (release_data nennt nur Pakete); README: present vor allen Ablehnungen, Debian-inbox 12/13 + eigener amd64-Kernel, Proxmox abgewiesen, install_rocm Ubuntu 22.04/24.04/26.04 + Debian 12/13 amd64. Ubuntu-POD korrigiert nebenbei: 22.04 hat nur linux-firmware als Firmware-Paket. prove -lr t/: Files=42, Tests=1860, Result: PASS.
+
+Committed 60dfd72 (Match the AMD Ubuntu/RHEL POD and the README …), main ff. Nur Doku.
