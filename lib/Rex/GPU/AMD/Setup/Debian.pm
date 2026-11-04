@@ -26,8 +26,11 @@ my %RELEASE = (
 
 The row of this Debian release (C<VERSION_ID> C<13> or C<12>), C<undef>
 for another one: the C<amdgpu-dkms> suite (C<noble>, C<jammy>), the kernel
-AMD supports (the release's own C<amd64> kernel series, 6.12 and 6.1 -- a
-backports kernel is not), the ROCm repository (C<debian13>, C<debian12>).
+it is installed on (AMD's 6.12 and 6.1, as the release's own kernel of the
+flavour C<amd64>: C<6.12.N+deb13-amd64>, C<6.1.0-N-amd64> -- not
+C<cloud-amd64>, C<rt-amd64> or a backports kernel), the ROCm repository
+(C<debian13>, C<debian12>). Only the C<amdgpu-dkms> path and
+L<Rex::GPU::AMD/install_rocm> read it; the inbox path does not.
 
 =cut
 
@@ -62,19 +65,25 @@ sub rocm_repo_dir {
 
 =head1 DESCRIPTION
 
-B<Experimental.> The AMD driver on Debian 12 and 13, per L</release_data>:
+B<Experimental.> The AMD driver on Debian:
 
 =over
 
-=item * B<amdgpu-dkms> from C<repo.radeon.com/amdgpu/31.60/ubuntu> with
-C<linux-headers-$(uname -r)>, on the release's own kernel only.
+=item * B<amdgpu-dkms> on Debian 12 and 13, per L</release_data>: from
+C<repo.radeon.com/amdgpu/31.60/ubuntu> with C<linux-headers-$(uname -r)>,
+on the release's own C<amd64> kernel only.
 
-=item * B<inbox>: the kernel's own C<amdgpu>, plus C<firmware-amd-graphics>
-when it is not installed (it needs the C<non-free-firmware> component; it
-dies, before installing anything, if apt has no candidate). Debian's kernel
-always carries C<amdgpu.ko>; there is no package to add it. The GPUs AMD
-supports only with the inbox driver (the Ryzen APUs) are not supported on
-Debian: it dies before any change.
+=item * B<inbox>, which checks neither the release nor the kernel series
+(L</release_data> is not read): the kernel's own C<amdgpu>, plus
+C<firmware-amd-graphics> when it is not installed (on Debian 12 and 13 it
+is in the C<non-free-firmware> component; it dies, before installing
+anything, if apt has no candidate). No package is known that adds a
+missing C<amdgpu.ko> (Debian's C<amd64> kernel carries it): it dies then,
+before any change. The GPUs AMD supports only with the inbox driver (the
+Ryzen APUs, rows with C<driver =E<gt> 'inbox'>) are not supported on
+Debian: L<Rex::GPU::AMD/install_driver> dies before any change for them,
+unless their driver already works, which it answers with C<present>
+(C<method =E<gt> 'dkms'> dies then too).
 
 =back
 

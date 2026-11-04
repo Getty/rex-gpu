@@ -94,7 +94,9 @@ C<uname -r> and C<modinfo -n amdgpu> tell the kinds apart).
 =item C<inbox> -- the distribution kernel's own C<amdgpu> was made usable:
 only what is missing is installed (the firmware package if none of
 L<Rex::GPU::AMD::Setup/firmware_packages> is installed, the module package
-if the running kernel has no C<amdgpu.ko>), nothing if nothing is missing.
+if the running kernel has no C<amdgpu.ko> -- where
+L<Rex::GPU::AMD::Setup/inbox_module_packages> has none, as on Debian, it
+dies before any change), nothing if nothing is missing.
 
 =item C<dkms> -- AMD's C<amdgpu-dkms> 31.60 was installed from
 C<repo.radeon.com> with the running kernel's headers, its signing key
@@ -122,18 +124,21 @@ AMD supports only with the inbox driver dies, also where the driver
 already works; C<method =E<gt> 'inbox'> for one whose row says C<dkms>
 warns and goes ahead. C<install_driver> never removes or replaces a driver.
 
-After an install C<amdgpu> is loaded with C<modprobe amdgpu> if it was not
-loaded before. If it was, or if the GPUs are still not usable, only a reboot
-can activate the driver: with C<reboot =E<gt> 1> the host is rebooted and
-waited for (up to about 5 minutes, see L</reboot_and_wait>), and the driver
-must then be usable or it dies; without it a warning says so and the method
-is returned.
+Then -- also when nothing had to be installed -- C<amdgpu> is loaded with
+C<modprobe amdgpu> if it was not loaded before. If it was, or if the GPUs
+are still not usable, only a reboot can activate the driver: with
+C<reboot =E<gt> 1> the host is rebooted and waited for (up to about 5
+minutes, see L</reboot_and_wait>), and the driver must then be usable or it
+dies; without it a warning says so and the method is returned.
 
 Dies -- B<before anything is changed on the host> -- for an unknown option,
 a malformed or empty C<gpus>, a GPU that is not on the host, a host
-without an AMD GPU, a state that could not be read, an unsupported OS, release or kernel
+without an AMD GPU, a state that could not be read; and, unless the driver
+already works (C<present>), for an unsupported OS, an unsupported release
+or kernel for C<dkms> or for a GPU AMD supports only with the inbox driver
 (the per-OS matrix is in L<Rex::GPU::AMD::Setup::Ubuntu>,
-L<Rex::GPU::AMD::Setup::Debian> and L<Rex::GPU::AMD::Setup::RHEL>), a
+L<Rex::GPU::AMD::Setup::Debian> and L<Rex::GPU::AMD::Setup::RHEL>; C<inbox>
+for any other GPU checks neither the release nor the kernel series), a
 kernel command line with C<nomodeset>, C<amdgpu.modeset=0> or a module
 blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
