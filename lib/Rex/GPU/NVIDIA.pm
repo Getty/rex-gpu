@@ -91,7 +91,7 @@ just the first two; a GPU without C<vgpu> is not a vGPU:
 L<Rex::GPU::Detect::Sysfs> finds them without C<lspci> in the full shape,
 vGPU keys and C<nvswitch> included.
 
-B<NVIDIA vGPU guest> (karr #24; C<vgpu =E<gt> 1>, see
+B<NVIDIA vGPU guest> (C<vgpu =E<gt> 1>, see
 L<Rex::GPU::Detect/NVIDIA vGPU guests>): such a device needs NVIDIA's
 licensed vGPU guest (GRID) driver, which none of the package sources
 Rex::GPU installs from carries, and the open C<nvidia.ko> of the datacenter packages
@@ -216,7 +216,7 @@ Then, as after an install, it warns if the unit is not active. Omitted or empty
 (the default, and every caller that finds its GPUs without C<lspci>): no
 Fabric Manager, nothing changes.
 
-B<HGX B200/B300> (karr #56): their NVSwitches are not PCI devices on the
+B<HGX B200/B300>: their NVSwitches are not PCI devices on the
 host, so there are no C<nvswitches>; they are recognised by the GPUs'
 device IDs instead (B200 C<2901>/C<2909>, B300 C<3182>;
 L<Rex::GPU::NVIDIA::Setup/nvlink_platforms>, from C<gpus>, so also for a
@@ -319,7 +319,7 @@ host is changed. A host whose driver was installed by hand (C<nvidia-smi -L>
 lists the GPU and C<libcuda.so.1> is in the linker cache) passes the
 already-installed check above instead. L<Rex::GPU/gpu_setup> passes only
 compute GPUs, and detection never counts a Kepler as compute, at any PCI
-class (karr #55): a Kepler display card and a class-C<0302> Tesla
+class: a Kepler display card and a class-C<0302> Tesla
 K80/K40/K20 are skipped there with a warning and never reach
 C<install_driver>. The refusal here is for a caller that passes one
 directly.

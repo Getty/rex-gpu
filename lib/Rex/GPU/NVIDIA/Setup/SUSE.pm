@@ -91,7 +91,7 @@ package carries it.
 
 C<16.0> on Leap 16 and later, the C<x.y> of the raw release string
 (C<15.6>) before -- never C<operating_system_version>, which strips the dots
-(C<156>, karr #6).
+(C<156>).
 
 =method repo_url
 

@@ -854,7 +854,7 @@ rules, first match wins:
 =over
 
 =item * A Kepler-or-older device ID (below C<1340>, see below) — B<not>
-compute, whatever the PCI class. This is checked first (karr #55), so a Kepler
+compute, whatever the PCI class. This is checked first, so a Kepler
 Tesla (K80, K40, K20), which enumerates as class C<0302>, is skipped with the
 Kepler warning like a Kepler display card, and a newer GPU on the same host
 is still installed.

@@ -34,7 +34,7 @@ C<apt-get -o DPkg::Lock::Timeout=120>: every C<apt-get> of this layer.
 =method prepare_host
 
 Stops C<unattended-upgrades>, C<apt-daily> and C<apt-daily-upgrade>
-(karr #37: on a fresh boot they hold the dpkg lock).
+(on a fresh boot they hold the dpkg lock).
 
 =method refresh_index
 
@@ -183,7 +183,7 @@ sub dkms_repo {
 =method place_key
 
 C<gpg --dearmor> of the checked key into C<path>, through a temporary file
-that replaces it only when non-empty (the karr #38 pattern), mode 0644 for
+that replaces it only when non-empty, mode 0644 for
 apt's C<_apt> user.
 
 =cut
@@ -318,7 +318,7 @@ sub _trim {
 
 B<Experimental.> The apt/dpkg layer under L<Rex::GPU::AMD::Setup::Ubuntu>
 and L<Rex::GPU::AMD::Setup::Debian>, with the driver path's apt rules
-(karr #37, as in L<Rex::GPU::NVIDIA::Setup::Apt>): the apt timers stopped
+(as in L<Rex::GPU::NVIDIA::Setup::Apt>): the apt timers stopped
 before the first C<apt-get>, a dpkg lock timeout on every C<apt-get>, the
 install run directly and C<dpkg -l> (C<ii>, or C<hi> when held) as the
 only evidence. And

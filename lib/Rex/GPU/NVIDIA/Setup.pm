@@ -148,7 +148,7 @@ sub fabric_label {
   my %platform = $self->nvlink_platform_ids;   # device_id => platform
 
 The GPUs that mark an NVLink platform, as a list of lowercase PCI device
-IDs and the platform each one marks (karr #49; IDs from the supported-GPU
+IDs and the platform each one marks (IDs from the supported-GPU
 table of NVIDIA's open-gpu-kernel-modules README, driver 615):
 
 =over
@@ -158,7 +158,7 @@ Their NVSwitches are not PCI devices on the host, so there are no
 L</nvswitches>; CUDA needs NVIDIA Fabric Manager, the NVLink Subnet Manager
 (C<nvlsm>), the InfiniBand user-space stack and kernel 5.17 or newer. It
 makes L</nvlink_fabric_needed> true, so the driver comes with Fabric
-Manager and L</install_nvlink_fabric> (karr #56).
+Manager and L</install_nvlink_fabric>.
 
 =item * C<nvl72> -- GB200 (C<2941>) and GB300 (C<31c2>, C<31c3>) NVL72
 compute trays: multi-node NVLink needs C<nvidia-imex>; Fabric Manager runs

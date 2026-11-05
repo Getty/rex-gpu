@@ -96,7 +96,7 @@ has members => ( is => 'ro', default => sub { [] } );
 =attr compute
 
 Whether the GPU generation is one to install a driver for, as the
-L</generations> row for L</device_id> declares it (karr #45, #54):
+L</generations> row for L</device_id> declares it:
 
 =over
 
@@ -109,8 +109,8 @@ resolve that name. The built-in table marks Maxwell through Blackwell Ultra.
 =item * C<0> -- the row says the generation is not to be installed for: the
 built-in table marks Kepler and older, whose last driver branch (470) the
 current distributions no longer package. L<Rex::GPU::Detect> reports such a
-GPU as not compute whatever its PCI class (a class-C<0302> Tesla K80 too,
-karr #55), with a warning naming the generation and branch.
+GPU as not compute whatever its PCI class (a class-C<0302> Tesla K80 too),
+with a warning naming the generation and branch.
 
 =item * C<undef> -- no row covers the ID (or it is missing or malformed), the
 row has no C<compute> key, or the requirement was built by L</intersect>.
@@ -164,7 +164,7 @@ C<< $self->SUPER::generations >> to keep the built-in ones:
 
 The table chooses a driver, and its C<compute> flags also decide detection:
 L<Rex::GPU::Detect> asks this class (the built-in table, not a subclass) for
-L</compute> before its name rules (karr #45, #54). The criterion is the
+L</compute> before its name rules. The criterion is the
 generation, not the marketing name: Maxwell, Pascal, Volta, Turing, Ampere,
 Ada, Hopper, Blackwell and Blackwell Ultra rows are C<compute =E<gt> 1>, the
 Kepler-or-older row C<compute =E<gt> 0>. A subclass that adds or replaces rows
@@ -210,7 +210,7 @@ have their own rows ahead of that block: open kernel module only, oldest
 branch 535 (C<2342>) and 565 (C<2348>). The IDs are from NVIDIA's
 C<supportedchips> READMEs (C<2342> first in 535.247.01, not in 535.104.05;
 C<2348> first in 565.77), checked 2026-09-26. Open-only is a maintainer
-decision (karr #72) following NVIDIA's blog post "NVIDIA Transitions Fully
+decision following NVIDIA's blog post "NVIDIA Transitions Fully
 Towards Open-Source GPU Kernel Modules"; NVIDIA's driver README
 (C<kernel_open.html>, up to 615.71.09) still lists Hopper as supported by the
 proprietary flavor, with no Grace exception.
@@ -218,7 +218,7 @@ proprietary flavor, with no Grace exception.
 =item * Kepler or older, every ID below C<1340> (Kepler C<0FC6>-C<12BA>, Fermi and
 earlier): the 470 and older legacy lists. Proprietary only, nothing newer
 than 470. Not compute, at any PCI class (the class-C<0302> Tesla
-K80/K40/K20 included, karr #55): L<Rex::GPU::Detect> skips them with a
+K80/K40/K20 included): L<Rex::GPU::Detect> skips them with a
 warning, and L<Rex::GPU::NVIDIA> refuses to install for one passed to it
 anyway.
 

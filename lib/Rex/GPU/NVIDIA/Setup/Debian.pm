@@ -89,7 +89,7 @@ A reason unless the chosen driver source is NVIDIA's CUDA repository
 
 The driver branch of Debian's own C<nvidia-driver> in a release: 11 (470),
 12 (535), 13 (550); C<undef> for any other. A fixed table (maintainer
-decision, epic karr #25): looking it up with C<apt-cache> would need
+decision): looking it up with C<apt-cache> would need
 C<non-free> enabled first, a host change before the plan can fail.
 Override it for a release this table does not know.
 
@@ -277,7 +277,7 @@ C<deb-src>) whose components include C<main>, and
 =item * it has a C<signed-by> option (C<Signed-By:> in deb822) that names
 only keyrings L</is_debian_archive_keyring> accepts -- whatever its URI: a
 repository signed with Debian's archive key is Debian's archive or a mirror
-of it (karr #41). Any other C<signed-by> (a foreign keyring, an inline key)
+of it. Any other C<signed-by> (a foreign keyring, an inline key)
 makes it a third-party entry, even on a Debian URI;
 
 =item * or it has no C<signed-by>, and L</is_debian_archive_uri> accepts
