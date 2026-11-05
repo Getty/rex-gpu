@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-05T23:36:14Z
+claimed_by: k89-k93
+class: standard
+completed: 2026-11-05T23:36:14Z
+created: 2026-11-04T01:55:13Z
+id: 89
+priority: medium
+started: 2026-11-05T23:17:04Z
+status: done
+tags:
+- amd
+- rocm
+- behavior
+title: 'AMD install_rocm: _dpkg_status zählt nur ''install ok installed'' — gehaltenes/halb
+  installiertes rocm-core entgeht dem Altlinien-Check'
+updated: 2026-11-05T23:36:15Z
+---
+
+Nebenfund aus k87 (rex-gpu-worker, lesend). Setup::Apt::_dpkg_status (lib/Rex/GPU/AMD/Setup/Apt.pm) wertet nur Zeilen 'PKG install ok installed VERSION'. Folgen:
+- rocm-core der Altlinie, gehalten (apt-mark hold -> 'hold ok installed') oder halb installiert ('install ok unpacked', 'half-configured', 'reinstreq half-installed'): der Altlinien-Check sieht es nicht, install_rocm installiert 10.1 neben die alte Linie statt zu sterben.
+- Umgekehrt: gehaltene amdrocm10.1-* werden nie als present erkannt, und verify_packages (dpkg -l | grep '^ii'; gehalten = 'hi') meldet sie nach der Installation als fehlend.
+Vorbild im selben Modul: package_on_disk (k81) zählt jeden Zustand außer not-installed/config-files. Empfehlung: rocm-core-Check wie package_on_disk; für present/verify gehaltene ('hold ok installed') als installiert werten. Verhaltensänderung -> Test (test-writer). Nicht gegen Hardware geprüft.
+
+worker: Setup/Apt.pm -- _dpkg_status liefert jeden dpkg-Datensatz mit status/state/version; rocm-core-Altlinie zählt jeden Zustand außer not-installed/config-files (wie package_on_disk); present/at-release und package_installed/verify_packages zählen ii und hi (grep -q '^[hi]i'); iU/iF/hF/iHR/it/ri zählen nicht. Gehaltene Firmware in plan_inbox gilt als installiert. test-writer: t/17 +3, t/18 +4 Subtests, dpkg_l-Helfer, 22 AMD-Goldens nur grep-Zeile ^ii -> ^[hi]i. Rot gegen altes lib: t/18 Subtests 5,7 + rocm-core-Zustände, t/17 Subtests 31,33. prove -lr t/: Files=44, Tests=1889, PASS. Nicht gegen Hardware geprüft. Nebenfunde: k94, k95.
+
+Commit cd3ee557647656fab086fe8faffba84e6e32d73c (Count held packages as installed and any rocm-core on disk as the old ROCm line), main ff auf cd3ee55.
