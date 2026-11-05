@@ -8,6 +8,29 @@ use namespace::autoclean;
 
 extends 'Rex::GPU::NVIDIA::Setup::Apt';
 
+# Proxmox VE 9.2 (read-only on a live host, 2026-11-05, k88): os-release
+#   ID=debian VERSION_ID=13, kernel 7.0.14-20-pve, pve-firmware 3.18-6
+#   (candidate 3.18-9). apt-get -s install from the sources as this class
+#   writes them, none removed by either: debian-nonfree (nvidia-driver
+#   nvidia-smi libcuda1 linux-headers-$K, Debian 13 main contrib non-free
+#   non-free-firmware) 167 new, with firmware-nvidia-gsp 550.163.01-2;
+#   nvidia-cuda-repo debian13/x86_64 (nvidia-driver-cuda
+#   nvidia-kernel-open-dkms linux-headers-$K) 73 new, with
+#   firmware-nvidia-gsp 620.70.06-1.
+#   linux-headers-7.0.14-20-pve is no package; proxmox-headers-7.0.14-20-pve
+#     Provides it, and apt takes that.
+#   pve-firmware 3.18-6 to 3.18-9 Conflicts and Replaces
+#     firmware-amd-graphics, firmware-misc-nonfree, from 3.18-9 also
+#     firmware-nvidia-graphics -- never firmware-nvidia-gsp, whose files lie
+#     under lib/firmware/nvidia/<driver version>/; none of pve-firmware's
+#     588 files under nvidia/ is in such a directory.
+#   Debian 13 and CUDA debian13/x86_64 indexes (2026-11-05): neither source
+#     pulls firmware-nvidia-graphics (in Debian only firmware-misc-nonfree
+#     depends on it); the only firmware either pulls is firmware-nvidia-gsp.
+#   Not checked: whether the DKMS module builds against the Proxmox kernel
+#     (nor against any kernel that is not Debian's).
+#   So Proxmox VE is not refused here, unlike the AMD driver paths (k81).
+
 =method sources
 
 In this order:
@@ -533,6 +556,18 @@ for Debian (and every C<is_debian> host that is not Ubuntu): C<nvidia-driver>
 from Debian C<non-free>, or where that cannot drive the GPUs (Blackwell) the
 open-module set from NVIDIA's CUDA repository (L</sources>), on the apt
 layer L<Rex::GPU::NVIDIA::Setup::Apt>.
+
+Proxmox VE (C<pve-firmware> installed), which reports itself as Debian, is
+not refused here, unlike the AMD driver
+(L<Rex::GPU::AMD::Setup::Debian/host_unsupported>). On Proxmox VE 9.2
+(Debian 13) neither source conflicts with C<pve-firmware>: the only
+firmware they pull in, C<firmware-nvidia-gsp>, is not among its conflicts,
+and they share no file; Proxmox VE 8 (Debian 12) was not checked. The
+C<linux-headers-$(uname -r)> of
+L<Rex::GPU::NVIDIA::Setup::Apt/kernel_packages> is no package for a
+Proxmox kernel; apt installs C<proxmox-headers-$(uname -r)>, which provides
+it, and the DKMS module is then built against the Proxmox kernel. Whether
+it builds there is not tested.
 
 =head1 SEE ALSO
 

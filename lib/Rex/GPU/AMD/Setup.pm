@@ -580,8 +580,9 @@ The C<amdgpu-dkms> repository for this OS. Per OS class.
 Why no AMD driver may be installed on this host at all, whatever the
 method, or C<undef>: L</plan_inbox> and L</plan_dkms> ask it before any
 other check, L<Rex::GPU::AMD/install_driver> before it names a way out for
-GPUs whose hardware rows disagree. Here: C<undef>, without a host command;
-L<Rex::GPU::AMD::Setup::Debian> refuses a Proxmox VE host. Host-read-only.
+GPUs whose hardware rows disagree; L</install_rocm> does not. Here:
+C<undef>, without a host command; L<Rex::GPU::AMD::Setup::Debian> refuses
+a Proxmox VE host. Host-read-only.
 
 =method dkms_unsupported
 

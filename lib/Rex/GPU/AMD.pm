@@ -414,7 +414,12 @@ C</etc/apt/sources.list.d/amdrocm-stable.sources> exists with other
 content. Dies after the install if a package is not installed, or not at
 C<release>.
 
-The driver is not part of it: run L</install_driver> first.
+The driver is not part of it: run L</install_driver> first. On Proxmox VE
+(C<pve-firmware> installed) that installs no driver -- only a working
+C<amdgpu> passes it, as C<present> -- but C<install_rocm> is not refused
+there and runs as on the Debian release the host reports itself as:
+neither its packages nor what apt pulls in with them include a firmware
+package, so nothing conflicts with C<pve-firmware>.
 
 =cut
 

@@ -29,6 +29,12 @@ use lib "$Bin/lib";
 #     no package for (gfx906), no target at all, an unknown option; and, after
 #     only read-only commands: a non-apt OS (RHEL), an unsupported OS, a
 #     foreign repository file, a non-amd64 host;
+#   * Proxmox VE (k88; Debian 13 + pve-firmware on disk, kernel 7.0.14-20-pve)
+#     is NOT refused: install_rocm runs the same commands as on plain Debian
+#     13 (golden amd/debian-13--rocm-10.1--gfx1151--proxmox), installs only
+#     libatomic1 libquadmath0 amdrocm10.1-<gfx>, no firmware-* package, no
+#     `pkg:` line, never asks for pve-firmware, result `installed`. This pins
+#     EXISTING behavior (green against the code before k88 too);
 #   * a signing key that is not the pinned one dies; a package installed at
 #     another version than the release dies after the install.
 #
@@ -39,6 +45,11 @@ use lib "$Bin/lib";
 #     then runs on the GPU;
 #   * the shell behaviour of the key pipeline, printf quoting and dpkg-query
 #     format string (recorded, never evaluated);
+#   * Proxmox: that apt resolves those packages on a real PVE 9.2 (the Hub
+#     read `apt-get -s`: 0 Remv, no firmware-* package -- a live finding, not
+#     reproduced here), that ROCm then runs on the -pve kernel; the host
+#     answers (pve-firmware `install ok installed`, kernel 7.0.14-20-pve) are
+#     hand-written in the shape of t/17's pve_status;
 #   * RHEL: install_rocm is refused there; no rpm path exists to test.
 # -----------------------------------------------------------------------------
 
@@ -93,6 +104,25 @@ subtest 'install on Ubuntu 24.04 and Debian 13 (goldens)' => sub {
     ok($at_key < $at_install, '... and its fingerprint is read before anything is installed');
     golden_is(masked($rec), "amd/$os--rocm-10.1--gfx1151");
   }
+};
+
+subtest 'Proxmox VE is not refused: the Debian 13 commands, no firmware package (k88, golden)' => sub {
+  my $pve = [ qr{^dpkg-query -W -f='\$\{Status\}\\n' pve-firmware 2>/dev/null$} => 'install ok installed', 0 ];
+  my ( $rec, $how ) = rocm(rocm_host('debian-13', host => { kernel => '7.0.14-20-pve', responses => [ $pve ] }),
+    release => '10.1', targets => [ 'gfx1151' ]);
+  is($rec->{error}, undef, 'lives (no Proxmox refusal)');
+  is($how, 'installed', '... installed');
+  ok(no_pkg($rec), '... no Rex::Pkg call');
+  ok(!$rec->{trapped}, '... no unmocked Rex function reached');
+  my @install = grep { /apt-get .* install / } @{ $rec->{lines} };
+  is(scalar @install, 1, '... one apt-get install');
+  like($install[0], qr/ install -y libatomic1 libquadmath0 amdrocm10\.1-gfx1151\z/, '... exactly the extras and the target package');
+  ok(!( grep { /firmware-/ } @{ $rec->{lines} } ), '... no firmware-* package anywhere in the transcript');
+  ok(!( grep { /pve-firmware/ } @{ $rec->{lines} } ), '... pve-firmware is not even asked');
+  # the Debian 13 transcript with the Proxmox answers is the plain one, byte for byte
+  my ( $plain ) = rocm(rocm_host('debian-13'), release => '10.1', targets => [ 'gfx1151' ]);
+  is_deeply($rec->{lines}, $plain->{lines}, '... identical to plain Debian 13');
+  golden_is(masked($rec), 'amd/debian-13--rocm-10.1--gfx1151--proxmox');
 };
 
 subtest 'targets from gpus, from the running driver, deduplicated' => sub {

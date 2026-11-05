@@ -22,6 +22,13 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #     kernel/; pve-firmware Conflicts and Replaces firmware-amd-graphics, and
 #     apt-get -s install firmware-amd-graphics removes proxmox-ve,
 #     proxmox-default-kernel, proxmox-kernel-7.0 and pve-firmware.
+#   install_rocm on the same host (read-only, 2026-11-05, k88): apt-get -s
+#     install libatomic1 libquadmath0 amdrocm10.1-gfx1151 -gfx1100 -gfx942
+#     from the debian13 ROCm repository: 111 new, none removed, no firmware-*
+#     package. AMD's debian13 and debian12 indexes (2026-11-05): no package
+#     depends on or recommends a firmware package, and the Debian 13 closure
+#     (with recommends) of what they need from Debian holds none either. So
+#     install_rocm asks no host_unsupported.
 my %RELEASE = (
   '13' => { suite => 'noble', kernel => qr/\A6\.12\.\d+\+deb13(?:u\d+)?-amd64\z/,
             kernel_text => '6.12 (6.12.N+deb13-amd64)', rocm => 'debian13' },
@@ -45,11 +52,12 @@ L<Rex::GPU::AMD/install_rocm>.
 A reason when C<pve-firmware> is on disk
 (L<Rex::GPU::AMD::Setup::Apt/package_on_disk>: one C<dpkg-query>), else
 C<undef>: a Proxmox VE host, which reports itself as Debian (C<ID=debian>,
-C<VERSION_ID=13>). Both paths die on it before any change, also with a
-Debian kernel booted -- the package decides, not the kernel's name.
+C<VERSION_ID=13>). Both driver paths die on it before any change, also
+with a Debian kernel booted -- the package decides, not the kernel's name.
 C<pve-firmware> brings the amdgpu firmware itself and conflicts with
 C<firmware-amd-graphics>; apt would remove C<proxmox-ve> and the Proxmox
-kernel to install that.
+kernel to install that. L<Rex::GPU::AMD/install_rocm> does not ask it: it
+installs no firmware package, and runs on Proxmox VE too.
 
 =method inbox_unsupported
 
@@ -147,9 +155,10 @@ Instinct GPUs -- and GPUs whose row says no C<matrix>, or that have no row
 -- get C<amdgpu-dkms> or the inbox driver here.
 
 =item * B<Not on Proxmox VE> (L</host_unsupported>): with C<pve-firmware>
-installed both paths die before any change, also on a Debian kernel. A
-working C<amdgpu> of the Proxmox kernel is answered with C<present>, as
-everywhere.
+installed both driver paths die before any change, also on a Debian
+kernel. A working C<amdgpu> of the Proxmox kernel is answered with
+C<present>, as everywhere. ROCm is not refused there:
+L<Rex::GPU::AMD/install_rocm> installs no firmware package.
 
 =back
 
