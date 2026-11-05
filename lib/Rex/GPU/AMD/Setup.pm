@@ -569,6 +569,13 @@ The amdgpu driver release of the C<amdgpu-dkms> repository: C<31.60>.
 The signing key of C<repo.radeon.com> (primary key valid until 2028-08-21),
 with C<path> from L</amdgpu_key_path>.
 
+=method amdgpu_key_path
+
+Where L</install_key> puts L</amdgpu_key> and the L</dkms_repo> file points
+to it. Per OS class: C</etc/apt/keyrings/rocm.gpg> here, and so for
+L<Rex::GPU::AMD::Setup::Ubuntu> and L<Rex::GPU::AMD::Setup::Debian>;
+C</etc/pki/rpm-gpg/RPM-GPG-KEY-rocm> in L<Rex::GPU::AMD::Setup::RHEL>.
+
 =method dkms_repo
 
   { file => ..., content => ..., key => amdgpu_key }
