@@ -24,8 +24,8 @@ run: apt-get -o DPkg::Lock::Timeout=120 update -q
 run: LC_ALL=C apt-cache policy linux-headers-7.0.0-12-generic 2>/dev/null
 run: LC_ALL=C apt-cache policy amdgpu-dkms 2>/dev/null
 run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-7.0.0-12-generic amdgpu-dkms
-run: dpkg -l linux-headers-7.0.0-12-generic 2>/dev/null | grep -q '^ii'
-run: dpkg -l amdgpu-dkms 2>/dev/null | grep -q '^ii'
+run: dpkg -l linux-headers-7.0.0-12-generic 2>/dev/null | grep -q '^[hi]i'
+run: dpkg -l amdgpu-dkms 2>/dev/null | grep -q '^[hi]i'
 run: modinfo -n amdgpu 2>/dev/null
 run: dkms status -m amdgpu -k 7.0.0-12-generic 2>&1
 run: modprobe amdgpu

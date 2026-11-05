@@ -40,6 +40,7 @@ our @EXPORT_OK = qw(
   module_path
   os_kernel
   sequence
+  dpkg_l
   gpu_synapse
   gpu_mi300x
   gpu_navi31
@@ -136,6 +137,24 @@ sub sequence {
     my $item = $items[ $i < $#items ? $i++ : $#items ];
     return @$item;
   };
+}
+
+# dpkg_l(PKG => 'hi', ...) => Golden responses for the two forms of the check
+# the AMD apt layer has used, `dpkg -l PKG | grep -q '^ii'` (before k89) and
+# `... grep -q '^[hi]i'`, for a package in the given first-two-columns state of
+# `dpkg -l` ('ii' installed, 'hi' installed and held, 'iF' half-configured,
+# 'iU' unpacked, 'ri' ...): the host answers each grep as the real one would,
+# so a code version using either form sees the same host. Hand-written.
+sub dpkg_l {
+  my ( %state ) = @_;
+  my @r;
+  for my $pkg (sort keys %state) {
+    my $s = $state{$pkg};
+    push @r,
+      [ qr{^dpkg -l \Q$pkg\E 2>/dev/null \| grep -q '\^ii'$} => '', $s =~ /\Aii\z/ ? 0 : 1 ],
+      [ qr{^dpkg -l \Q$pkg\E 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', $s =~ /\A[hi]i\z/ ? 0 : 1 ];
+  }
+  return @r;
 }
 
 my %OS = (

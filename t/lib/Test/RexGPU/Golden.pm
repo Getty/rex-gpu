@@ -80,6 +80,8 @@ my @COMMON = (
   # driver scripts it present
   [ qr{^/sbin/ldconfig -p }                => '', 1 ],
   [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$} => '', 0 ],
+  # the AMD apt layer counts a held package (hi) as installed too (k89)
+  [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 0 ],
   [ q{rpm -q --qf '%{VERSION}' nvidia-driver 2>&1} => '580.95.05', 0 ],
   [ qr{^rpm -q (?:--whatprovides )?(\S+) 2>&1$} => 'installed', 0 ],
   [ 'uname -m'                             => 'x86_64', 0 ],

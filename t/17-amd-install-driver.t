@@ -59,6 +59,13 @@ use lib "$Bin/lib";
 #   * a working driver is answered with `present` before any Debian check: a
 #     Proxmox host with a working amdgpu gets only the state read (no
 #     pve-firmware query, no change);
+#   * held packages count as installed (k89, `hi` in dpkg -l): held firmware
+#     in plan_inbox is not installed again (Debian: only modprobe; Ubuntu: no
+#     apt-get), a half-configured one (`iF`) is installed; after a dkms
+#     install a held amdgpu-dkms passes verify_packages, a half-configured one
+#     (`iF`, `hF`) dies naming the package; the host answers `grep -q '^ii'`
+#     and `grep -q '^[hi]i'` as the real grep would (dpkg_l), so these are red
+#     against the code before k89 because of the rating;
 #   * these die with the first change already made but no driver installed:
 #     a key that is not the pinned one (a key directory is made and removed),
 #     a required package without a candidate (after apt-get update), and these
@@ -109,6 +116,10 @@ use lib "$Bin/lib";
 #     headers is likewise the format assumed, not captured. Whether a real
 #     mirror drops the headers of the running kernel, and whether `dnf
 #     repoquery` applies the excludes and modules of that host, is not tested;
+#   * the `hi` / `iF` answers of dpkg -l are hand-written in dpkg's format, not
+#     captured, and the `grep` itself is not evaluated (dpkg_l scripts what it
+#     would answer); the Ubuntu held-firmware case reuses the synapse inbox
+#     transcript shape and is not pinned as a golden;
 #   * what the remote shell does with a command: the key download pipeline, the
 #     printf quoting, the `grep -rsHE` over modprobe.d, the dearmor chain, are
 #     recorded verbatim and never evaluated -- a wrong quote or flag in them
@@ -121,7 +132,7 @@ use lib "$Bin/lib";
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw( record_host golden_is mutating_lines );
-use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x gpu_navi31 gpu_unknown sequence module_path os_kernel );
+use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x gpu_navi31 gpu_unknown sequence module_path os_kernel dpkg_l );
 use Rex::GPU::AMD;
 
 my $STATE_CMD = Rex::GPU::AMD->state_script;
@@ -295,8 +306,8 @@ subtest 'inbox on Ubuntu 24.04 kernel 7.0 (the Ryzen AI Max APU): firmware only 
   my $host = amd_host('ubuntu-24.04', kernel => $K, state => [ fresh('synapse'), working('synapse') ], module => 'inbox',
     responses => [
       # no firmware package installed yet; the first one is installed by the run
-      [ qr{^dpkg -l linux-firmware-amd-graphics 2>/dev/null \| grep -q '\^ii'$} => sequence([ '', 1 ], [ '', 0 ]), 0 ],
-      [ qr{^dpkg -l linux-firmware 2>/dev/null \| grep -q '\^ii'$} => '', 1 ],
+      [ qr{^dpkg -l linux-firmware-amd-graphics 2>/dev/null \| grep -q '\^\[hi\]i'$} => sequence([ '', 1 ], [ '', 0 ]), 0 ],
+      [ qr{^dpkg -l linux-firmware 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 1 ],
     ]);
   my ( $rec, $how ) = install($host, gpus => [ gpu_synapse() ]);
   is($rec->{error}, undef, 'lives');
@@ -422,7 +433,7 @@ sub debian_install {
 }
 # firmware-amd-graphics not installed before the run, installed after it
 sub firmware_missing {
-  return [ qr{^dpkg -l firmware-amd-graphics 2>/dev/null \| grep -q '\^ii'$} => sequence([ '', 1 ], [ '', 0 ]), 0 ];
+  return [ qr{^dpkg -l firmware-amd-graphics 2>/dev/null \| grep -q '\^\[hi\]i'$} => sequence([ '', 1 ], [ '', 0 ]), 0 ];
 }
 
 subtest 'inbox on Debian 12 and 13 with the release\'s own kernel: pve-firmware read, then firmware-amd-graphics (goldens)' => sub {
@@ -699,7 +710,7 @@ subtest 'inbox on RHEL 9, linux-firmware offered by no repository: dies before d
 
 subtest 'a package not installed afterwards (half-configured DKMS): dies, naming the package (golden)' => sub {
   my ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [
-    [ qr{^dpkg -l amdgpu-dkms 2>/dev/null \| grep -q '\^ii'$} => '', 1 ] ]);
+    [ qr{^dpkg -l amdgpu-dkms 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 1 ] ]);
   like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured/,
     'dies after the install');
   ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} }), '... no modprobe after a failed verify');
@@ -813,6 +824,52 @@ subtest 'no Rex::Pkg anywhere: not for the driver, not for the helpers' => sub {
   ok(no_pkg($rec), 'no pkg: line');
   ok(( grep { /^run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y --no-upgrade curl gnupg$/ } @{ $rec->{lines} }),
     'the missing helpers are installed with a direct apt-get, lock timeout set');
+};
+
+#### held and half-configured packages (k89)
+
+subtest 'a held firmware package is installed: inbox does not install it again (k89)' => sub {
+  my ( $rec, $how ) = debian_install('debian-13', responses => [ dpkg_l('firmware-amd-graphics' => 'hi') ]);
+  is($rec->{error}, undef, 'Debian 13, held firmware-amd-graphics: lives');
+  is($how, 'inbox', '... inbox');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [ 'run: modprobe amdgpu' ], '... the only change: modprobe amdgpu');
+  ok(!( grep { /apt-get .* install / } @{ $rec->{lines} } ), '... no apt-get install');
+  ok(( grep { m{^run: dpkg -l firmware-amd-graphics 2>/dev/null \| grep -q '\^\[hi\]i'$} } @{ $rec->{lines} } ), '... asked with the held-aware check');
+
+  # Ubuntu 24.04: either of the firmware packages, held
+  my $host = amd_host('ubuntu-24.04', kernel => '7.0.0-42-generic', state => [ fresh('synapse'), working('synapse') ], module => 'inbox',
+    responses => [ dpkg_l('linux-firmware-amd-graphics' => 'hi', 'linux-firmware' => 'un') ]);
+  ( $rec, $how ) = install($host, gpus => [ gpu_synapse() ]);
+  is($rec->{error}, undef, 'Ubuntu 24.04, held linux-firmware-amd-graphics: lives');
+  is($how, 'inbox', '... inbox');
+  ok(!( grep { /apt-get .* install / } @{ $rec->{lines} } ), '... no apt-get install');
+  ok(no_pkg($rec), '... no pkg: line');
+};
+
+subtest 'a half-configured firmware package is not installed: inbox installs it (k89)' => sub {
+  my ( $rec ) = debian_install('debian-13', responses => [ dpkg_l('firmware-amd-graphics' => 'iF') ]);
+  my @install = grep { /apt-get .* install -y / } @{ $rec->{lines} };
+  is(scalar @install, 1, 'one apt-get install');
+  like($install[0], qr/ install -y firmware-amd-graphics\z/, '... of firmware-amd-graphics');
+  like($rec->{error}, qr/\Afirmware-amd-graphics not installed after apt-get install/, '... and it is still not installed afterwards (the scripted host stays iF): dies');
+};
+
+subtest 'verify_packages after a dkms install: a held amdgpu-dkms passes, a half-configured one dies (k89)' => sub {
+  my ( $rec, $how ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => 'hi') ]);
+  is($rec->{error}, undef, 'held (hi) amdgpu-dkms: lives');
+  is($how, 'dkms', '... dkms');
+  ok(no_pkg($rec), '... verified by dpkg, not Rex::Pkg');
+  ok(( grep { m{^run: dpkg -l amdgpu-dkms 2>/dev/null \| grep -q '\^\[hi\]i'$} } @{ $rec->{lines} } ), '... via the held-aware check');
+
+  ( $rec, $how ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => 'ii') ]);
+  is($rec->{error}, undef, 'ii amdgpu-dkms: lives');
+
+  for my $state (qw( iF hF )) {
+    ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => $state) ]);
+    like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured/,
+      "$state: dies, naming the package");
+    ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} } ), '... no modprobe after a failed verify');
+  }
 };
 
 done_testing;

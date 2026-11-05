@@ -49,7 +49,8 @@ source carries it any more. Read-only.
 
 =method package_installed
 
-C<dpkg -l PKG | grep -q '^ii'>. Read-only.
+C<dpkg -l PKG | grep -q '^[hi]i'>: installed and configured, held (C<hi>)
+or not (C<ii>). Read-only.
 
 =method package_on_disk
 
@@ -72,9 +73,10 @@ packages, directly: never L<Rex::Commands::Pkg>.
 
 =method verify_packages
 
-Each of the plan's packages must be C<ii> in C<dpkg -l>; dies otherwise. A
-failed DKMS build makes C<amdgpu-dkms>'s post-install exit non-zero, which
-leaves it half-configured -- not C<ii>.
+Each of the plan's packages must be L</package_installed>, C<ii> or C<hi>
+in C<dpkg -l>; dies otherwise. A failed DKMS build makes C<amdgpu-dkms>'s
+post-install exit non-zero, which leaves it half-configured -- C<iF> (C<hF>
+when held), not C<ii> or C<hi>.
 
 =cut
 
@@ -103,7 +105,7 @@ sub has_candidate {
 
 sub package_installed {
   my ( $self, $package ) = @_;
-  $self->run_cmd("dpkg -l $package 2>/dev/null | grep -q '^ii'");
+  $self->run_cmd("dpkg -l $package 2>/dev/null | grep -q '^[hi]i'");
   return $? == 0 ? 1 : 0;
 }
 
@@ -198,14 +200,18 @@ sub place_key {
   my $how = $setup->install_rocm($rocm, \@targets);   # 'present' or 'installed'
 
 Host-read-only first: L</rocm_repo_dir> (dies without one), C<amd64>,
-C<dpkg-query> of C<rocm-core> (installed: dies -- AMD requires removing the
-old ROCm line first, and this never uninstalls) and of the target packages
-(all installed at the release: C<present>), the existing
+C<dpkg-query> of C<rocm-core> (in any state but C<not-installed> and
+C<config-files>, as L</package_on_disk> counts -- held, unpacked and
+half-configured too: dies; AMD requires removing the old ROCm line first,
+and this never uninstalls) and of the target packages (all installed and
+configured, held or not, at the release: C<present>; an unpacked or
+half-configured one is not), the existing
 C</etc/apt/sources.list.d/amdrocm-stable.sources> (other content: dies).
 Then L</prepare_host>, L</install_helpers>, the key to
 C</etc/apt/keyrings/amdrocm.gpg> (L<Rex::GPU::AMD::Setup/install_key>),
 the deb822 source AMD documents, L</refresh_index>, C<apt-get install> of
-the extra and target packages, and every one must be C<ii> at the release.
+the extra and target packages, and every one must pass
+L</verify_packages> and be installed at the release.
 
 =cut
 
@@ -220,12 +226,13 @@ sub install_rocm {
     unless $self->arch eq 'amd64';
   my @packages = map { $rocm->{package_prefix}.$_ } @$targets;
   my $status = $self->_dpkg_status('rocm-core', @packages);
-  if (my $old = $status->{'rocm-core'}) {
-    die "install_rocm: ROCm $old->{version} (rocm-core) is installed; AMD requires removing ROCm "
-      ."7.2.4 or older before installing ROCm $release, and install_rocm does not uninstall. "
-      ."Nothing was changed on the host\n";
+  my $old = $status->{'rocm-core'};
+  if (_on_disk($old)) {
+    die "install_rocm: ROCm ".( $old->{version} // 'of unknown version' )." (rocm-core) is "
+      ."$old->{state}; AMD requires removing ROCm 7.2.4 or older before installing ROCm $release, "
+      ."and install_rocm does not uninstall. Nothing was changed on the host\n";
   }
-  my $at_release = sub { my ( $s ) = @_; $s && index($s->{version}, "$release.") == 0 };
+  my $at_release = sub { my ( $s ) = @_; _installed($s) && index($s->{version}, "$release.") == 0 };
   unless (grep { !$at_release->($status->{$_}) } @packages) {
     Rex::Logger::info("ROCm $release already installed: ".join(', ', @packages));
     return 'present';
@@ -266,18 +273,36 @@ sub install_rocm {
   return 'installed';
 }
 
-# { package => { version => ... } } for every one of @packages dpkg has
-# installed ("install ok installed"); read-only.
+# { package => { status => 'WANT EFLAG STATE', state => STATE, version => ... } }
+# for every one of @packages dpkg has a record of, in any state (k89: the
+# rocm-core check and the present check count them differently); version is
+# undef for not-installed. Read-only.
 sub _dpkg_status {
   my ( $self, @packages ) = @_;
   my $out = $self->run_cmd(q{dpkg-query -W -f='${Package} ${Status} ${Version}\n' }
     .join(' ', @packages).' 2>/dev/null') // '';
   my %status;
   for my $line (split /\r?\n/, $out) {
-    next unless $line =~ /\A(\S+) install ok installed (\S+)\z/;
-    $status{$1} = { version => $2 };
+    next unless $line =~ /\A(\S+) (\S+ \S+ (\S+))(?: (\S+))?\s*\z/;
+    # one line per architecture dpkg has a record for: a record on disk is
+    # never replaced by one that is not
+    next if _on_disk($status{$1});
+    $status{$1} = { status => $2, state => $3, version => $4 };
   }
   return \%status;
+}
+
+# On disk in any state but not-installed and config-files, as package_on_disk
+# counts (k89).
+sub _on_disk {
+  my ( $s ) = @_;
+  return $s && $s->{state} ne 'not-installed' && $s->{state} ne 'config-files' ? 1 : 0;
+}
+
+# Installed and configured, held or not (k89).
+sub _installed {
+  my ( $s ) = @_;
+  return $s && $s->{status} =~ /\A(?:install|hold) ok installed\z/ ? 1 : 0;
 }
 
 sub _trim {
@@ -295,7 +320,8 @@ B<Experimental.> The apt/dpkg layer under L<Rex::GPU::AMD::Setup::Ubuntu>
 and L<Rex::GPU::AMD::Setup::Debian>, with the driver path's apt rules
 (karr #37, as in L<Rex::GPU::NVIDIA::Setup::Apt>): the apt timers stopped
 before the first C<apt-get>, a dpkg lock timeout on every C<apt-get>, the
-install run directly and C<dpkg -l ^ii> as the only evidence. And
+install run directly and C<dpkg -l> (C<ii>, or C<hi> when held) as the
+only evidence. And
 L</install_rocm>, which is apt-only.
 
 =head1 SEE ALSO

@@ -36,7 +36,22 @@ use lib "$Bin/lib";
 #     `pkg:` line, never asks for pve-firmware, result `installed`. This pins
 #     EXISTING behavior (green against the code before k88 too);
 #   * a signing key that is not the pinned one dies; a package installed at
-#     another version than the release dies after the install.
+#     another version than the release dies after the install;
+#   * the dpkg state counts (k89), by maintainer decision:
+#       - rocm-core in ANY state but not-installed and config-files is the old
+#         line and dies before any change: held (`hold ok installed`),
+#         `install ok unpacked`, `install ok half-configured`, `install
+#         reinstreq half-installed`; `deinstall ok config-files` (rc) and
+#         `unknown ok not-installed` do not die (the install runs);
+#       - `present` needs every target package installed AND configured at the
+#         release, held (`hold ok installed`) or not: only read-only commands;
+#         an unpacked, half-configured or half-installed one is not present
+#         (the install runs);
+#       - after the install a held package (`hi` in dpkg -l) passes
+#         verify_packages and the version check; a half-configured one (`iF`)
+#         dies. The host answers `grep -q '^ii'` and `grep -q '^[hi]i'` as the
+#         real grep would (dpkg_l), so these fail against the code before k89
+#         for the rating, not for a missing mock line.
 #
 # NOT covered -- scripted host, hand-written output:
 #   * whether stable.repo.amd.com serves those package names and versions
@@ -51,10 +66,16 @@ use lib "$Bin/lib";
 #     answers (pve-firmware `install ok installed`, kernel 7.0.14-20-pve) are
 #     hand-written in the shape of t/17's pve_status;
 #   * RHEL: install_rocm is refused there; no rpm path exists to test.
+#   * the k89 states: the dpkg-query / `dpkg -l` answers for held, unpacked,
+#     half-configured and half-installed packages are hand-written in dpkg's
+#     documented format, not captured; the `grep` in `dpkg -l PKG | grep -q
+#     '^[hi]i'` is never evaluated by a shell here (dpkg_l scripts what it
+#     would answer); the cases `un`, `ri`, `hF` etc. beyond those named above
+#     are not each tested; not a real dpkg on a held or interrupted host.
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw( record_host golden_is mutating_lines );
-use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x sequence );
+use Test::RexGPU::AMD qw( amd_host amd_state gpu_synapse gpu_mi300x sequence dpkg_l );
 use Rex::GPU::AMD;
 
 my $STATE_CMD = Rex::GPU::AMD->state_script;
@@ -166,6 +187,75 @@ subtest 'present: every package at the release, nothing changed' => sub {
   is($how, 'installed', 'one of two packages missing: installed');
 };
 
+subtest 'present: held target packages count as installed (k89)' => sub {
+  my $host = amd_host('ubuntu-24.04', responses => [
+    [ $QUERY => 'amdrocm10.1-gfx1151 hold ok installed 10.1.0-35', 0 ] ]);
+  my ( $rec, $how ) = rocm($host, release => '10.1', targets => [ 'gfx1151' ]);
+  is($rec->{error}, undef, 'lives');
+  is($how, 'present', 'a held package at the release: present');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only commands ran');
+  ok(!( grep { /apt-get|curl|\.sources/ } @{ $rec->{lines} } ), '... no apt-get, no download, no repository file');
+
+  # held and not held, both at the release
+  $host = amd_host('ubuntu-24.04', responses => [
+    [ $QUERY => "amdrocm10.1-gfx942 install ok installed 10.1.0-35\namdrocm10.1-gfx1151 hold ok installed 10.1.0-35", 0 ] ]);
+  ( $rec, $how ) = rocm($host, release => '10.1', targets => [ 'gfx942', 'gfx1151' ]);
+  is($how, 'present', 'one held, one not: present');
+  is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only commands ran');
+
+  # held, but at another release: not present
+  $host = rocm_host('ubuntu-24.04', before => 'amdrocm10.1-gfx1151 hold ok installed 9.0.0-1');
+  ( $rec, $how ) = rocm($host, release => '10.1', targets => [ 'gfx1151' ]);
+  is($how, 'installed', 'held at another version: not present, installed');
+};
+
+subtest 'present: a half-installed target package is not present (k89)' => sub {
+  for my $c ([ 'install ok unpacked', 'unpacked' ], [ 'install ok half-configured', 'half-configured' ],
+             [ 'install reinstreq half-installed', 'half-installed' ], [ 'hold ok half-configured', 'held half-configured' ]) {
+    my ( $status, $label ) = @$c;
+    my ( $rec, $how ) = rocm(rocm_host('ubuntu-24.04', before => "amdrocm10.1-gfx1151 $status 10.1.0-35"),
+      release => '10.1', targets => [ 'gfx1151' ]);
+    is($rec->{error}, undef, "$label: lives");
+    is($how, 'installed', '... not present: the install runs');
+    ok(( grep { /apt-get .* install -y .*amdrocm10\.1-gfx1151\z/ } @{ $rec->{lines} } ), '... with apt-get install of the target');
+  }
+
+  # one held, one half-configured: not present
+  my ( $rec, $how ) = rocm(rocm_host('ubuntu-24.04', packages => [ 'amdrocm10.1-gfx942', 'amdrocm10.1-gfx1151' ],
+      before => "amdrocm10.1-gfx942 hold ok installed 10.1.0-35\namdrocm10.1-gfx1151 install ok half-configured 10.1.0-35"),
+    release => '10.1', targets => [ 'gfx942', 'gfx1151' ]);
+  is($how, 'installed', 'one held, one half-configured: not present');
+};
+
+subtest 'after the install: a held package passes verify, a half-configured one dies (k89)' => sub {
+  # held before and after the install: dpkg -l says hi
+  my ( $rec, $how ) = rocm(rocm_host('ubuntu-24.04', responses => [
+      dpkg_l('amdrocm10.1-gfx1151' => 'hi'),
+      [ $QUERY => sequence([ '', 0 ], [ 'amdrocm10.1-gfx1151 hold ok installed 10.1.0-35', 0 ]), 0 ] ]),
+    release => '10.1', targets => [ 'gfx1151' ]);
+  is($rec->{error}, undef, 'a held target package after the install: lives');
+  is($how, 'installed', '... installed');
+  ok(no_pkg($rec), '... verified by dpkg, not Rex::Pkg');
+  ok(( grep { m{^run: dpkg -l amdrocm10\.1-gfx1151 2>/dev/null \| grep -q '\^\[hi\]i'$} } @{ $rec->{lines} } ), '... via the held-aware check');
+
+  # a plain ii package still passes
+  ( $rec, $how ) = rocm(rocm_host('ubuntu-24.04', responses => [ dpkg_l('amdrocm10.1-gfx1151' => 'ii') ]),
+    release => '10.1', targets => [ 'gfx1151' ]);
+  is($rec->{error}, undef, 'ii: lives');
+
+  # half-configured (iF) after the install: both checks say no
+  for my $state (qw( iF hF iU )) {
+    ( $rec ) = rocm(rocm_host('ubuntu-24.04', responses => [ dpkg_l('amdrocm10.1-gfx1151' => $state) ]),
+      release => '10.1', targets => [ 'gfx1151' ]);
+    like($rec->{error}, qr/\Aamdrocm10\.1-gfx1151 not installed after apt-get install/, "$state: dies, naming the package");
+  }
+
+  # an extra package (libatomic1) held is fine too
+  ( $rec ) = rocm(rocm_host('ubuntu-24.04', responses => [ dpkg_l('libatomic1' => 'hi') ]),
+    release => '10.1', targets => [ 'gfx1151' ]);
+  is($rec->{error}, undef, 'a held extra package: lives');
+};
+
 #### refusals
 
 subtest 'an older ROCm line (rocm-core 7.2.4) is refused; nothing is changed (golden)' => sub {
@@ -177,6 +267,41 @@ subtest 'an older ROCm line (rocm-core 7.2.4) is refused; nothing is changed (go
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], 'no command that changes the host');
   ok(!( grep { /remove|purge|apt-get/ } @{ $rec->{lines} } ), '... nothing removed, no apt-get at all');
   golden_is(masked($rec), 'amd/ubuntu-24.04--rocm-10.1--old-rocm-core');
+};
+
+subtest 'rocm-core in any dpkg state but not-installed / config-files is the old line: refused (k89)' => sub {
+  my $VER = '7.2.4.70204-1';
+  for my $c ([ 'hold ok installed', 'installed', 'held' ], [ 'install ok unpacked', 'unpacked', 'unpacked' ],
+             [ 'install ok half-configured', 'half-configured', 'half-configured' ],
+             [ 'install reinstreq half-installed', 'half-installed', 'half-installed' ],
+             [ 'hold ok half-configured', 'half-configured', 'held and half-configured' ]) {
+    my ( $status, $state, $label ) = @$c;
+    my $host = amd_host('ubuntu-24.04', responses => [
+      [ $QUERY => "rocm-core $status $VER\namdrocm10.1-gfx1151 install ok installed 10.1.0-35", 0 ] ]);
+    my ( $rec, $how ) = rocm($host, release => '10.1', targets => [ 'gfx1151' ]);
+    like($rec->{error}, qr/\Ainstall_rocm: ROCm \Q$VER\E \(rocm-core\) is \Q$state\E; AMD requires removing ROCm 7\.2\.4 or older before installing ROCm 10\.1, and install_rocm does not uninstall\. Nothing was changed on the host\n?\z/,
+      "$label: dies, naming version and state");
+    is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... no command that changes the host');
+    ok(!( grep { /remove|purge|apt-get/ } @{ $rec->{lines} } ), '... nothing removed, no apt-get at all');
+  }
+
+  # dies before the present check, whatever the target packages say
+  my $host = amd_host('ubuntu-24.04', responses => [
+    [ $QUERY => "rocm-core hold ok installed $VER", 0 ] ]);
+  my ( $rec ) = rocm($host, release => '10.1', targets => [ 'gfx1151' ]);
+  like($rec->{error}, qr/\(rocm-core\) is installed; AMD requires removing/, 'held rocm-core with no target package: dies');
+
+  # rc (config files left) and never-installed are not the old line: the install runs
+  for my $c ([ 'deinstall ok config-files', 'config-files, rc' ], [ 'unknown ok not-installed', 'not-installed' ]) {
+    my ( $status, $label ) = @$c;
+    my ( $rec2, $how ) = rocm(rocm_host('ubuntu-24.04', before => "rocm-core $status $VER"),
+      release => '10.1', targets => [ 'gfx1151' ]);
+    is($rec2->{error}, undef, "$label: lives");
+    is($how, 'installed', '... the install runs');
+  }
+  my ( $rec3, $how3 ) = rocm(rocm_host('ubuntu-24.04', before => "rocm-core unknown ok not-installed "),
+    release => '10.1', targets => [ 'gfx1151' ]);
+  is($how3, 'installed', 'not-installed with an empty version column (dpkg-query for a known-but-removed name): installed');
 };
 
 subtest 'arguments that die before any command' => sub {
@@ -255,7 +380,7 @@ subtest 'a package installed at another version than the release: dies after the
   my ( $rec ) = rocm(rocm_host('ubuntu-24.04', version => '7.9.0-1'), release => '10.1', targets => [ 'gfx1151' ]);
   like($rec->{error}, qr/\Ainstall_rocm: amdrocm10\.1-gfx1151 is installed at 7\.9\.0-1, not ROCm 10\.1\n?\z/, 'dies naming both');
 
-  ( $rec ) = rocm(rocm_host('ubuntu-24.04', responses => [ [ qr{^dpkg -l amdrocm10\.1-gfx1151 2>/dev/null \| grep -q '\^ii'$} => '', 1 ] ]),
+  ( $rec ) = rocm(rocm_host('ubuntu-24.04', responses => [ [ qr{^dpkg -l amdrocm10\.1-gfx1151 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 1 ] ]),
     release => '10.1', targets => [ 'gfx1151' ]);
   like($rec->{error}, qr/\Aamdrocm10\.1-gfx1151 not installed after apt-get install/, 'a package dpkg does not show as installed: dies');
   ok(no_pkg($rec), '... verified by dpkg, not Rex::Pkg');

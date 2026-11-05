@@ -24,7 +24,10 @@ Revision history for Rex-GPU
     gpus => with the dGPUs.
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
     =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
-    (apt only). gpus => [] is refused.
+    (apt only) and dies before any change when rocm-core of an older ROCm
+    line is on the host, also held (apt-mark hold) or half installed. On
+    apt hosts a held package counts as installed for the driver, firmware
+    and ROCm checks; a half installed one does not. gpus => [] is refused.
   - gpu_setup installs the AMD driver for ROCm-capable discrete AMD GPUs;
     an APU only with the new option amd_integrated => 1; amd => or
     set gpu_amd_class picks a custom class. Rex::GPU->can('amd_class') is
