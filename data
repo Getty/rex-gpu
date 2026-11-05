@@ -1,0 +1,40 @@
+---
+class: standard
+completed: 2026-11-05T12:59:52Z
+created: 2026-11-04T01:48:29Z
+id: 88
+priority: medium
+started: 2026-11-05T12:42:53Z
+status: done
+tags:
+- amd
+- nvidia
+- debian
+- risk
+title: 'Proxmox VE: install_rocm und NVIDIA::Setup::Debian ohne Proxmox-Schutz (ungeprüft)'
+updated: 2026-11-05T13:00:02Z
+---
+
+Nebenfund aus k81 (worker). k81 weist Proxmox VE (pve-firmware auf der Platte) nur in den AMD-Treiberpfaden ab (Setup::Debian::host_unsupported in plan_inbox/plan_dkms). Ungeprüft offen:
+- AMD install_rocm auf Proxmox: zieht amdrocm10.1-* (oder libatomic1/libquadmath0) ein firmware-*-Paket nach, das mit pve-firmware kollidiert? apt-get install -y würde Entfernungen durchziehen. Prüfen auf PVE: apt-get -s install amdrocm10.1-gfx1151.
+- NVIDIA::Setup::Debian auf Proxmox: nvidia-driver hängt an firmware-nvidia-gsp; kollidiert pve-firmware damit? Außerdem linux-headers-$(uname -r), das es für einen -pve-Kernel nicht gibt (dort proxmox-headers-*). Prüfen auf PVE: apt-get -s install nvidia-driver firmware-nvidia-gsp.
+Erst Befund auf einem PVE-Host (nur lesend, apt-get -s), dann Entscheidung Maintainer, ob abweisen wie k81.
+
+2026-11-05 12:42 Befund Hub (perl-developer-a8) auf kaiser, Proxmox VE 9.2, Kernel 7.0.14-20-pve, pve-firmware 3.18-6 (Kandidat 3.18-9). Nur lesend: apt-get -s mit eigener Quellliste, Listen und Cache in einem Temp-Verzeichnis (danach gelöscht), dpkg-Status nur gelesen. Die Quellen je Pfad so, wie der Code sie einträgt.
+- install_rocm (Debian 13 + stable.repo.amd.com/rocm/core/packages/debian13): libatomic1 libquadmath0 amdrocm10.1-gfx1151/-gfx1100/-gfx942 → 111 Inst, 0 Remv, kein firmware-*-Paket.
+- NVIDIA non-free (Debian 13 main contrib non-free non-free-firmware): nvidia-driver nvidia-smi libcuda1 linux-headers-$(uname -r) → 167 Inst, 0 Remv; firmware-nvidia-gsp 550.163.01-2 kommt mit, kollidiert nicht.
+- NVIDIA CUDA-Repo (debian13/x86_64): nvidia-driver-cuda nvidia-kernel-open-dkms linux-headers-$(uname -r) → 73 Inst, 0 Remv; firmware-nvidia-gsp 620.70.06-1.
+- linux-headers-7.0.14-20-pve gibt es nicht als Paket, aber proxmox-headers-7.0.14-20-pve hat Provides: linux-headers-7.0.14-20-pve; apt wählt es selbst.
+- pve-firmware Conflicts/Replaces (3.18-6 bis 3.18-9): firmware-amd-graphics, firmware-misc-nonfree, ab 3.18-9 auch firmware-nvidia-graphics; nie firmware-nvidia-gsp.
+- Dateien: firmware-nvidia-gsp legt nach lib/firmware/nvidia/<Treiberversion>/ ab (550.163.01, 620.70.06); pve-firmware hat 588 Dateien unter nvidia/, keinen versionierten Ordner, Überschneidung 0.
+- kaiser hat non-free nicht aktiv (main contrib non-free-firmware); enable_nonfree würde es eintragen.
+Offen, nicht geprüft: ob Debians nvidia-kernel-dkms 550 gegen den Proxmox-Kernel 7.0 baut. Das gilt für jeden Kernel außerhalb Debians, nicht nur für Proxmox.
+Festlegung Hub: keine Proxmox-Abweisung für install_rocm und NVIDIA::Setup::Debian, denn die k81-Begründung (apt entfernt proxmox-ve) trifft nicht zu. Umsetzung: POD-Grenze festhalten und mit Tests absichern, kein Verhalten. Auftrag: perl-developer/docs/rex-karten-2026-11-04/rex-gpu-k88-auftrag.md
+
+2026-11-05 Umsetzung (Worktree k88-proxmox-boundary, Branch worktree-k88-proxmox-boundary). Kein Verhalten geändert: lib/ nur POD und Kommentare (Code ohne POD/Kommentare identisch mit fc97b7a). POD: Rex::GPU::AMD install_rocm (läuft auf Proxmox, kein Firmware-Paket; Abweisung nur für install_driver), Rex::GPU::AMD::Setup host_unsupported (install_rocm fragt es nicht), Rex::GPU::AMD::Setup::Debian host_unsupported + DESCRIPTION (both driver paths; ROCm nicht abgewiesen), Rex::GPU::NVIDIA::Setup::Debian DESCRIPTION (Proxmox nicht abgewiesen, keine Quelle kollidiert mit pve-firmware, linux-headers-K über Provides von proxmox-headers-K, DKMS-Bau gegen PVE-Kernel ungeprüft). README unverändert (Z. 82 spricht nur über install_driver). Kommentare: Live-Befund oben in NVIDIA/Setup/Debian.pm, install_rocm-Zeile im k81-Block von AMD/Setup/Debian.pm. Tests: t/18-amd-rocm.t neuer Subtest (Proxmox nicht abgewiesen, Golden amd/debian-13--rocm-10.1--gfx1151--proxmox), neu t/96-golden-driver-proxmox.t (Ada non-free + Blackwell CUDA-Repo, Goldens driver/debian-13--{ada,blackwell}--proxmox, linux-headers-7.0.14-20-pve). Halten bestehendes Verhalten fest, kein Rot-Beleg. prove -lr t/: Files=44, Tests=1882, Result: PASS. Nicht gegen Hardware gelaufen.
+
+Offen/Empfehlung (Worker, nicht blockierend): Die NVIDIA-POD begrenzt die Aussage auf Proxmox VE 9.2 (Debian 13) und sagt 'Proxmox VE 8 (Debian 12) was not checked' (dort andere Pakete: Treiber 535, CUDA-Repo debian12, anderes pve-firmware). Empfehlung: einmal apt-get -s auf einem PVE-8-Host, dann den Satz anpassen oder streichen. Zusatzprüfung des Workers nur lesend über die öffentlichen Paketindizes (kein Zielhost): ROCm debian13/debian12 ohne Firmware-Abhängigkeit; Debian-13- und CUDA-debian13-Index ziehen kein firmware-nvidia-graphics (pve-firmware 3.18-9 konfliktet damit), nur firmware-nvidia-gsp. Weiter offen: ob der DKMS-Bau gegen Kernel 7.0-pve gelingt.
+
+Commit-fertig: lib/ nur POD+Kommentare, t/ neue Tests + 3 Goldens; prove -lr t/ PASS (Files=44 Tests=1882). Weiter an rex-gpu-release-manager.
+
+Committet f76035708bda997f03bc1ba37af382faed8a8cb7 (Document that install_rocm and the Debian NVIDIA driver run on Proxmox VE (k88)); main per ff-only von fc97b7a auf f760357 vorgespult, nicht gepusht. Changes unverändert (kein Verhalten geändert; der AMD-Eintrag ordnet die Proxmox-Abweisung nur install_driver zu). Nebenfund toter POD-Link amdgpu_key_path → k93 (backlog).
