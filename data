@@ -1,0 +1,34 @@
+---
+claimed_at: 2026-11-05T23:47:12Z
+claimed_by: k89-k93
+class: standard
+completed: 2026-11-05T23:47:12Z
+created: 2026-11-04T02:53:06Z
+id: 92
+priority: low
+started: 2026-11-05T23:17:14Z
+status: done
+tags:
+- docs
+- pod
+title: POD trägt noch ältere karr-#NN-Verweise (NVIDIA, Detect, AMD::Setup::Apt)
+updated: 2026-11-05T23:47:13Z
+---
+
+Fund bei der k82-POD-Nacharbeit (Hub-Regel: POD, README, Changes und Meldungen ohne karr-/kNN-Verweise; Karte nur im Commit-Betreff; Codekommentare bleiben).
+
+Stand main 92d871b, POD-Zeilen mit karr-Verweis (die vier k82-Stellen werden gerade entfernt):
+- lib/Rex/GPU/AMD/Setup/Apt.pm:37 (karr #37), :184 (karr #38 pattern), :296 (karr #37)
+- lib/Rex/GPU/Detect.pm:857 (karr #55)
+- lib/Rex/GPU/NVIDIA.pm:94 (karr #24), :219 (karr #56), :322 (karr #55)
+- lib/Rex/GPU/NVIDIA/Requirement.pm:99 (karr #45, #54), :113 (karr #55), :167 (karr #45, #54), :213 (karr #72), :221 (karr #55)
+- lib/Rex/GPU/NVIDIA/Setup.pm:151 (karr #49), :161 (karr #56)
+- lib/Rex/GPU/NVIDIA/Setup/Debian.pm:69 (epic karr #25), :257 (karr #41)
+- lib/Rex/GPU/NVIDIA/Setup/SUSE.pm:94 (karr #6)
+README: keine. Changes: nur 'k76' im veröffentlichten 0.004-Eintrag (Z. 79) -- Historie, nicht ändern.
+
+Empfehlung: in einem Doku-Commit (worker, nur POD) die Verweise streichen, Sätze sonst unverändert; podchecker-Zahl darf nicht steigen. Ein Teil der NVIDIA-Verweise steht in veröffentlichter POD (0.005) -- trotzdem streichen, nur Wortlaut.
+
+worker: 17 POD-Verweise in 7 Dateien entfernt (Detect, NVIDIA, NVIDIA/Requirement, NVIDIA/Setup, NVIDIA/Setup/Debian, NVIDIA/Setup/SUSE, AMD/Setup/Apt), Sätze sonst unverändert; nur POD (18+/18-), Codekommentare und veröffentlichtes Changes unberührt. Nachprüfung: kein karr-Verweis mehr in Quell- und gebauter POD. podchecker gebauter POD: Zahlen unverändert (Apt.pm 1 Fehler = rocm_repo_dir-Link, k96). prove -lr t/: 44/1889 PASS.
+
+Commit 327374778e31de216ceeb5493357d7ea56a22d22 (Drop card references from the NVIDIA, Detect and AMD apt POD), main ff auf 3273747.
