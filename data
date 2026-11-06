@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-06T19:30:01Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T19:30:01Z
+created: 2026-11-06T18:57:39Z
+id: 99
+priority: low
+started: 2026-11-06T19:21:12Z
+status: done
+tags:
+- skill
+- agent
+- drift
+title: rex-gpu-core Skill und worker-Agent nennen noch dpkg -l grep '^ii' als Verify-Form
+updated: 2026-11-06T19:30:01Z
+---
+
+Drift aus k94 (2026-11-06). Seit k89 (AMD) und k94 (NVIDIA) prüfen beide apt-Layer mit dpkg -l PKG | grep -q '^[hi]i' (gehaltene Pakete zählen, halb konfigurierte nicht). .claude/skills/rex-gpu-core/SKILL.md Z. 122 und .claude/agents/rex-gpu-worker.md Z. 47 nennen noch '^ii'. Skill-Text ist Lane des Teams (nicht vom Hauptagenten). Fertig, wenn beide die '^[hi]i'-Form und die Regel (hi zählt, iF/hF/iU nicht) nennen.
+
+Skill rex-gpu-core und worker-Agent nennen jetzt dpkg -l PKG | grep -q '^[hi]i' und die Regel: hi zählt, iF/hF/iU nicht. Belegt gegen NVIDIA Setup/Apt.pm, Debian.pm, Ubuntu.pm, AMD Setup/Apt.pm, NVIDIA.pm _toolkit_present. Keine weiteren Stellen im Skill oder in den Agenten. Kein Code, kein Changes-Eintrag.
+
+Commit 4a5695c (main per ff). Kein Changes-Eintrag.
