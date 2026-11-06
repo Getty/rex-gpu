@@ -575,33 +575,65 @@ C<x86_64> (C<amd64> in L<Rex::GPU::AMD::Setup::Apt>).
 
 =method refresh_index
 
+Refreshes the package index, so that L</has_candidate> sees what the
+package sources carry now; L</prepare_source> ends with it. Nothing here,
+and so in L<Rex::GPU::AMD::Setup::RHEL> (dnf fetches the metadata it lacks
+itself); L<Rex::GPU::AMD::Setup::Apt/refresh_index>: C<apt-get update -q>.
+
 =method has_candidate
 
   $setup->has_candidate($package);
+
+True if C<$package> has an installation candidate -- already installed, or
+installable from the host's package sources. Here: always true, without a
+host command; L<Rex::GPU::AMD::Setup::Apt/has_candidate> and
+L<Rex::GPU::AMD::Setup::RHEL/has_candidate> ask the package manager.
 
 =method package_installed
 
   $setup->package_installed($package);
 
+True if C<$package> is installed. Here: always false, without a host
+command; L<Rex::GPU::AMD::Setup::Apt/package_installed> (C<dpkg -l>) and
+L<Rex::GPU::AMD::Setup::RHEL/package_installed> (C<rpm -q>) ask the
+package database.
+
 =method package_held
 
   $setup->package_held($package);
 
+True if C<$package> is on hold, so that the package manager does not
+change it (apt: C<apt-mark hold>). Here: always false, without a host
+command, and so in L<Rex::GPU::AMD::Setup::RHEL>;
+L<Rex::GPU::AMD::Setup::Apt/package_held> reads dpkg's selection. Only
+L</post_install> asks.
+
 =method install_helpers
+
+Installs C<curl> and C<gpg> when they are missing -- L</install_key> needs
+both; L</prepare_source> runs it before the signing key of a repository.
+Nothing here; L<Rex::GPU::AMD::Setup::Apt/install_helpers> and
+L<Rex::GPU::AMD::Setup::RHEL/install_helpers> install them.
 
 =method install_packages
 
+  $setup->install_packages($plan);
+
+Installs the plan's C<packages> directly, never through
+L<Rex::Commands::Pkg>; whether they went in is for L</verify_packages>,
+which L</install> runs next. Dies here: the base class has no packaging
+layer (L<Rex::GPU::AMD::Setup::Apt/install_packages>: C<apt-get install>,
+L<Rex::GPU::AMD::Setup::RHEL/install_packages>: C<dnf install>).
+
 =method verify_packages
 
-The packaging layer, implemented by L<Rex::GPU::AMD::Setup::Apt> and
-L<Rex::GPU::AMD::Setup::RHEL>: refresh the package index, does a package
-have an installation candidate -- already installed, or installable from
-the host's package sources (here: assumed yes) --, is it installed, is it
-on hold (the package manager does not change it; here: no, without a host
-command, and so on RHEL; only L</post_install> asks), install C<curl> and
-C<gpg> when missing, install the plan's packages (directly, never through
-L<Rex::Commands::Pkg>) and verify every one of them installed (dies
-otherwise).
+  $setup->verify_packages($plan);
+
+Dies unless every one of the plan's C<packages> is installed, as the
+package database reports it -- not the installer's exit status. Dies here,
+whatever the plan: the base class has no packaging layer
+(L<Rex::GPU::AMD::Setup::Apt/verify_packages>: C<dpkg -l>,
+L<Rex::GPU::AMD::Setup::RHEL/verify_packages>: C<rpm -q>).
 
 =cut
 
@@ -701,20 +733,46 @@ Where AMD supports the Radeon GPUs, for messages: Ubuntu 26.04 (GA kernel
 
 =method kernel_header_packages
 
+The running kernel's header packages, which C<amdgpu-dkms> is built
+against: L</plan_dkms> requires them. None here; C<linux-headers-KERNEL>
+in L<Rex::GPU::AMD::Setup::Ubuntu> and L<Rex::GPU::AMD::Setup::Debian>,
+C<kernel-headers-KERNEL>, C<kernel-devel-KERNEL> and (9, 10)
+C<kernel-devel-matched-KERNEL> in L<Rex::GPU::AMD::Setup::RHEL>.
+
 =method optional_packages
+
+Packages installed with C<amdgpu-dkms> only if they have a candidate:
+L</plan_dkms> lists them, L</resolve_plan> keeps those that have one. None
+here, and so in L<Rex::GPU::AMD::Setup::Debian> and
+L<Rex::GPU::AMD::Setup::RHEL>; C<linux-modules-extra-KERNEL> on Ubuntu
+24.04 and 22.04.
 
 =method firmware_packages
 
+The amdgpu firmware packages for the inbox driver, alternatives: none is
+needed if one of them is installed (L</plan_inbox>), else the first with a
+candidate is installed (L</resolve_plan>; it dies if none has one). None
+here, so no firmware package is checked or installed;
+L<Rex::GPU::AMD::Setup::Ubuntu>, L<Rex::GPU::AMD::Setup::Debian> and
+L<Rex::GPU::AMD::Setup::RHEL> name theirs in their DESCRIPTION.
+
 =method inbox_module_packages
+
+The packages that bring C<amdgpu.ko> to a running kernel without it:
+L</plan_inbox> requires them then (and dies if there are none),
+L</fallback_method> picks C<inbox> when one of them has a candidate. None
+here, and so in L<Rex::GPU::AMD::Setup::Debian> and
+L<Rex::GPU::AMD::Setup::RHEL>; in L<Rex::GPU::AMD::Setup::Ubuntu> its
+L</optional_packages> (C<linux-modules-extra-KERNEL> on 24.04 and 22.04).
 
 =method rocm_repo_dir
 
-The packages of this OS: the running kernel's headers for DKMS; packages
-installed with DKMS only if they have a candidate; the firmware packages
-for the inbox driver, alternatives -- none needed if one is installed, else
-the first with a candidate; the package that brings C<amdgpu.ko> to a
-kernel without it; the ROCm repository directory (C<ubuntu2404>, ...) for
-L<Rex::GPU::AMD/install_rocm>, C<undef> where there is none. Empty here.
+The directory of AMD's ROCm repository for this OS release
+(C<ubuntu2404>, C<debian13>, ...), for L<Rex::GPU::AMD/install_rocm>:
+L<Rex::GPU::AMD::Setup::Apt/install_rocm> builds the repository's C<URIs>
+from it and dies without one. C<undef> where there is none: here, and so
+in L<Rex::GPU::AMD::Setup::RHEL>; L<Rex::GPU::AMD::Setup::Ubuntu> and
+L<Rex::GPU::AMD::Setup::Debian> take it from their C<release_data>.
 
 =method install_rocm
 
