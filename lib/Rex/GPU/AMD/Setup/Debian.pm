@@ -11,7 +11,8 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #   ROCm 10.1 compatibility matrix (Instinct): Debian 13 kernel 6.12, Debian
 #     12 kernel 6.1.0; no Radeon and no Ryzen APU support on Debian. Both
 #     die here, with either driver: radeon_unsupported and
-#     inbox_only_unsupported are inherited from Rex::GPU::AMD::Setup (k82).
+#     inbox_only_unsupported are inherited from Rex::GPU::AMD::Setup (k82);
+#     install_rocm refuses their gfx targets with them too (k91).
 #   amdgpu 31.60 install guide, Debian: the Ubuntu repository of
 #     repo.radeon.com, suite noble for Debian 13 and jammy for Debian 12;
 #     linux-headers-$K.
@@ -158,7 +159,9 @@ Instinct GPUs -- and GPUs whose row says no C<matrix>, or that have no row
 installed both driver paths die before any change, also on a Debian
 kernel. A working C<amdgpu> of the Proxmox kernel is answered with
 C<present>, as everywhere. ROCm is not refused there:
-L<Rex::GPU::AMD/install_rocm> installs no firmware package.
+L<Rex::GPU::AMD/install_rocm> installs no firmware package, and refuses
+only what it refuses on any Debian -- the gfx targets of the Radeon GPUs
+and the Ryzen APUs, which AMD's matrix does not list on Debian.
 
 =back
 

@@ -18,6 +18,7 @@ extends 'Rex::GPU::AMD::Setup::Apt';
 #     followed, so an APU on 6.14 dies before any change. The Radeon list
 #     binds every GPU of the Radeon table (matrix => 'radeon'), whatever
 #     the method (k82): a Radeon on 24.04 GA 6.8 or 22.04 GA 5.15 dies.
+#     install_rocm binds the Radeon and Ryzen APU targets the same way (k91).
 #   amdgpu 31.60 install guide (instinct.docs.amd.com/projects/amdgpu-docs,
 #     docs-31.60.0): suites resolute/noble/jammy; linux-headers-$K, and on
 #     24.04/22.04 linux-modules-extra-$K.
@@ -55,7 +56,9 @@ Kernels are the C<MAJOR.MINOR> of a C<-generic> C<uname -r>
 (C<7.0.0-42-generic>), from the ROCm 10.1 compatibility matrix. The
 C<amdgpu-dkms> kernels are the Instinct table's; the Radeon GPUs
 (C<matrix =E<gt> 'radeon'>) are bound to their own, for C<inbox> and
-C<amdgpu-dkms> alike (L</radeon_unsupported>).
+C<amdgpu-dkms> alike (L</radeon_unsupported>). The Radeon and inbox-only
+columns bind the gfx targets of those GPUs for
+L<Rex::GPU::AMD/install_rocm> too.
 
 =method kernel_series
 

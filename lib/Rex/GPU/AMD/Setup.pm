@@ -268,6 +268,44 @@ sub check_radeon {
   return;
 }
 
+=method check_rocm_matrix
+
+  $setup->check_rocm_matrix(\@targets);   # gfx target names, lowercase
+
+Host-read-only: dies, naming them, for the gfx targets whose
+L<Rex::GPU::AMD/hardware_class> row says C<matrix =E<gt> 'radeon'> unless
+L</radeon_unsupported> is empty, then for those whose row says
+C<matrix =E<gt> 'ryzen'> (the Ryzen APUs) unless
+L</inbox_only_unsupported> is -- the releases and kernels
+L<Rex::GPU::AMD/install_driver> binds these GPUs to. A C<matrix =E<gt>
+'instinct'> target and a target without C<matrix> -- no row, a
+C<compute =E<gt> 0> target, a row of your own written without the field
+-- are not checked. The running kernel is read only for a C<radeon> or
+C<ryzen> target. Asked by L<Rex::GPU::AMD::Setup::Apt/install_rocm> after
+its C<present> check, before any change.
+
+=cut
+
+# k91: AMD's matrix binds ROCm as it binds the driver (k82), in the order of
+# plan_inbox and plan_dkms: the Radeon check first, then the Ryzen APUs'.
+sub check_rocm_matrix {
+  my ( $self, $targets ) = @_;
+  my $hardware = $self->amd->hardware_class;
+  my %table;
+  for my $gfx (@$targets) {
+    my $row = $hardware->target($gfx) or next;
+    push @{ $table{ $row->{matrix} } }, $gfx if defined $row->{matrix};
+  }
+  for my $check ([ radeon => 'radeon_unsupported' ], [ ryzen => 'inbox_only_unsupported' ]) {
+    my ( $matrix, $unsupported ) = @$check;
+    my $gfx = $table{$matrix} or next;
+    my $why = $self->$unsupported // next;
+    die "install_rocm: AMD's ROCm compatibility matrix does not list ".join(', ', @$gfx)
+      .' for this OS and kernel: '.$why.". Nothing was changed on the host\n";
+  }
+  return;
+}
+
 =method fallback_method
 
 For GPUs without a hardware row (L<Rex::GPU::AMD/install_driver> with
@@ -610,9 +648,10 @@ own C<amd64> kernel.
 
 Why a GPU AMD supports only with the inbox driver (the Ryzen APUs) is not
 supported on this OS release and kernel, or C<undef>. Asked by
-L</plan_inbox> and by L<Rex::GPU::AMD/install_driver> for GPUs whose
-hardware rows disagree; host-read-only. Here: always a reason -- AMD
-supports them only on Ubuntu (L</inbox_only_supported>).
+L</plan_inbox>, by L<Rex::GPU::AMD/install_driver> for GPUs whose
+hardware rows disagree and by L</check_rocm_matrix> for their gfx targets;
+host-read-only. Here: always a reason -- AMD supports them only on Ubuntu
+(L</inbox_only_supported>).
 
 =method inbox_only_supported
 
@@ -625,7 +664,8 @@ compatibility matrix).
 Why a GPU of the Radeon table of AMD's ROCm compatibility matrix
 (C<matrix =E<gt> 'radeon'>) is not supported on this OS release and
 kernel, or C<undef> when it is -- for C<inbox> and C<amdgpu-dkms> alike.
-Asked by L</check_radeon>; host-read-only. Here: always a reason -- AMD
+Asked by L</check_radeon> and, for their gfx targets, by
+L</check_rocm_matrix>; host-read-only. Here: always a reason -- AMD
 lists the Radeon GPUs only on Ubuntu and RHEL (L</radeon_supported>);
 L<Rex::GPU::AMD::Setup::Debian> inherits it (no Radeon on Debian),
 L<Rex::GPU::AMD::Setup::Ubuntu> and L<Rex::GPU::AMD::Setup::RHEL> bind it

@@ -4,6 +4,7 @@
 run: cat /etc/os-release 2>/dev/null
 run: dpkg --print-architecture
 run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' rocm-core amdrocm10.1-gfx1151 2>/dev/null
+run: uname -r
 run: cat /etc/apt/sources.list.d/amdrocm-stable.sources 2>/dev/null
 run: systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 run: command -v curl >/dev/null 2>&1

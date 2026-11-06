@@ -1,9 +1,9 @@
-# golden: amd/debian-13--rocm-10.1--gfx1151--proxmox
+# golden: amd/debian-13--rocm-10.1--gfx942--proxmox
 # Host interactions Rex::GPU emits, in order. Regenerate with
 # REX_GPU_GOLDEN_UPDATE=1 prove -l t/ -- and read the diff.
 run: cat /etc/os-release 2>/dev/null
 run: dpkg --print-architecture
-run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' rocm-core amdrocm10.1-gfx1151 2>/dev/null
+run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' rocm-core amdrocm10.1-gfx942 2>/dev/null
 run: cat /etc/apt/sources.list.d/amdrocm-stable.sources 2>/dev/null
 run: systemctl stop unattended-upgrades apt-daily.service apt-daily-upgrade.service 2>/dev/null || true
 run: command -v curl >/dev/null 2>&1
@@ -23,8 +23,8 @@ Signed-By: /etc/apt/keyrings/amdrocm.gpg
 Enabled: yes
 ' > /etc/apt/sources.list.d/amdrocm-stable.sources.tmp && chmod 0644 /etc/apt/sources.list.d/amdrocm-stable.sources.tmp && mv -f /etc/apt/sources.list.d/amdrocm-stable.sources.tmp /etc/apt/sources.list.d/amdrocm-stable.sources
 run: apt-get -o DPkg::Lock::Timeout=120 update -q
-run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y libatomic1 libquadmath0 amdrocm10.1-gfx1151
+run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y libatomic1 libquadmath0 amdrocm10.1-gfx942
 run: dpkg -l libatomic1 2>/dev/null | grep -q '^[hi]i'
 run: dpkg -l libquadmath0 2>/dev/null | grep -q '^[hi]i'
-run: dpkg -l amdrocm10.1-gfx1151 2>/dev/null | grep -q '^[hi]i'
-run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' amdrocm10.1-gfx1151 2>/dev/null
+run: dpkg -l amdrocm10.1-gfx942 2>/dev/null | grep -q '^[hi]i'
+run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' amdrocm10.1-gfx942 2>/dev/null

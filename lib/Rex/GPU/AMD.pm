@@ -431,17 +431,37 @@ Dies before anything is changed on the host for anything else, for a
 release or target AMD ships no package for, for both C<gpus> and
 C<targets>, for an empty C<gpus>, for a GPU without C<gfx_target>, when the old ROCm line is
 installed (C<rocm-core>: AMD requires removing ROCm 7.2.4 or older first;
-C<install_rocm> never uninstalls), and when
+C<install_rocm> never uninstalls), for a Radeon or Ryzen APU target AMD's
+matrix does not list for the host's release and kernel (below), and when
 C</etc/apt/sources.list.d/amdrocm-stable.sources> exists with other
 content. Dies after the install if a package is not installed, or not at
 C<release>.
 
+AMD's compatibility matrix binds the Radeon GPUs and the Ryzen APUs to
+releases and kernels, and C<install_rocm> follows it as L</install_driver>
+does. Unless every package is already installed (C<present>, checked
+first), it dies before any change for a target whose L</hardware_class>
+row says C<matrix =E<gt> 'radeon'> outside the releases and kernels of
+L<Rex::GPU::AMD::Setup/radeon_unsupported> (Ubuntu 26.04 GA kernel 7.0,
+24.04 HWE kernel 7.0, 22.04 HWE kernel 6.8, all C<-generic>; no Debian
+release), then for one with C<matrix =E<gt> 'ryzen'> outside those of
+L<Rex::GPU::AMD::Setup/inbox_only_unsupported> (Ubuntu 26.04 GA kernel 7.0
+and 24.04 HWE kernel 7.0, C<-generic>; not 22.04, no Debian release),
+reading the running kernel for it. The row is looked up by gfx target,
+whether the targets came from C<targets>, C<gpus> or the KFD nodes. A
+C<matrix =E<gt> 'instinct'> target needs nothing beyond the OS list above;
+a target without C<matrix> -- no row (C<gfx1250>), a C<compute =E<gt> 0>
+target (C<gfx1010>-C<gfx1012>, C<gfx1031>-C<gfx1036>), a row of your own
+written without the field -- is not checked
+(L<Rex::GPU::AMD::Setup/check_rocm_matrix>).
+
 The driver is not part of it: run L</install_driver> first. On Proxmox VE
 (C<pve-firmware> installed) that installs no driver -- only a working
 C<amdgpu> passes it, as C<present> -- but C<install_rocm> is not refused
-there and runs as on the Debian release the host reports itself as:
-neither its packages nor what apt pulls in with them include a firmware
-package, so nothing conflicts with C<pve-firmware>.
+there and runs as on the Debian release the host reports itself as (so not
+for a Radeon or Ryzen APU target, above): neither its packages nor what
+apt pulls in with them include a firmware package, so nothing conflicts
+with C<pve-firmware>.
 
 =cut
 
@@ -830,7 +850,7 @@ sub setup_for {
 
 B<Experimental.> The class L</install_driver> and L</verify_amd> ask for a
 GPU's gfx target, C<compute>, C<integrated>, supported C<driver> and AMD
-C<matrix> table:
+C<matrix> table, and L</install_rocm> for each target's C<matrix>:
 L<Rex::GPU::AMD::Hardware>. Override it in a subclass to use your own rows.
 
 =method normalize_slot

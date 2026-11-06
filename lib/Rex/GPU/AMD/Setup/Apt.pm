@@ -205,8 +205,11 @@ C<config-files>, as L</package_on_disk> counts -- held, unpacked and
 half-configured too: dies; AMD requires removing the old ROCm line first,
 and this never uninstalls) and of the target packages (all installed and
 configured, held or not, at the release: C<present>; an unpacked or
-half-configured one is not), the existing
-C</etc/apt/sources.list.d/amdrocm-stable.sources> (other content: dies).
+half-configured one is not), then -- only when not C<present> --
+L<Rex::GPU::AMD::Setup/check_rocm_matrix> (a Radeon or Ryzen APU target
+outside the releases and kernels AMD's matrix lists for it: dies), the
+existing C</etc/apt/sources.list.d/amdrocm-stable.sources> (other content:
+dies).
 Then L</prepare_host>, L</install_helpers>, the key to
 C</etc/apt/keyrings/amdrocm.gpg> (L<Rex::GPU::AMD::Setup/install_key>),
 the deb822 source AMD documents, L</refresh_index>, C<apt-get install> of
@@ -237,6 +240,9 @@ sub install_rocm {
     Rex::Logger::info("ROCm $release already installed: ".join(', ', @packages));
     return 'present';
   }
+  # k91: after present (an install at the release is never refused), before
+  # any change.
+  $self->check_rocm_matrix($targets);
 
   my $key = { url => $rocm->{key_url}, fingerprint => $rocm->{key_fingerprint},
               path => '/etc/apt/keyrings/amdrocm.gpg' };
