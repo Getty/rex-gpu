@@ -66,12 +66,12 @@ Options:
 
 =item C<reboot>
 
-If true, the host is rebooted immediately after driver installation.
-The function waits up to 5 minutes for the host to come back (polling
-every 5 seconds via SSH reconnect; the host counts as back once
-C<echo ok> run over the new connection prints C<ok>), then continues with
-verification.
-Default: C<0>.
+If true, the host is rebooted immediately after driver installation and
+waited for: 20 seconds, then up to 60 SSH reconnects 5 seconds apart (over
+5 minutes in all) until C<echo ok> run over the new connection prints
+C<ok> from the new boot (a changed C<boot_id>, where it was readable
+before); then verification goes on. If the host does not come back,
+C<install_driver> dies. Default: C<0>.
 
 Rebooting is required on the first deployment when the C<nouveau>
 open-source driver was previously loaded, because nouveau must be
@@ -1781,7 +1781,8 @@ sub _reboot_and_wait {
   # Wait long enough for the system to actually go down
   sleep 20;
 
-  # Poll until SSH comes back (up to 5 minutes)
+  # Poll until the new boot answers: up to 60 tries 5 s apart (with the 20 s
+  # above, over 5 minutes in all)
   my $conn = Rex::get_current_connection()->{conn};
   my $back = 0;
   for my $i (1..60) {

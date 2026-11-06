@@ -146,9 +146,12 @@ removes or replaces a driver.
 Then -- also when nothing had to be installed -- C<amdgpu> is loaded with
 C<modprobe amdgpu> if it was not loaded before. If it was, or if the GPUs
 are still not usable, only a reboot can activate the driver: with
-C<reboot =E<gt> 1> the host is rebooted and waited for (up to about 5
-minutes, see L</reboot_and_wait>), and the driver must then be usable or it
-dies; without it a warning says so and the method is returned.
+C<reboot =E<gt> 1> the host is rebooted and waited for (20 seconds, then up
+to 60 reconnects 5 seconds apart, over 5 minutes in all, until C<echo ok>
+answers from the new boot -- a changed C<boot_id>, where it was readable
+before; it dies if the host does not come back, see L</reboot_and_wait>),
+and the driver must then be usable or it dies; without it a warning says so
+and the method is returned.
 
 Dies -- B<before anything is changed on the host> -- for an unknown option,
 a malformed or empty C<gpus>, a GPU that is not on the host, a host
@@ -171,9 +174,10 @@ blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
 non-x86_64 host, Secure Boot enabled (the DKMS module would need a MOK
 enrolled at the console), or an existing repository file of other content.
-Dies before any package is installed, but after the apt timers are stopped
-and C<apt-get update> ran (apt) and, for C<dkms>, with AMD's signing key
-and repository file in place (a re-run accepts them), when a package the
+Dies before any driver package is installed, but after the apt timers are
+stopped and C<apt-get update> ran (apt) and, for C<dkms>, with C<curl> and
+C<gpg> installed where they were missing and AMD's signing key and
+repository file in place (a re-run accepts them), when a package the
 install needs has no candidate -- neither installed nor offered by the
 host's package sources: for C<dkms> the running kernel's headers (the
 message then says to upgrade the kernel and reboot: usually the mirror has
