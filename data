@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-06T18:45:52Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T18:45:52Z
+created: 2026-11-05T23:29:26Z
+id: 95
+priority: low
+started: 2026-11-06T18:29:01Z
+status: done
+tags:
+- amd
+- dkms
+- message
+title: 'AMD dkms: gehaltenes amdgpu-dkms -- post_install-Meldung nennt den Hold nicht'
+updated: 2026-11-06T18:45:52Z
+---
+
+Nebenfund aus k89 (rex-gpu-worker). Seit k89 besteht ein gehaltenes amdgpu-dkms (hi) verify_packages. apt-get install -y lässt ein gehaltenes Paket aus (Exit wird ignoriert), danach stirbt post_install mit 'dkms reports no amdgpu module built ...', wenn für den laufenden Kernel kein Modul gebaut ist. Der Fehler wird also gemeldet, aber weder diese Meldung noch die alte (Hinweis auf make.log) nennt die eigentliche Ursache, den Hold. Idee: in plan_dkms/post_install einen Hold (dpkg-query ${Status} 'hold ...') erkennen und benennen. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
+
+worker (lib/): Prüfung in post_install (dkms-Zweig), nur auf dem Fehlerweg: kein Modul gebaut + package_held('amdgpu-dkms') -> Meldung nennt den Hold und 'apt-mark unhold amdgpu-dkms', make.log-Hinweis als Rückfall. Ohne Hold Meldung wörtlich wie bisher. Neue Methode package_held (Basis: 0 ohne Host-Befehl, RHEL unverändert; Apt: dpkg-query ${Status} beginnt mit 'hold '), POD. Nicht plan_dkms, weil dort Repo/Index fehlen und ein Hold auf der Kandidatenversion mit fehlenden Headern heute funktioniert (dkms-Hook baut). Offen, nicht umgesetzt (Hub-Vorgabe 'Hold nennen'): Hold auf der Kandidatenversion ist nicht die Ursache, die Meldung nennt ihn trotzdem zuerst; genauer wäre ein apt-cache-policy-Vergleich Installed/Candidate. Nicht erfasst: 'hold ok not-installed' und Hold auf Fremdversion + fehlendes Header-Paket sterben weiter in verify_packages ohne Hold-Hinweis. prove grün, kein Golden bewegt. Nicht gegen Hardware geprüft. Tests: test-writer läuft.
+
+test-writer: neu t/17-amd-dkms-held.t (Ubuntu 24.04, Debian 13/12: gehalten + kein Modul -> volle neue Meldung wörtlich, eine dpkg-query; hold ok not-installed zählt; ohne Hold alte Meldung wörtlich; gehalten + Modul gebaut -> lebt, keine dpkg-query; RHEL 9 alte Meldung, keine dpkg-query). Rot gegen main-lib (vom Hauptagenten nachgestellt): 7 von 9 failen (1-4 alte Meldung statt Hold; 5-7 dpkg-query lief 0 statt 1 Mal), 8-9 auch alt grün. prove -lr t/: Files=47, Tests=1924, PASS. Kein Golden bewegt.
+
+Commit bc805a94cf6b8a9cb962a01498abbbb9b73ea9b3 (Name a held amdgpu-dkms when the DKMS module is missing (k95)); main per ff nachgezogen.
