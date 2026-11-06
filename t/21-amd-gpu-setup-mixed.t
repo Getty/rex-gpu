@@ -31,14 +31,25 @@ use lib "$Bin/lib";
 #   * $Rex::GPU::AMD::GPU_SETUP is true inside install_driver only, false
 #     inside verify_amd, and false after gpu_setup -- also when install_driver
 #     died; install_driver gets exactly gpus => [...], reboot => 0|1;
-#   * the early dies (Proxmox) keep their message under gpu_setup.
+#   * the early dies (Proxmox) keep their message under gpu_setup;
+#   * k104: install_driver called directly ends an abort on "Nothing was
+#     changed on the host\n" (true of it alone); under gpu_setup, where
+#     gpu_detect and the NVIDIA steps may have changed the host before it, the
+#     same abort ends on "Nothing was changed for the AMD GPU\n" (one GPU
+#     passed) or "... for the AMD GPUs\n" (several), after the NVIDIA steps
+#     ran in order on a mixed NVIDIA + AMD host with the REAL AMD install_driver;
+#   * k104: a die of install_driver that is an object, or a string with another
+#     last sentence, reaches the gpu_setup caller unchanged, and the flag is
+#     undef after it.
 #
 # NOT covered -- scripted host, hand-written output:
 #   * the state script in a real shell, a real amdgpu / KFD; the Ubuntu
 #     24.04 / 22.04 answers are the hand-written profiles of Test::RexGPU::AMD
 #     (kernel strings guessed there);
 #   * that the advised way out works on a host: gpu_setup without
-#     amd_integrated skipping the APU is t/15's dispatch, with recorders.
+#     amd_integrated skipping the APU is t/15's dispatch, with recorders;
+#   * the NVIDIA steps of the mixed host are recorders here: that they changed
+#     a host is what the message says, not something this test shows.
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw( record_host mutating_lines );
@@ -53,7 +64,8 @@ my $STATE = 'run: '.Rex::GPU::AMD->state_script;
 my $A = 'AMD GPU 0000:95:00.0 [1002:1586] (gfx1151)';
 my $B = 'AMD GPU 0000:c1:00.0 [1002:74a1] (gfx942)';
 my $HEAD = qr/\Ainstall_driver: AMD supports \Q$A\E only with the inbox driver and \Q$B\E with amdgpu-dkms, and one amdgpu drives every GPU of a host\. /;
-my $TAIL = qr/Nothing was changed on the host\n?\z/;
+my $TAIL = qr/Nothing was changed on the host\n?\z/;          # install_driver called directly
+my $GTAIL = qr/Nothing was changed for the AMD GPUs\n?\z/;       # under gpu_setup (k104), two GPUs; \n? because record_host chomps
 my $LEAVE = "Leave out gpu_setup's amd_integrated => 1 to give the driver to $B only; gpu_setup then skips $A with a warning. Or call Rex::GPU::AMD->install_driver directly instead of gpu_setup: ";
 
 my %BROKEN = (
@@ -122,21 +134,21 @@ sub clean {
 subtest 'gpu_setup: the inbox driver carries the APU -- gpu_setup ways out, then method => inbox' => sub {
   my $rec = run_on(host('ubuntu-24.04', kernel => '7.0.0-42-generic'));
   ok(!$rec->{trapped}, 'no unmocked Rex function reached');
-  like($rec->{error}, qr/$HEAD\Q${LEAVE}pass method => 'inbox' to drive all of them with the inbox driver. \E$TAIL/,
-    'dies with the whole message');
+  like($rec->{error}, qr/$HEAD\Q${LEAVE}pass method => 'inbox' to drive all of them with the inbox driver. \E$GTAIL/,
+    'dies with the whole message, ending "for the AMD GPUs"');
   unlike($rec->{error}, qr/Pass gpus|no way out/, '... no dead-end note');
   clean($rec, 'HWE 7.0');
 };
 
 subtest 'gpu_setup: the inbox driver does NOT carry the APU -- reason, then gpus' => sub {
   my $rec = run_on(host('ubuntu-22.04'));
-  like($rec->{error}, qr/$HEAD\Q${LEAVE}method => 'inbox' is no way out on this host for $A: \E.*Ubuntu 22\.04.*\Q Pass gpus => with $B only to leave $A out. \E$TAIL/s,
+  like($rec->{error}, qr/$HEAD\Q${LEAVE}method => 'inbox' is no way out on this host for $A: \E.*Ubuntu 22\.04.*\Q Pass gpus => with $B only to leave $A out. \E$GTAIL/s,
     'Ubuntu 22.04: both gpu_setup ways out, the reason, gpus =>');
   unlike($rec->{error}, qr/pass method => 'inbox'/i, '... no method => inbox advice');
   clean($rec, 'Ubuntu 22.04');
 
   $rec = run_on(host('ubuntu-24.04', kernel => '7.0.0-42-generic'), class => 'Test::InboxUnsupportedAMD');
-  like($rec->{error}, qr/$HEAD\Q${LEAVE}method => 'inbox' is no way out on this host: the inbox amdgpu is not allowed on this test host. Pass gpus => with $B only to leave $A out. \E$TAIL/,
+  like($rec->{error}, qr/$HEAD\Q${LEAVE}method => 'inbox' is no way out on this host: the inbox amdgpu is not allowed on this test host. Pass gpus => with $B only to leave $A out. \E$GTAIL/,
     'only inbox_unsupported: "no way out on this host: <reason>", then gpus =>');
   clean($rec, 'inbox_unsupported');
 };
@@ -155,7 +167,7 @@ subtest 'install_driver directly: the message of before k90, no gpu_setup in it'
 
 subtest 'the guard: an inbox-only GPU that is not an APU gets no amd_integrated advice' => sub {
   my $rec = run_on(host('ubuntu-24.04', kernel => '7.0.0-42-generic'), class => 'Test::NotAPUAMD');
-  like($rec->{error}, qr/$HEAD\QCall Rex::GPU::AMD->install_driver directly instead of gpu_setup: pass method => 'inbox' to drive all of them with the inbox driver. \E$TAIL/,
+  like($rec->{error}, qr/$HEAD\QCall Rex::GPU::AMD->install_driver directly instead of gpu_setup: pass method => 'inbox' to drive all of them with the inbox driver. \E$GTAIL/,
     'the addition starts with "Call Rex::GPU::AMD->install_driver directly instead of gpu_setup: "');
   unlike($rec->{error}, qr/amd_integrated|Leave out/, '... no amd_integrated advice');
   clean($rec, 'not an APU');
@@ -195,6 +207,79 @@ subtest 'the flag: set in install_driver only, reset after gpu_setup, arguments 
     else {
       is_deeply(\@flag, [ [ install_driver => 1 ], [ verify_amd => undef ] ], '... verify_amd sees the flag false');
     }
+  }
+};
+
+subtest 'k104: install_driver directly -- an abort ends "Nothing was changed on the host" (not a regression)' => sub {
+  my $rec = record_host(host => amd_host('debian-13', state => $BOTH, responses => [ [ $PVE->[0] => 'install ok installed', 0 ] ]),
+    subs => { detect_mocks() },
+    code => sub { Rex::GPU::AMD->install_driver(gpus => [ gpu_mi300x() ]) });
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  like($rec->{error}, qr/\Ainstall_driver: this is a Proxmox VE host.* Nothing was changed on the host\z/s,
+    'Proxmox abort: ends on "Nothing was changed on the host" (record_host chomps the newline)');
+  unlike($rec->{error}, qr/for the AMD GPU/, '... not rewritten');
+};
+
+# gpu_setup on a mixed host: NVIDIA recorders, REAL AMD install_driver.
+sub mixed_setup {
+  my ( $host, $amd_gpus, %o ) = @_;
+  my @order;
+  my $nv = { name => 'NVIDIA Test GPU', compute => 1 };
+  my %rec = map { my $s = $_; ( "Rex::GPU::NVIDIA::$s" => sub { push @order, $s; 1 } ) }
+    qw( install_driver install_container_toolkit generate_cdi_specs configure_containerd verify_nvidia );
+  my $rec = record_host(host => $host,
+    subs => {
+      'Rex::GPU::gpu_detect'        => sub { return { nvidia => [ $nv ], nvswitch => [], amd => [ @$amd_gpus ] } },
+      'Rex::GPU::_check_connection' => sub { return },
+      %rec,
+    },
+    code => sub { Rex::GPU::gpu_setup(amd_integrated => 1, containerd_config => 'rke2') });
+  return ( $rec, \@order );
+}
+
+my @NV_STEPS = qw( install_driver install_container_toolkit generate_cdi_specs configure_containerd verify_nvidia );
+
+subtest 'k104: gpu_setup, NVIDIA + one AMD GPU -- the AMD abort says "for the AMD GPU"' => sub {
+  my ( $rec, $order ) = mixed_setup(
+    amd_host('debian-13', state => $BOTH, responses => [ [ $PVE->[0] => 'install ok installed', 0 ] ]),
+    [ gpu_mi300x() ]);
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  is_deeply($order, \@NV_STEPS, 'the NVIDIA steps ran first, in order');
+  like($rec->{error}, qr/\Ainstall_driver: this is a Proxmox VE host/, 'the real AMD install_driver aborted (Proxmox)');
+  like($rec->{error}, qr/ Nothing was changed for the AMD GPU\z/, 'ends on "Nothing was changed for the AMD GPU" (record_host chomps the newline)');
+  unlike($rec->{error}, qr/on the host/, '... no "on the host"');
+};
+
+subtest 'k104: gpu_setup, NVIDIA + two AMD GPUs -- the AMD abort says "for the AMD GPUs"' => sub {
+  my ( $rec, $order ) = mixed_setup(host('ubuntu-24.04', kernel => '7.0.0-42-generic'),
+    [ gpu_synapse(), gpu_mi300x() ]);
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  is_deeply($order, \@NV_STEPS, 'the NVIDIA steps ran first, in order');
+  like($rec->{error}, qr/$HEAD/, 'the real _die_mixed_drivers message');
+  like($rec->{error}, qr/\Q gpu_setup's amd_integrated\E/, '... with the gpu_setup advice');
+  like($rec->{error}, qr/ Nothing was changed for the AMD GPUs\z/, 'ends on "Nothing was changed for the AMD GPUs" (record_host chomps the newline)');
+  unlike($rec->{error}, qr/on the host/, '... no "on the host"');
+  is($Rex::GPU::AMD::GPU_SETUP, undef, 'the flag is undef after gpu_setup');
+};
+
+subtest 'k104: other dies of install_driver pass through gpu_setup unchanged' => sub {
+  my @gpus = ( gpu_synapse(), gpu_mi300x() );
+  my $obj = bless { why => 'x' }, 'Test::AMDDie';
+  my $other = "install_driver: amdgpu is not usable after the reboot: x\n";
+  my $tail  = "install_driver: something. Nothing was changed on the host, really\n";
+  for my $case ( [ object => $obj ], [ 'other last sentence' => $other ], [ 'tail not at the end' => $tail ] ) {
+    my ( $label, $die ) = @$case;
+    my $caught;   # own eval: record_host chomps its error, which would hide a changed newline
+    my $rec = record_host(host => host('ubuntu-24.04'),
+      subs => {
+        detect_mocks(@gpus),
+        'Rex::GPU::AMD::install_driver' => sub { die $die },
+      },
+      code => sub { eval { Rex::GPU::gpu_setup(amd_integrated => 1); 1 } or $caught = $@; 1 });
+    ok(!$rec->{trapped}, "$label: no unmocked Rex function reached");
+    if (ref $die) { is($caught, $die, "$label: the very same object") }
+    else          { is($caught, $die, "$label: the identical string, newline included") }
+    is($Rex::GPU::AMD::GPU_SETUP, undef, "$label: the flag is undef after gpu_setup");
   }
 };
 

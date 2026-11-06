@@ -200,7 +200,11 @@ it found no C<lspci>), and on a host with a CUDA-capable NVIDIA GPU every
 NVIDIA step above -- the driver step (with C<reboot>, the reboot after a
 driver install), the container toolkit, the CDI specs, the containerd
 configuration unless C<containerd_config> is C<none>, and
-L<Rex::GPU::NVIDIA/verify_nvidia>. None of that is undone.
+L<Rex::GPU::NVIDIA/verify_nvidia>. None of that is undone. So where the
+message of such a die ends with C<Nothing was changed on the host> (as it
+does from C<install_driver> called directly), C<gpu_setup> ends it with
+C<Nothing was changed for the AMD GPU> instead (C<GPUs> when it passed
+several), also for an C<amd> class of your own.
 
   gpu_setup(
     containerd_config => 'rke2',  # containerd integration target
@@ -438,10 +442,23 @@ sub gpu_setup {
         # k90: a die for GPUs whose rows disagree (APU + amdgpu-dkms GPU,
         # amd_integrated => 1) names gpu_setup's ways out, not method/gpus.
         local $Rex::GPU::AMD::GPU_SETUP = 1;
-        $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
-          gpus   => \@install,
-          reboot => ($opts{reboot} ? 1 : 0),
-        );
+        # k104: "Nothing was changed on the host" is install_driver's own;
+        # gpu_detect (pciutils) and the NVIDIA steps may have changed the host
+        # before it, so here it is said for the AMD GPUs. Any other die (an
+        # object, another last sentence) is passed on as it is.
+        eval {
+          $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
+            gpus   => \@install,
+            reboot => ($opts{reboot} ? 1 : 0),
+          );
+          1;
+        } or do {
+          my $error = $@;
+          my $noun = @install > 1 ? 'GPUs' : 'GPU';
+          $error =~ s/ Nothing was changed on the host\n\z/ Nothing was changed for the AMD $noun\n/
+            unless ref $error;
+          die $error;
+        };
       }
       $class->_step($amd, 'Rex::GPU::AMD', 'verify_amd', gpus => \@install);
     }

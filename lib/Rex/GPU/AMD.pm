@@ -174,6 +174,10 @@ blacklist naming C<amdgpu>, an C<amdgpu> blacklist in C<modprobe.d>, a GPU
 bound to another driver (C<vfio-pci>, C<radeon>), and, for C<dkms>, a
 non-x86_64 host, Secure Boot enabled (the DKMS module would need a MOK
 enrolled at the console), or an existing repository file of other content.
+These messages end with C<Nothing was changed on the host>; called from
+L<Rex::GPU/gpu_setup>, whose earlier steps may have changed the host
+(C<pciutils>, the NVIDIA steps), they end with C<Nothing was changed for
+the AMD GPU> (C<GPUs> for several) instead.
 Dies before any driver package is installed, but after the apt timers are
 stopped and C<apt-get update> ran (apt) and, for C<dkms>, with C<curl> and
 C<gpg> installed where they were missing and AMD's signing key and
