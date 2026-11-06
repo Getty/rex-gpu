@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-06T00:20:44Z
+claimed_by: k89-k93
+class: standard
+completed: 2026-11-06T00:20:44Z
+created: 2026-11-04T02:44:23Z
+id: 91
+priority: medium
+started: 2026-11-05T23:17:25Z
+status: done
+tags:
+- amd
+- rocm
+- decision
+title: 'AMD install_rocm: ROCm-Matrix (Radeon/Ryzen je OS) nicht geprüft'
+updated: 2026-11-06T00:20:50Z
+---
+
+Fund aus k82 (worker-Bewertung, nicht umgesetzt).
+
+Ist: install_driver lässt seit k82 einen Radeon außerhalb von AMDs ROCm-10.1-Matrix vor jeder Änderung sterben (check_radeon/radeon_unsupported je OS-Klasse). install_rocm prüft das nicht: es installiert amdrocm10.1-<gfx> auch für Radeon-Targets auf Debian 12/13 (die Paketlisten von stable.repo.amd.com führen sie dort, s. k87) -- und die Matrix IST die ROCm-Matrix.
+
+Offene Entscheidungen (Maintainer/Hub):
+- install_rocm kennt nur gfx-Targets: Prüfung über hardware_class->target(gfx)->{matrix}, auch für bloße targets => [...].
+- Konsequent angewandt gilt auch die Ryzen-Tabelle: dann wird das bestehende Golden debian-13--rocm-10.1--gfx1151 (APU auf Debian) zum Abbruch.
+- Userspace-Install an den Kernel binden (wie install_driver) oder nur an die Release?
+- Targets ohne matrix (compute 0, für die AMD trotzdem Pakete ausliefert) blieben ungeprüft.
+
+Empfehlung: dieselbe Strenge wie install_driver (Release und Kernel aus radeon_unsupported/inbox_only_unsupported wiederverwenden), vor jeder Änderung; Golden gfx1151-Debian wird dann bewusst zum Abbruch. Verhaltensänderung -> Test.
+
+Commit 7c6217620801f5d793e728bfab3a1fd17735f75c auf main (ff). install_rocm prueft Radeon- und Ryzen-APU-Targets nach present und vor jeder Aenderung gegen die ROCm-Matrix (check_rocm_matrix). Golden debian-13--rocm-10.1--gfx1151 bewusst Abbruch; Proxmox-Golden auf gfx942. Rot-Beweis: t/18 gegen altes lib failed 11 of 30. prove -lr t/: Files=45, Tests=1910, PASS. Nicht gegen Hardware gelaufen.
