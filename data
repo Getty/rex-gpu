@@ -1,0 +1,27 @@
+---
+claimed_at: 2026-11-06T19:04:08Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T19:04:08Z
+created: 2026-11-06T18:37:20Z
+id: 98
+priority: low
+started: 2026-11-06T18:56:53Z
+status: done
+tags:
+- pod
+- amd
+- nvidia
+- gpu_setup
+title: 'Rex::GPU POD: gpu_setup sagt nicht, was vor einem AMD-Abbruch schon eingerichtet
+  ist'
+updated: 2026-11-06T19:04:08Z
+---
+
+Fund aus rex-rancher, vom Hub perl-developer-bb am 2026-11-06 in die Runde k94-k97 gegeben (nach k97). lib/Rex/GPU.pm, POD von gpu_setup um Z. 193-194 ('A die of install_driver (most of them before it changes the host, see there) ends gpu_setup') und Z. 297-298 (amd_integrated: install_driver 'dies before any change'): das gilt für Rex::GPU::AMD::install_driver selbst. gpu_setup läuft aber erst den ganzen NVIDIA-Pfad (install_driver mit evtl. Reboot, install_container_toolkit, generate_cdi_specs, configure_containerd, verify_nvidia) und dann AMD: auf einem Host mit NVIDIA- und AMD-GPU ist NVIDIA bei einem AMD-Abbruch schon eingerichtet. Fertig, wenn die gpu_setup-POD sagt, was bis zu diesem Abbruch schon geschehen ist, gegen den Stand nach k90 geprüft (k90: Abbruch-Meldung nennt gpu_setups Auswege). Nur POD, ohne Kartennummer, eigener Commit, podchecker auf dem gebauten GPU.pm ohne Fehler und Warnung.
+
+Nachtrag Hub perl-developer-bb, gleiche Karte: in lib/Rex/GPU.pm beschreibt das reboot-Item der gpu_setup-POD (um Z. 232-236) nur NVIDIA (bis 5 Minuten, alle 5 s; nouveau). Es soll auch AMD nennen: Rex::GPU::AMD startet neu, bei inbox und dkms gleich, nur wenn amdgpu nicht schon funktionierte und modprobe nach der Installation nicht reicht; Wartezeit danach etwa 20 s, dann bis zu 60 mal 5 s (AMD.pm reboot_and_wait). Gegen AMD.pm _activate prüfen: war amdgpu vorher schon geladen, aber nicht nutzbar, wird ohne modprobe direkt neu gestartet; ohne reboot nur eine Warnung. Nur POD, podchecker ohne Warnung.
+
+worker: gpu_setup-POD in lib/Rex/GPU.pm: neuer Absatz, dass die AMD-Schritte zuletzt kommen und ein AMD-Abbruch nach gpu_detect (ggf. pciutils) und allen NVIDIA-Schritten kommt (Treiber, ggf. Reboot, Toolkit, CDI, containerd ausser bei none, verify_nvidia), nichts wird zurückgenommen; reboot-Item: gemeinsame Wartezeit (20 s, dann bis 60 Versuche im 5-s-Abstand bis echo ok aus neuem Boot, sonst die), NVIDIA-Fall, AMD-Fall (inbox und dkms gleich, nur wenn amdgpu nicht schon ging und modprobe nicht reicht; geladen aber nicht nutzbar: Reboot ohne modprobe; ohne reboot nur Warnung), zwei Reboots bei NVIDIA und AMD möglich; amd_integrated-Item: Abbruch nach den NVIDIA-Schritten, nicht wenn amdgpu schon für alle geht. Belegt gegen GPU.pm gpu_setup, AMD.pm _activate/reboot_and_wait, NVIDIA.pm _reboot_and_wait (Hauptagent nachgesehen). Alte NVIDIA-Angabe (5 Minuten, alle 5 s) war ungenau, korrigiert. Gebaut und podchecker: 21 Dateien ohne Befund, Linkcheck 671/0. prove -lr t/: Files=47, Tests=1924, PASS. Nur POD.
+
+Commit a2ceeeccff65dbfc1d453026f6bb97a921f6672f (Say what gpu_setup did before an AMD die, and when it reboots for AMD (k98)); main per ff nachgezogen.
