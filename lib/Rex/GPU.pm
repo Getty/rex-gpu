@@ -190,8 +190,17 @@ with C<amd_integrated =E<gt> 1>. Every AMD GPU not passed gets a warning
 naming why: unknown (no hardware row, C<compute =E<gt> undef>), not
 ROCm-capable, or integrated. Neither ROCm itself
 (L<Rex::GPU::AMD/install_rocm>) nor any container runtime or CDI setup for
-AMD is part of C<gpu_setup>. A die of L<Rex::GPU::AMD/install_driver>
-(most of them before it changes the host, see there) ends C<gpu_setup>.
+AMD is part of C<gpu_setup>.
+
+The AMD steps come last. A die of L<Rex::GPU::AMD/install_driver> ends
+C<gpu_setup> without L<Rex::GPU::AMD/verify_amd>. Most of them come before
+C<install_driver> changes the host (see there), but not before what
+C<gpu_setup> did up to then: L</gpu_detect> (which installs C<pciutils> if
+it found no C<lspci>), and on a host with a CUDA-capable NVIDIA GPU every
+NVIDIA step above -- the driver step (with C<reboot>, the reboot after a
+driver install), the container toolkit, the CDI specs, the containerd
+configuration unless C<containerd_config> is C<none>, and
+L<Rex::GPU::NVIDIA/verify_nvidia>. None of that is undone.
 
   gpu_setup(
     containerd_config => 'rke2',  # containerd integration target
@@ -231,13 +240,27 @@ values -- even on a host without a GPU.
 
 =item C<reboot>
 
-If true, the host is rebooted after driver installation and the function
-waits (up to 5 minutes, polling every 5 seconds) for it to come back before
-continuing with toolkit installation and containerd configuration. Default: C<0>.
+If true, C<gpu_setup> may reboot the host (when: below) and waits for it:
+20 seconds, then up to 60 reconnects 5 seconds apart (over 5 minutes in
+all) until C<echo ok> answers from the new boot (a changed C<boot_id>,
+where it was readable before); if it does not come back, C<gpu_setup>
+dies. Default: C<0>.
 
-Rebooting is required on the first deployment if the C<nouveau> open-source
-driver was previously loaded, because nouveau must be unloaded before the
-NVIDIA driver can bind to the GPU.
+NVIDIA: the host is rebooted right after the driver is installed -- not
+when a working driver was already there -- before the toolkit installation
+and containerd configuration go on. Rebooting is required on the first
+deployment if the C<nouveau> open-source driver was previously loaded,
+because nouveau must be unloaded before the NVIDIA driver can bind to the
+GPU.
+
+AMD, with C<inbox> and C<dkms> alike: the host is rebooted only if
+C<amdgpu> did not already work (then nothing is installed and nothing is
+rebooted) and loading it is not enough -- if C<amdgpu> was not loaded
+before, C<modprobe amdgpu> is tried first; if it was loaded but not
+usable, the host is rebooted without trying it. After that reboot the
+driver must be usable, or C<gpu_setup> dies. Without C<reboot> a warning
+says to reboot, and C<gpu_setup> goes on to L<Rex::GPU::AMD/verify_amd>.
+A host with an NVIDIA and an AMD GPU can be rebooted twice.
 
 =item C<setup>
 
@@ -294,10 +317,12 @@ B<Experimental.> If true, a ROCm-capable integrated AMD GPU (an APU, e.g.
 the Ryzen AI Max C<gfx1151>) gets the driver too. Default: C<0>, an
 integrated GPU is skipped with a warning. AMD supports the Ryzen APUs only
 with the inbox driver; next to a GPU that needs C<amdgpu-dkms> (one
-C<amdgpu> drives every GPU of a host) L<Rex::GPU::AMD/install_driver> dies
-before any change, naming the ways out: leave C<amd_integrated> off (the
-other GPUs get the driver, the APU is skipped with a warning), or call
-L<Rex::GPU::AMD/install_driver> directly with C<method> or C<gpus>.
+C<amdgpu> drives every GPU of a host), unless C<amdgpu> already works for
+all of them, L<Rex::GPU::AMD/install_driver> dies before it changes the
+host -- but after the NVIDIA steps, if any (see above) -- naming the ways
+out: leave C<amd_integrated> off (the other GPUs get the driver, the APU is
+skipped with a warning), or call L<Rex::GPU::AMD/install_driver> directly
+with C<method> or C<gpus>.
 
 =back
 
