@@ -1,0 +1,27 @@
+---
+block_reason: 'Ort der Prüfung braucht eine Maintainer-Entscheidung, die nicht auf
+  der Karte steht: flacher Debian-Override (a) oder neuer Schritt im dokumentierten
+  Setup-Ablauf (b, empfohlen, erweitert die experimentelle Setup-API). Empfehlung
+  in der Notiz.'
+blocked: true
+class: standard
+created: 2026-11-06T18:57:51Z
+id: 100
+priority: low
+started: 2026-11-06T19:20:31Z
+status: backlog
+tags:
+- nvidia
+- apt
+- debian
+- behavior
+title: 'Debian NVIDIA: verify_packages prüft Zustand, nicht Branch -- ein gehaltener
+  oder nicht aktualisierter älterer Treiber-Branch besteht'
+updated: 2026-11-06T19:46:56Z
+---
+
+Nebenfund aus k94 (rex-gpu-worker, 2026-11-06). Auf Debian sind die Treiber-Paketnamen unversioniert (nvidia-driver, libcuda1, nvidia-driver-cuda, nvidia-kernel-open-dkms). NVIDIA::Setup::Apt::verify_packages prüft nur den dpkg-Zustand (ii/hi), nicht die Version. resolve_plan prüft die GPU-Anforderung (min/max Branch) am Kandidaten, nicht am Installierten. Bleibt ein älterer Branch installiert (gehalten seit k94, oder apt-get install scheiterte aus anderem Grund, das gab es schon vor k94 mit ii), besteht verify_packages; danach folgen nouveau-Blacklist, initramfs und ggf. Reboot, verify_nvidia warnt nur. Ubuntu ist kaum betroffen (Branch im Paketnamen). Idee: nach dem Install die installierte Upstream-Version (dpkg-query) gegen die Anforderung der GPU prüfen, wie verify_versioned_package es für Fabric Manager tut. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
+
+Empfehlung (rex-gpu-worker, Analyse read-only, nicht gegen Hardware geprüft). WIE: nach verify_packages die installierte Upstream-Version des Pakets lesen, das die Quelle als Treiberversion nennt (dpkg-query -W PKG), deren Major als branch mit dem kernel_module der Quelle gegen requirement why_not prüfen; bei Grund die, vor Fabric Manager, nouveau-Blacklist, initramfs und Reboot. Nur wenn die Anforderung eine Grenze hat, sonst keine neue Host-Zeile (Ada, Turing und GPU-lose Hosts unverändert). Ein gehaltener älterer Branch, der die Anforderung erfüllt, besteht. Paket: CUDA-Quelle nvidia-kernel-open-dkms, non-free nvidia-driver (vorher Debians Depends prüfen). Korrektur zur Karte: auf Debian prüft resolve_plan keinen Kandidaten, why_not sieht nur die deklarierte Tabelle. OFFEN, Maintainer: der Ort. (a) flach: Override von Setup::Debian::verify_packages wie RHEL pin_branch (k26), nur Debian. (b) systemisch, empfohlen: neuer Schritt verify_driver_branch im Basis-Ablauf Setup::install, gesteuert über einen neuen Quell-Schlüssel (etwa driver_version_from) und das vorhandene installed_driver_version; in k100 nur Debian verdrahtet; fabric_manager_match nicht wiederverwenden. Warum b: dritter Fall derselben Klasse (k26 RHEL, k100 Debian, k106 RHEL cuda-open-dkms). b erweitert die dokumentierte feste Setup-Sequenz (WRITING YOUR OWN SETUP) und das sources-Schema, also experimentelle öffentliche API. WIRKUNG: auf non-free fängt die Prüfung heute nur Maxwell/Pascal/Volta mit einem Treiber über 580 und eigene requirement-Vorgaben; der Hauptfall der Karte (gehaltener älterer Branch auf non-free) besteht absichtlich. Auf dem CUDA-Pfad stirbt Blackwell, B300 oder GH200 mit gehaltenem älterem nvidia-kernel-open-dkms, statt neu zu booten und ohne nutzbare GPU weiterzulaufen; die Pakete bleiben dann installiert. BEI BAU: Karte auf dem Rancher-Board (gpu-Option kann auf Debian nach installierten Treiberpaketen sterben); GPU.pm-POD (dies kommen aus plan, nichts installiert) und install_driver-POD anpassen; Goldens debian-12/13 volta, blackwell, blackwell--proxmox und debian-12 hgx-b200 bekommen je eine dpkg-query-Zeile; Harness braucht Default-Antworten dafür. Roter Test: Debian 12 Blackwell mit 550 stirbt ohne Blacklist und initramfs, mit 615 läuft er durch; Volta mit 590 stirbt, mit gehaltenem 535 läuft er durch; Ada emittiert keine dpkg-query.
+
+2026-11-06 19:46 Hub (Gettys Entscheidung): k100 und k106 bis k109 bleiben für Rex::GPU 0.006 im Backlog; vor dem Release kommen nur die Texte k103 bis k105.
