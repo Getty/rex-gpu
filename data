@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-06T00:01:13Z
+claimed_by: k89-k93
+class: standard
+completed: 2026-11-06T00:01:13Z
+created: 2026-11-04T02:07:38Z
+id: 90
+priority: low
+started: 2026-11-05T23:17:20Z
+status: done
+tags:
+- amd
+- message
+title: 'AMD gpu_setup mit amd_integrated => 1 bei APU + dGPU: Meldung nennt install_driver-Optionen
+  (method/gpus), die gpu_setup nicht hat'
+updated: 2026-11-06T00:01:13Z
+---
+
+Nebenfund aus k85 (worker). gpu_setup erreicht den gemischten Fall (APU inbox + dGPU dkms) nur mit amd_integrated => 1; die Meldung von install_driver rät zu method => 'inbox' bzw. gpus => [...], beides Optionen von install_driver, nicht von gpu_setup. Für gpu_setup-Aufrufer wäre der Ausweg: amd_integrated => 1 weglassen (oder install_driver direkt rufen). Schon vor k85 so. install_driver weiß nicht, wer es ruft; Lösungsidee: gpu_setup fängt den Fall selbst ab oder ergänzt die Meldung. Entscheidung Maintainer; bei Änderung Test.
+
+worker: gpu_setup setzt um den install_driver-Schritt local $Rex::GPU::AMD::GPU_SETUP = 1 (interne Paketvariable, keine Option: Argumente an install_driver unverändert, eigene gpu_amd_class-Overrides unberührt). _die_mixed_drivers nennt dann zuerst gpu_setups Ausweg (amd_integrated => 1 weglassen; nur wenn jede inbox-GPU integriert ist), dann install_driver direkt mit dem bisherigen method/gpus-Hinweis. Direkter install_driver-Aufruf: Meldung wortgleich. POD gpu_setup amd_integrated und install_driver. test-writer: neu t/21-amd-gpu-setup-mixed.t (6 Subtests, echtes gpu_setup + install_driver auf geskriptetem Host). Rot gegen altes lib: 4/6 Subtests (1, 2, 4, 6), Kontrollen 3 und 5 grün. prove -lr t/: Files=45, Tests=1895, PASS. Nicht gegen Hardware geprüft.
+
+Commit 33213bac2c970b4adb440fac9953990c8f1a2c52 (Name gpu_setups ways out when an APU meets an amdgpu-dkms GPU), main ff auf 33213ba.
