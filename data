@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-06T19:35:45Z
+id: 109
+priority: low
+status: backlog
+tags:
+- amd
+- dkms
+- rhel
+- message
+title: 'AMD RHEL dkms: ein dnf versionlock wird nicht erkannt, package_held ist dort
+  immer 0'
+updated: 2026-11-06T19:35:45Z
+---
+
+Nebenfund aus k101 (rex-gpu-worker, 2026-11-06). Seit k95 und k101 nennt der apt-Layer einen Hold auf amdgpu-dkms (apt-mark hold) in post_install und verify_packages. Auf RHEL gibt package_held immer 0 zurück, ohne Host-Befehl; ein dnf versionlock auf amdgpu-dkms oder kernel-devel wird nicht erkannt und nicht genannt. Ob ein Gegenstück lohnt (dnf versionlock list, Plugin nicht immer installiert), ist Maintainer-Entscheidung; bei Änderung Test. Nicht gegen Hardware geprüft.
