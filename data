@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-06T20:22:49Z
+claimed_by: rex-gpu-release-manager
+class: standard
+completed: 2026-11-06T20:22:49Z
+created: 2026-11-06T19:19:20Z
+id: 103
+priority: low
+started: 2026-11-06T20:18:54Z
+status: done
+tags:
+- changes
+- amd
+- docs
+title: 'Changes: AMD-Eintrag im NEXT-Block sagt every refusal dies before any change
+  und dies before any package install'
+updated: 2026-11-06T20:22:54Z
+---
+
+Nebenfund aus k102 (rex-gpu-worker, 2026-11-06). Lane Release-Manager, nur Wortlaut. Im {{$NEXT}}-Block von Changes sagt der AMD-Eintrag in Zeile 10 "every refusal dies before any change": das stimmt für install_driver selbst, unter gpu_setup nicht (vorher laufen Detection, ggf. die pciutils-Installation und alle NVIDIA-Schritte). Zeile 19 "else it dies before any package install": bei dkms können curl und gnupg dann schon installiert sein, Key und Repo-Datei liegen. README und POD sind seit k102 korrigiert.
+
+rex-gpu-release-manager (2026-11-06): AMD-Eintrag im NEXT-Block: Abbrüche von install_driver selbst vor jeder Änderung ('Nothing was changed on the host'); unter gpu_setup laufen gpu_detect (ggf. pciutils) und alle NVIDIA-Schritte vorher und bleiben, der Abbruch endet dort 'Nothing was changed for the AMD GPU' ('GPUs'). Kandidaten-Abbruch bei dkms: kein Treiberpaket installiert, aber apt-Timer gestoppt, apt-get update gelaufen, curl/gpg ggf. installiert, Key und Repo-Datei liegen. Rest des NEXT-Blocks gegen lib/ gelesen: keine Code-Abweichung (FM-Versionsprüfung vom Koordinator gegengeprüft: NVIDIA/Setup/Apt.pm:241-246).
+
+Committed 7ece7fd (rex-gpu-release-manager), main per ff auf 7ece7fd.
