@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-06T18:56:49Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T18:56:49Z
+created: 2026-11-06T00:24:01Z
+id: 97
+priority: low
+started: 2026-11-06T18:50:09Z
+status: done
+tags:
+- amd
+- pod
+- audit
+title: 'AMD Setup POD: grouped method headings give podchecker empty-section warnings'
+updated: 2026-11-06T18:56:49Z
+---
+
+Fund aus dem Release-Audit 0.006 (Hauptagent k89-k93, 2026-11-06). podchecker auf dem gebauten Rex/GPU/AMD/Setup.pm meldet 7 Warnungen 'empty section in previous paragraph': gruppierte method-Ueberschriften ohne eigenen Absatz (refresh_index/has_candidate, install_helpers/install_packages/verify_packages, kernel_header_packages/optional_packages/firmware_packages/inbox_module_packages/rocm_repo_dir), eingefuehrt mit 6e21d6b nach 0.005. Kein Fehler, nur Warnungen; blockiert den Release nicht. Vorschlag: jeder Methode einen eigenen Satz geben oder die Gruppe anders auszeichnen, sodass die gebaute POD warnungsfrei ist; zusammen mit k96 (toter Link rocm_repo_dir in Setup/Apt.pm, einziger podchecker-Fehler) erledigen.
+
+worker: jede Methode der Gruppen hat einen eigenen Absatz unter ihrer bisherigen method-Überschrift, die Anker bleiben: refresh_index, has_candidate, package_installed, package_held, install_helpers, install_packages, verify_packages, kernel_header_packages, optional_packages, firmware_packages, inbox_module_packages, rocm_repo_dir. Je Satz auch, was die Basisklasse tut, gegen die Subs geprüft; Hauptagent hat die RHEL/Debian/Ubuntu-Overrides stichprobenartig nachgesehen. Gebaut und podchecker: 21 Dateien ohne Befund. Linkcheck gebauter Baum: 667 interne Links, 0 kaputt. prove -lr t/: Files=47, Tests=1924, PASS. Nur POD.
+
+Commit ed6e1032befce70b3d50e16939a56d2e68428b9f (Give each AMD Setup packaging and package-list method its own POD (k97)); main per ff nachgezogen.
