@@ -7,31 +7,38 @@ Revision history for Rex-GPU
     amdgpu-dkms 31.60 from repo.radeon.com with a pinned key fingerprint, on
     Ubuntu 22.04/24.04/26.04, Debian 12/13 (inbox and dkms, only on the
     release's own amd64 kernel) and RHEL-family 8/9/10. A working driver is
-    left alone ('present'); every refusal dies before any change, among them
-    a Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
-    would remove proxmox-ve and its kernel. Radeon GPUs (the Radeon table
-    of AMD's ROCm 10.1 matrix, new field matrix in the Hardware rows) get
-    either driver only where that table lists them: Ubuntu 26.04 GA kernel
-    7.0, 24.04 HWE 7.0, 22.04 HWE 6.8, RHEL-family 10.2 and 9.8 with their
-    kernel build, never Debian; elsewhere install_driver dies before any
-    change (a working driver is still 'present'). For dkms the running
-    kernel's headers and amdgpu-dkms need an installation candidate
-    (installed or offered by the sources; on RHEL checked with dnf
-    repoquery), else it dies before any package install, for headers gone
-    from the mirror with the advice to upgrade the kernel and reboot. With
-    an APU next to a dGPU, method => 'auto' names method => 'inbox' only
-    where the inbox driver is supported for the APU, else the reason and
-    gpus => with the dGPUs; under gpu_setup with amd_integrated => 1 it
-    names gpu_setup's own ways out instead (leave amd_integrated out, or
-    call install_driver directly with method => or gpus =>).
-    verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
-    =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
-    (apt only) and dies before any change when rocm-core of an older ROCm
-    line is on the host, also held (apt-mark hold) or half installed.
-    install_rocm follows AMD's ROCm 10.1 matrix for Radeon GPUs and Ryzen
-    APUs as install_driver does (Ryzen APUs on Ubuntu 26.04 GA 7.0 and
-    24.04 HWE 7.0, Radeon also 22.04 HWE 6.8, never Debian; a ROCm already
-    installed stays 'present'); Instinct targets are unchanged. On
+    left alone ('present'); every refusal of install_driver itself dies
+    before any change ("Nothing was changed on the host"), among them a
+    Proxmox VE host (pve-firmware installed), where firmware-amd-graphics
+    would remove proxmox-ve and its kernel. Under gpu_setup, gpu_detect
+    (which installs pciutils where lspci is missing) and, on a host with a
+    CUDA-capable NVIDIA GPU, all NVIDIA steps run before it and are not
+    undone; there such a refusal ends "Nothing was changed for the AMD GPU"
+    ("GPUs" for several). Radeon GPUs (the Radeon table of AMD's ROCm 10.1
+    matrix, new field matrix in the Hardware rows) get either driver only
+    where that table lists them: Ubuntu 26.04 GA kernel 7.0, 24.04 HWE 7.0,
+    22.04 HWE 6.8, RHEL-family 10.2 and 9.8 with their kernel build, never
+    Debian; elsewhere install_driver dies before any change (a working
+    driver is still 'present'). For dkms the running kernel's headers and
+    amdgpu-dkms need an installation candidate (installed or offered by the
+    sources; on RHEL checked with dnf repoquery), else it dies with no
+    driver package installed, for headers gone from the mirror with the
+    advice to upgrade the kernel and reboot. By then the apt timers are
+    stopped and apt-get update ran (apt) and, for dkms, curl and gpg are
+    installed where missing and AMD's signing key and repository file are in
+    place (a re-run accepts them). With an APU next to a dGPU, method =>
+    'auto' names method => 'inbox' only where the inbox driver is supported
+    for the APU, else the reason and gpus => with the dGPUs; under gpu_setup
+    with amd_integrated => 1 it names gpu_setup's own ways out instead
+    (leave amd_integrated out, or call install_driver directly with method
+    => or gpus =>). verify_amd(gpus =>) reports per GPU from sysfs/KFD.
+    install_rocm(release =>, gpus =>) installs the ROCm Core SDK from
+    stable.repo.amd.com (apt only) and dies before any change when rocm-core
+    of an older ROCm line is on the host, also held (apt-mark hold) or half
+    installed. install_rocm follows AMD's ROCm 10.1 matrix for Radeon GPUs
+    and Ryzen APUs as install_driver does (Ryzen APUs on Ubuntu 26.04 GA 7.0
+    and 24.04 HWE 7.0, Radeon also 22.04 HWE 6.8, never Debian; a ROCm
+    already installed stays 'present'); Instinct targets are unchanged. On
     apt hosts a held package counts as installed for the driver, firmware
     and ROCm checks; a half installed one does not. gpus => [] is refused.
   - gpu_setup installs the AMD driver for ROCm-capable discrete AMD GPUs;
