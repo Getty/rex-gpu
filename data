@@ -1,0 +1,22 @@
+---
+claimed_at: 2026-11-06T18:50:04Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T18:50:04Z
+created: 2026-11-05T23:40:42Z
+id: 96
+priority: low
+started: 2026-11-06T18:45:57Z
+status: done
+tags:
+- amd
+- pod
+title: 'AMD Setup Apt: POD-Link auf rocm_repo_dir in install_rocm löst nicht auf'
+updated: 2026-11-06T18:50:04Z
+---
+
+Nebenfund aus k93 (worker, podchecker auf dem gebauten POD). lib/Rex/GPU/AMD/Setup/Apt.pm Z. 202 (POD von install_rocm) verlinkt intern auf rocm_repo_dir. Die Methode ist nur in der Basisklasse dokumentiert (AMD/Setup.pm, gruppierter method-Block); im gebauten POD meldet podchecker: unresolved internal link rocm_repo_dir. Schon vor k89/k93 vorhanden. Fix (nur POD): Link auf Rex::GPU::AMD::Setup/rocm_repo_dir. Fertig, wenn podchecker auf dem gebauten Apt.pm keinen Fehler mehr meldet. Kein Verhalten betroffen; betrifft das Audit-Kriterium podchecker ohne Fehler für 0.006.
+
+worker: L</rocm_repo_dir> in der install_rocm-POD (AMD/Setup/Apt.pm) -> L<Rex::GPU::AMD::Setup/rocm_repo_dir>. Keine weiteren Links in Apt.pm auf nur in der Basisklasse dokumentierte Methoden. Gebaut + podchecker: Setup/Apt.pm clean, nur AMD/Setup.pm mit den 7 k97-Warnungen. prove -lr t/: Files=47, Tests=1924, PASS. Nur POD, kein Changes-Eintrag.
+
+Commit 4fd3443e0a5e6fa1ceb6bc684c89858f9dfd37d0 (Link install_rocm's rocm_repo_dir to the AMD Setup base class (k96)); main per ff nachgezogen.
