@@ -292,7 +292,12 @@ call; this option wins over it. See L</amd_class>.
 
 B<Experimental.> If true, a ROCm-capable integrated AMD GPU (an APU, e.g.
 the Ryzen AI Max C<gfx1151>) gets the driver too. Default: C<0>, an
-integrated GPU is skipped with a warning.
+integrated GPU is skipped with a warning. AMD supports the Ryzen APUs only
+with the inbox driver; next to a GPU that needs C<amdgpu-dkms> (one
+C<amdgpu> drives every GPU of a host) L<Rex::GPU::AMD/install_driver> dies
+before any change, naming the ways out: leave C<amd_integrated> off (the
+other GPUs get the driver, the APU is skipped with a warning), or call
+L<Rex::GPU::AMD/install_driver> directly with C<method> or C<gpus>.
 
 =back
 
@@ -404,10 +409,15 @@ sub gpu_setup {
       push @install, $gpu;
     }
     if (@install) {
-      $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
-        gpus   => \@install,
-        reboot => ($opts{reboot} ? 1 : 0),
-      );
+      {
+        # k90: a die for GPUs whose rows disagree (APU + amdgpu-dkms GPU,
+        # amd_integrated => 1) names gpu_setup's ways out, not method/gpus.
+        local $Rex::GPU::AMD::GPU_SETUP = 1;
+        $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
+          gpus   => \@install,
+          reboot => ($opts{reboot} ? 1 : 0),
+        );
+      }
       $class->_step($amd, 'Rex::GPU::AMD', 'verify_amd', gpus => \@install);
     }
   }

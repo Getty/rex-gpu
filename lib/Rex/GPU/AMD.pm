@@ -30,6 +30,12 @@ use Rex::GPU::AMD::Setup::Ubuntu;
 # printf + mv over the exec channel, never through Rex's file commands: these
 # hosts have no SFTP subsystem.
 
+# True while Rex::GPU::gpu_setup runs install_driver (local there, k90): its
+# die for GPUs whose rows disagree then names gpu_setup's ways out. Internal:
+# no option, so install_driver -- a subclass's override included -- gets the
+# arguments it always got from gpu_setup.
+our $GPU_SETUP;
+
 # The driver state, one read-only command with shell builtins only (a fork
 # only per AMD device for its driver/render symlink). Lines:
 #   amdgpu 0|1                  /sys/module/amdgpu exists
@@ -125,12 +131,17 @@ nor L<Rex::GPU::AMD::Setup/inbox_unsupported> gives a reason), else that
 reason and C<gpus> with only the C<amdgpu-dkms> ones -- on a Proxmox VE host
 the Proxmox reason instead, and for a Radeon GPU AMD's matrix does not list
 on this host (L<Rex::GPU::AMD::Setup/check_radeon>) the Radeon reason,
-naming no way out: both would include it; for GPUs without a row it takes
-C<inbox> if the running kernel has an C<amdgpu.ko> or can get one from the
-host's package sources, else C<dkms>. C<method =E<gt> 'dkms'> for a GPU
-AMD supports only with the inbox driver dies, also where the driver
-already works; C<method =E<gt> 'inbox'> for one whose row says C<dkms>
-warns and goes ahead. C<install_driver> never removes or replaces a driver.
+naming no way out: both would include it. Called from
+L<Rex::GPU/gpu_setup>, which takes neither C<method> nor C<gpus>, the
+message names its ways out instead: leaving out its C<amd_integrated>
+(where that skips every GPU AMD supports only with the inbox driver), or
+calling C<install_driver> directly, with the advice above. For GPUs without
+a row it takes C<inbox> if the running kernel has an C<amdgpu.ko> or can
+get one from the host's package sources, else C<dkms>.
+C<method =E<gt> 'dkms'> for a GPU AMD supports only with the inbox driver
+dies, also where the driver already works; C<method =E<gt> 'inbox'> for
+one whose row says C<dkms> warns and goes ahead. C<install_driver> never
+removes or replaces a driver.
 
 Then -- also when nothing had to be installed -- C<amdgpu> is loaded with
 C<modprobe amdgpu> if it was not loaded before. If it was, or if the GPUs
@@ -253,7 +264,8 @@ sub _auto_method {
   my ( $class, $targets, $setup ) = @_;
   my %by;
   push @{ $by{ $_->{driver} } }, $class->gpu_label($_) for grep { defined $_->{driver} } @$targets;
-  $class->_die_mixed_drivers($setup, join(', ', @{ $by{inbox} }), join(', ', @{ $by{dkms} }))
+  $class->_die_mixed_drivers($setup, join(', ', @{ $by{inbox} }), join(', ', @{ $by{dkms} }),
+    !grep { ( $_->{driver} // '' ) eq 'inbox' && !$_->{integrated} } @$targets)
     if $by{inbox} && $by{dkms};
   return 'inbox' if $by{inbox};
   return 'dkms'  if $by{dkms};
@@ -271,20 +283,30 @@ sub _auto_method {
 # Radeon GPU outside AMD's matrix on this host (k82) is in both ways out --
 # every GPU for inbox, and its row says dkms -- and both plans die for it:
 # no way out is named, check_radeon dies as the plans would.
+#
+# Called from Rex::GPU::gpu_setup ($GPU_SETUP, k90), whose caller cannot pass
+# method or gpus: its ways out first -- leaving out amd_integrated, only
+# where that skips every inbox-only GPU ($apus: all of them integrated) --
+# then install_driver called directly, with the hints above.
 sub _die_mixed_drivers {
-  my ( $class, $setup, $inbox, $dkms ) = @_;
+  my ( $class, $setup, $inbox, $dkms, $apus ) = @_;
   if (my $why = $setup->host_unsupported) {
     die 'install_driver: '.$why.". Nothing was changed on the host\n";
   }
   $setup->check_radeon;
   my $only = $setup->inbox_only_unsupported;
   my $all  = $only ? undef : $setup->inbox_unsupported;
+  my $hint = ( $only ? "method => 'inbox' is no way out on this host for ".$inbox.': '.$only.'. '
+             : $all  ? "method => 'inbox' is no way out on this host: ".$all.'. '
+             :         "Pass method => 'inbox' to drive all of them with the inbox driver. " )
+    .( $only || $all ? 'Pass gpus => with '.$dkms.' only to leave '.$inbox.' out. ' : '' );
+  $hint = ( $apus ? "Leave out gpu_setup's amd_integrated => 1 to give the driver to ".$dkms
+                    .' only; gpu_setup then skips '.$inbox.' with a warning. Or call'
+                  : 'Call' )
+    .' Rex::GPU::AMD->install_driver directly instead of gpu_setup: '.lcfirst($hint)
+    if $GPU_SETUP;
   die 'install_driver: AMD supports '.$inbox.' only with the inbox driver and '.$dkms
-    .' with amdgpu-dkms, and one amdgpu drives every GPU of a host. '
-    .( $only ? "method => 'inbox' is no way out on this host for ".$inbox.': '.$only.'. '
-     : $all  ? "method => 'inbox' is no way out on this host: ".$all.'. '
-     :         "Pass method => 'inbox' to drive all of them with the inbox driver. " )
-    .( $only || $all ? 'Pass gpus => with '.$dkms.' only to leave '.$inbox.' out. ' : '' )
+    .' with amdgpu-dkms, and one amdgpu drives every GPU of a host. '.$hint
     ."Nothing was changed on the host\n";
 }
 

@@ -21,7 +21,9 @@ Revision history for Rex-GPU
     from the mirror with the advice to upgrade the kernel and reboot. With
     an APU next to a dGPU, method => 'auto' names method => 'inbox' only
     where the inbox driver is supported for the APU, else the reason and
-    gpus => with the dGPUs.
+    gpus => with the dGPUs; under gpu_setup with amd_integrated => 1 it
+    names gpu_setup's own ways out instead (leave amd_integrated out, or
+    call install_driver directly with method => or gpus =>).
     verify_amd(gpus =>) reports per GPU from sysfs/KFD. install_rocm(release
     =>, gpus =>) installs the ROCm Core SDK from stable.repo.amd.com
     (apt only) and dies before any change when rocm-core of an older ROCm
