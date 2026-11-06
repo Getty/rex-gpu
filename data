@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-06T20:13:43Z
+claimed_by: rex-gpu-worker
+class: standard
+completed: 2026-11-06T20:13:43Z
+created: 2026-11-06T19:19:30Z
+id: 104
+priority: low
+started: 2026-11-06T20:01:29Z
+status: done
+tags:
+- amd
+- messages
+- behavior
+title: AMD-Abbrüche unter gpu_setup sagen Nothing was changed on the host, obwohl
+  NVIDIA-Schritte schon liefen
+updated: 2026-11-06T20:13:48Z
+---
+
+Nebenfund aus k102 (rex-gpu-worker, 2026-11-06). Die AMD-Abbrüche (AMD.pm, AMD/Setup.pm, AMD/Setup/Apt.pm) enden auch unter gpu_setup auf "Nothing was changed on the host", ebenso der Text von _die_mixed_drivers für gpu_setup. Auf einem Host mit NVIDIA- und AMD-GPU sind dann aber schon alle NVIDIA-Schritte gelaufen (Treiber, ggf. Reboot, Toolkit, CDI, containerd), und ggf. ist pciutils installiert. Ideen: unter gpu_setup den Satz auf install_driver einschränken, oder gpu_setup ergänzt beim Weiterreichen, was schon lief. Meldungstext, also Verhalten: Changes-Eintrag, Tests und Goldens prüfen. Entscheidung Maintainer. Nicht gegen Hardware geprüft.
+
+rex-gpu-worker (2026-11-06): Form 'Nothing was changed for the AMD GPU' (GPUs bei mehreren) gewählt; Aufzählung des Gelaufenen gibt der Code nicht her (gpu_detect meldet pciutils-Install nicht zurück, gpu_setup sieht nur, dass NVIDIA-Schritte liefen, nicht ob sie änderten). Eine Stelle: gpu_setup fängt den die des AMD-install_driver-Schritts und schreibt nur den Schluss-Satz um; die-Objekte und andere Schlüsse unverändert; install_driver direkt unverändert. POD GPU.pm + AMD.pm nachgezogen. prove: nur t/21 Subtests 1,2,4 rot (behaupten den alten Schluss unter gpu_setup) -> test-writer. Nicht gegen Hardware geprüft.
+
+rex-gpu-test-writer (2026-11-06): t/21 erweitert (Subtests 7-10: install_driver direkt 'on the host'; gpu_setup NVIDIA+1 AMD 'for the AMD GPU'; NVIDIA+2 AMD via _die_mixed_drivers 'for the AMD GPUs'; Objekt/anderer Schluss unverändert durchgereicht). Subtests 1,2,4 auf den neuen Schluss unter gpu_setup umgestellt (Behauptung ersetzt). Rot-Beleg gegen main 9e7a93f: Subtests 1,2,4,8,9 rot. Goldens unverändert. prove -lr t/: 47 Dateien, 1946 Tests, PASS. Nicht gegen Hardware geprüft.
+
+Committed 94b7b4f (rex-gpu-release-manager), main per ff auf 94b7b4f. Kein Changes-Eintrag hier: der AMD-Eintrag im NEXT-Block deckt es mit k103 ab.
