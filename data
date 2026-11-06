@@ -1,0 +1,26 @@
+---
+claimed_at: 2026-11-06T18:28:53Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T18:28:53Z
+created: 2026-11-05T23:29:25Z
+id: 94
+priority: low
+started: 2026-11-06T18:10:04Z
+status: done
+tags:
+- nvidia
+- apt
+- behavior
+title: 'NVIDIA apt layer: verify_packages und cuda-keyring-Check werten gehaltene
+  Pakete (hi) als fehlend'
+updated: 2026-11-06T18:28:53Z
+---
+
+Nebenfund aus k89 (rex-gpu-worker, lesend). Seit k89 zählt der AMD-Apt-Layer gehaltene Pakete (dpkg -l 'hi') als installiert. Der NVIDIA-Apt-Layer nicht: NVIDIA::Setup::Apt::verify_packages (dpkg -l PKG | grep -q '^ii') und die cuda-keyring-Checks in NVIDIA::Setup::Debian/Ubuntu werten ein gehaltenes Paket (apt-mark hold nvidia-driver o. ä.) als fehlend -> 'not installed after apt-get install'. NVIDIA.pm _toolkit_present nutzt schon '^[hi]i'. Entscheidung Maintainer, ob angleichen; dann Verhaltensänderung -> Test (test-writer), NVIDIA-Goldens mit '^ii' ändern sich. Nicht gegen Hardware geprüft.
+
+worker (lib/): verify_packages (NVIDIA/Setup/Apt.pm), cuda-keyring-Checks in Debian add_nvidia_cuda_apt_repo und Ubuntu prepare_nvlink_fabric_source auf '^[hi]i'; POD (verify_packages, verify_versioned_package, DESCRIPTION, Debian/Ubuntu, NVIDIA.pm install_container_toolkit) nachgezogen. Host-Wirkung: gehaltenes Paket auf Kandidatenversion besteht jetzt (vorher falscher Abbruch); Fabric Manager auf Fremdversion stirbt weiter an der Versionsprüfung; Ubuntu mit gehaltenem cuda-keyring nimmt den 'schon konfiguriert'-Zweig; retrofit_nvlink_fabric zählt gehaltene Pakete als vorhanden. Lücke (schon vor k94 für ii): Debian-Namen unversioniert, ein gehaltener älterer Branch besteht verify_packages. Nicht gegen Hardware geprüft. Tests: test-writer läuft.
+
+test-writer: neu t/66-apt-held-packages.t (verify_packages ii/hi besteht, iF/hF/iU stirbt; Debian cuda-keyring hi ok, iF stirbt; Ubuntu cuda-keyring hi -> schon-konfiguriert-Zweig, iF -> Key/Pin/Quelle). Rot gegen main-lib (vom Hauptagenten nachgestellt): 4 von 5 Subtests failen (hi passes; held package passes; Debian hi: no die; Ubuntu hi: no pin/source, no key fetched). dpkg_l nach Test::RexGPU::Golden verschoben; tote '^ii'-Default-Regel entfernt. Mocks in t/94, t/96-golden-driver, t/96-golden-driver-distro-failures, t/97 auf dpkg_l umgeschlüsselt, ctk-without-package zustandsbehaftet. 51 Goldens: 126 Zeilenpaare, jede nur '^ii' -> '^[hi]i' (positionsgenau geprüft). prove -lr t/: Files=46, Tests=1915, PASS.
+
+Commit 7328c2cfc56fecb9c622247e56cce64125a4b69a (Count held packages as installed in the NVIDIA apt layer (k94)); main per ff nachgezogen.
