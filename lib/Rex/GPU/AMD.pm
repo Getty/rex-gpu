@@ -187,7 +187,11 @@ C<dnf repoquery> itself fails (metadata that cannot be downloaded).
 Dies after the install when a package is not installed afterwards (a failed
 DKMS build leaves C<amdgpu-dkms> half-configured, so C<dpkg -l> does not show
 it C<ii>; an RPM whose C<%post> build failed is caught by the C<dkms status>
-check).
+check). For C<dkms> on Debian and Ubuntu with C<amdgpu-dkms> on hold
+(C<apt-mark hold>), that message and the one for no module built name the
+hold as the cause -- C<apt-get install -y> does not change a held package,
+and aborts the whole install where it would have to -- and C<apt-mark
+unhold amdgpu-dkms> as the way out.
 
 =cut
 

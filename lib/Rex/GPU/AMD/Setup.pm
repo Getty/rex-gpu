@@ -605,8 +605,9 @@ package database.
 True if C<$package> is on hold, so that the package manager does not
 change it (apt: C<apt-mark hold>). Here: always false, without a host
 command, and so in L<Rex::GPU::AMD::Setup::RHEL>;
-L<Rex::GPU::AMD::Setup::Apt/package_held> reads dpkg's selection. Only
-L</post_install> asks.
+L<Rex::GPU::AMD::Setup::Apt/package_held> reads dpkg's selection. Asked
+only on a failure path: by L</post_install>, and by
+L<Rex::GPU::AMD::Setup::Apt/verify_packages> once a package is missing.
 
 =method install_helpers
 

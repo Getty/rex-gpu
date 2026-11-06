@@ -58,6 +58,35 @@ use lib "$Bin/lib";
 #   * the make.log itself, a real DKMS build, a reboot.
 # This test fails against the code before k95 (the held cases get the old
 # message) and passes after.
+#
+# k101: the same question one step earlier. verify_packages (apt) runs after
+# `apt-get install -y` and before any module check; with amdgpu-dkms in the
+# plan (dkms) and ANY package of it missing, it asks for the hold -- a held
+# amdgpu-dkms that "would have to change" aborts the whole install, so the
+# header package can be the one missing just as well.
+#
+# CLAIMS (k101):
+#   * dkms, amdgpu-dkms `hold ok not-installed` and not installed afterwards
+#     (headers installed): the die names amdgpu-dkms, the hold and `apt-mark
+#     unhold amdgpu-dkms`, then the make.log hint ("; if it is still not
+#     installed then, a failed DKMS build ...");
+#   * dkms, the header package missing and amdgpu-dkms held (`hold ok
+#     not-installed`, and `hold ok installed` at another version): the die
+#     names the header package, the hold and apt-mark unhold, and NO make.log
+#     hint;
+#   * dkms, not held (`install ok ...`), amdgpu-dkms or the header package
+#     missing: the old messages, character for character (anchored);
+#   * an inbox plan (no amdgpu-dkms in it) with a held amdgpu-dkms on the host
+#     and a package missing: the old message, and no dpkg-query for
+#     amdgpu-dkms;
+#   * everything installed, amdgpu-dkms held: no dpkg-query for amdgpu-dkms
+#     (the success path gets no new host line);
+#   * on the failure path the hold is asked exactly once;
+#   * RHEL: no dpkg-query, no `pkg:` line, no unmocked Rex function reached.
+# These fail against the code before k101 (the held cases get the old message).
+# NOT covered (k101): whether apt really aborts for a held package on a given
+# release; a hold by apt preferences pin; the header package name on kernels
+# other than the scripted ones; the dpkg-query answers are hand-written.
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw( record_host );
@@ -82,17 +111,19 @@ sub working {
 
 # amdgpu-dkms as dpkg-query -W -f='${Package} ${Status} ${Version}\n' prints it
 sub dpkg_query {
-  my ( $status ) = @_;
+  my ( $status, $version ) = @_;
   return [ qr{^dpkg-query -W -f='\$\{Package\} \$\{Status\} \$\{Version\}\\n' amdgpu-dkms 2>/dev/null$}
-    => "amdgpu-dkms $status 1:6.16.13-2255209.24.04", 0 ];
+    => "amdgpu-dkms $status ".( $version // '1:6.16.13-2255209.24.04' ), 0 ];
 }
 sub held_queries { my ( $rec ) = @_; return scalar grep { /dpkg-query .*amdgpu-dkms/ } @{ $rec->{lines} } }
 
 # install_driver(method => dkms) for an MI300X.
 #   built => 1  the module is there after the install (dkms status: nothing
 #               before, installed after); 0: nothing built, ever
-#   dpkg  => 'hi' | 'ii'   dpkg -l state of amdgpu-dkms (apt only)
-#   status => '...'        the dpkg-query ${Status} answer (apt only)
+#   dpkg  => 'hi' | 'ii' | 'un'   dpkg -l state of amdgpu-dkms (apt only)
+#   status => '...'        the dpkg-query ${Status} answer (apt only; omitted: unanswered)
+#   version => '...'       the ${Version} of that answer
+#   headers => 'ii' | 'un' dpkg -l state of linux-headers-<kernel> (apt only; default ii)
 sub dkms_install {
   my ( $os, %o ) = @_;
   my $kernel = os_kernel($os);
@@ -104,7 +135,8 @@ sub dkms_install {
     kernel => $kernel, state => [ fresh(), working() ], module => $o{built} ? 'dkms' : 'none',
     responses => [
       [ qr{^dkms status -m amdgpu -k } => $dkms, 0 ],
-      ( $apt ? ( dpkg_l('amdgpu-dkms' => $o{dpkg}), dpkg_query($o{status}) ) : () ),
+      ( $apt ? ( dpkg_l('amdgpu-dkms' => $o{dpkg} // 'ii', "linux-headers-$kernel" => $o{headers} // 'ii'),
+                 ( defined $o{status} ? dpkg_query($o{status}, $o{version}) : () ) ) : () ),
       ( $apt ? () : (
         [ qr{^rpm -q amdgpu-dkms 2>&1$} => sequence([ 'package amdgpu-dkms is not installed', 1 ], [ 'amdgpu-dkms', 0 ]), 0 ],
         [ qr{^rpm -q (?:kernel-\S+) 2>&1$} => 'ok', 0 ],
@@ -188,6 +220,93 @@ subtest 'amdgpu-dkms on hold, but the module is built: lives, no dpkg-query for 
 subtest 'rhel-9: no module built: the old message, no dpkg-query at all' => sub {
   my ( $rec ) = dkms_install('rhel-9', built => 0);
   is($rec->{error}, unheld_message(os_kernel('rhel-9')), 'exactly the old message');
+  is(scalar(grep { /dpkg-query/ } @{ $rec->{lines} }), 0, 'no dpkg-query');
+  ok(no_pkg($rec), 'no pkg: line');
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+};
+
+#### k101: verify_packages names the hold when a package is missing after the install
+
+my $VERIFY = ' not installed after apt-get install -- check the apt output';
+my $BUILD  = "a failed DKMS build leaves it half-configured ($MAKE_LOG)";
+my $HOLD   = '; amdgpu-dkms is on hold, and apt-get install -y does not change a held package (where it would have to, it aborts the install). Run apt-mark unhold amdgpu-dkms and install_driver again';
+
+sub verify_held_message { my ( $pkg ) = @_; return "$pkg$VERIFY$HOLD".( $pkg eq 'amdgpu-dkms' ? "; if it is still not installed then, $BUILD" : '' ) }
+sub verify_old_message  { my ( $pkg ) = @_; return "$pkg$VERIFY".( $pkg eq 'amdgpu-dkms' ? "; $BUILD" : '' ) }
+
+for my $os (qw( ubuntu-24.04 debian-13 debian-12 )) {
+  my $headers = 'linux-headers-'.os_kernel($os);
+
+  subtest "$os: k101 amdgpu-dkms held and not installed: hold first, make.log after" => sub {
+    my ( $rec ) = dkms_install($os, built => 0, dpkg => 'un', status => 'hold ok not-installed');
+    is($rec->{error}, verify_held_message('amdgpu-dkms'), 'the full message');
+    like($rec->{error}, qr/apt-mark unhold amdgpu-dkms.*; if it is still not installed then, .*\Q$MAKE_LOG\E/s, '... apt-mark unhold, then make.log');
+    is(held_queries($rec), 1, 'the hold is asked exactly once');
+    ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} }), 'dies before any modprobe');
+    ok(no_pkg($rec), 'no pkg: line');
+    ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+  };
+
+  for my $case ([ 'hold ok not-installed' => undef ], [ 'hold ok installed' => '1:6.14.14-2204561.24.04' ]) {
+    my ( $status, $version ) = @$case;
+    subtest "$os: k101 header package missing, amdgpu-dkms '$status': hold named, no make.log" => sub {
+      my ( $rec ) = dkms_install($os, built => 0, dpkg => 'hi', headers => 'un', status => $status, version => $version);
+      is($rec->{error}, verify_held_message($headers), 'the full message');
+      like($rec->{error}, qr/\A\Q$headers\E not installed/, '... names the header package');
+      unlike($rec->{error}, qr/make\.log|DKMS build/, '... no make.log hint');
+      is(held_queries($rec), 1, 'the hold is asked exactly once');
+      ok(no_pkg($rec), 'no pkg: line');
+      ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+    };
+  }
+
+  subtest "$os: k101 not held, a package missing: the old message, word for word" => sub {
+    my ( $rec ) = dkms_install($os, built => 0, dpkg => 'un', status => 'install ok not-installed');
+    is($rec->{error}, verify_old_message('amdgpu-dkms'), 'amdgpu-dkms missing: exactly the old message');
+    ( $rec ) = dkms_install($os, built => 0, dpkg => 'ii', headers => 'un', status => 'install ok installed');
+    is($rec->{error}, verify_old_message($headers), 'header package missing: exactly the old message');
+    ok(no_pkg($rec), 'no pkg: line');
+  };
+
+  # kept apart from the message claims: those hold before k101, this one does not
+  subtest "$os: k101 not held, a package missing: the hold is asked once, and answered no" => sub {
+    my ( $rec ) = dkms_install($os, built => 0, dpkg => 'un', status => 'install ok not-installed');
+    is(held_queries($rec), 1, 'amdgpu-dkms missing: one dpkg-query');
+    ( $rec ) = dkms_install($os, built => 0, dpkg => 'ii', headers => 'un', status => 'install ok installed');
+    is(held_queries($rec), 1, 'header package missing: one dpkg-query');
+  };
+}
+
+subtest 'k101: everything installed, amdgpu-dkms held: verify asks nothing new' => sub {
+  my ( $rec, $how ) = dkms_install('ubuntu-24.04', built => 1, dpkg => 'hi', status => 'hold ok installed');
+  is($rec->{error}, undef, 'lives');
+  is(held_queries($rec), 0, 'no dpkg-query for amdgpu-dkms');
+};
+
+subtest 'k101: an inbox plan with a held amdgpu-dkms on the host: old message, no hold question' => sub {
+  my $os = 'debian-13';
+  my $host = amd_host($os,
+    state => [ fresh() ], module => 'inbox',
+    responses => [
+      dpkg_l('firmware-amd-graphics' => 'un'),
+      dpkg_query('hold ok installed'),
+      [ 'LC_ALL=C apt-cache policy firmware-amd-graphics 2>/dev/null' =>
+        "firmware-amd-graphics:\n  Installed: (none)\n  Candidate: 20250410-2\n  Version table:\n", 0 ],
+    ]);
+  my $rec = record_host(
+    host => $host,
+    subs => { 'Rex::get_current_connection' => sub { return { conn => Local::FakeConn->new } } },
+    code => sub { Rex::GPU::AMD::install_driver(gpus => [ gpu_mi300x() ], method => 'inbox') },
+  );
+  is($rec->{error}, "firmware-amd-graphics$VERIFY", 'the old message, nothing appended');
+  is(held_queries($rec), 0, 'no dpkg-query for amdgpu-dkms');
+  ok(( grep { /apt-get .* install -y / } @{ $rec->{lines} }), 'the inbox install did run (the plan had a package to verify)');
+  ok(no_pkg($rec), 'no pkg: line');
+  ok(!$rec->{trapped}, 'no unmocked Rex function reached');
+};
+
+subtest 'k101 rhel-9: a package missing after dnf install: no dpkg-query, no pkg:' => sub {
+  my ( $rec ) = dkms_install('rhel-9', built => 0);
   is(scalar(grep { /dpkg-query/ } @{ $rec->{lines} }), 0, 'no dpkg-query');
   ok(no_pkg($rec), 'no pkg: line');
   ok(!$rec->{trapped}, 'no unmocked Rex function reached');

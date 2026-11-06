@@ -57,6 +57,12 @@ Revision history for Rex-GPU
     as the cause when no amdgpu module is built for the running kernel after
     the install, and apt-mark unhold amdgpu-dkms as the way out; new method
     package_held in the AMD setup package layer (no host command on RHEL).
+  - On Debian and Ubuntu, install_driver (dkms) also names a hold on
+    amdgpu-dkms when a package is still missing after the install -- a
+    held amdgpu-dkms that is not installed, or held at another version,
+    leaves apt-get install -y's whole install undone -- with apt-mark
+    unhold amdgpu-dkms as the way out; dpkg is asked only on that failure
+    path.
 
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which

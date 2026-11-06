@@ -27,4 +27,5 @@ run: LC_ALL=C apt-cache policy linux-modules-extra-6.8.0-85-generic 2>/dev/null
 run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-6.8.0-85-generic amdgpu-dkms linux-modules-extra-6.8.0-85-generic
 run: dpkg -l linux-headers-6.8.0-85-generic 2>/dev/null | grep -q '^[hi]i'
 run: dpkg -l amdgpu-dkms 2>/dev/null | grep -q '^[hi]i'
+run: dpkg-query -W -f='${Package} ${Status} ${Version}\n' amdgpu-dkms 2>/dev/null
 DIE: amdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured (/var/lib/dkms/amdgpu/*/build/make.log)

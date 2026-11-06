@@ -63,7 +63,8 @@ use lib "$Bin/lib";
 #     in plan_inbox is not installed again (Debian: only modprobe; Ubuntu: no
 #     apt-get), a half-configured one (`iF`) is installed; after a dkms
 #     install a held amdgpu-dkms passes verify_packages, a half-configured one
-#     (`iF`, `hF`) dies naming the package; the host answers `grep -q '^ii'`
+#     (`iF`, `hF`) dies naming the package (k101: `hF` names the hold first,
+#     the build log after it; `iF` keeps the build-log message only); the host answers `grep -q '^ii'`
 #     and `grep -q '^[hi]i'` as the real grep would (dpkg_l), so these are red
 #     against the code before k89 because of the rating;
 #   * these die with the first change already made but no driver installed:
@@ -710,7 +711,10 @@ subtest 'inbox on RHEL 9, linux-firmware offered by no repository: dies before d
 
 subtest 'a package not installed afterwards (half-configured DKMS): dies, naming the package (golden)' => sub {
   my ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [
-    [ qr{^dpkg -l amdgpu-dkms 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 1 ] ]);
+    [ qr{^dpkg -l amdgpu-dkms 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 1 ],
+    # k101: the hold question, answered as dpkg would for a half-configured, unheld package
+    [ qr{^dpkg-query -W -f='\$\{Package\} \$\{Status\} \$\{Version\}\\n' amdgpu-dkms 2>/dev/null$}
+      => 'amdgpu-dkms install ok half-configured 1:6.16.13-2255209.24.04', 0 ] ]);
   like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured/,
     'dies after the install');
   ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} }), '... no modprobe after a failed verify');
@@ -864,10 +868,25 @@ subtest 'verify_packages after a dkms install: a held amdgpu-dkms passes, a half
   ( $rec, $how ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => 'ii') ]);
   is($rec->{error}, undef, 'ii amdgpu-dkms: lives');
 
-  for my $state (qw( iF hF )) {
-    ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => $state) ]);
-    like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured/,
-      "$state: dies, naming the package");
+  # k101: the host answers the hold question as dpkg would -- iF is
+  # `install ok half-configured`, hF `hold ok half-configured`. The hF claim
+  # of k89 is REPLACED, not kept: a held, half-configured amdgpu-dkms now
+  # names the hold first (the make.log after it); only iF keeps the old
+  # build-log message.
+  for my $case ([ iF => 'install ok half-configured' ], [ hF => 'hold ok half-configured' ]) {
+    my ( $state, $status ) = @$case;
+    ( $rec ) = dkms_case('x', 'ubuntu-24.04', 'mi300x', responses => [ dpkg_l('amdgpu-dkms' => $state),
+      [ qr{^dpkg-query -W -f='\$\{Package\} \$\{Status\} \$\{Version\}\\n' amdgpu-dkms 2>/dev/null$}
+        => "amdgpu-dkms $status 1:6.16.13-2255209.24.04", 0 ] ]);
+    if ($state eq 'iF') {
+      like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; a failed DKMS build leaves it half-configured/,
+        "$state: dies, naming the package");
+      unlike($rec->{error}, qr/on hold/, '... no hold named');
+    }
+    else {
+      like($rec->{error}, qr/\Aamdgpu-dkms not installed after apt-get install -- check the apt output; amdgpu-dkms is on hold, .*apt-mark unhold amdgpu-dkms and install_driver again; if it is still not installed then, a failed DKMS build leaves it half-configured/,
+        "$state: dies, naming the package, the hold first and the build log after");
+    }
     ok(!( grep { $_ eq 'run: modprobe amdgpu' } @{ $rec->{lines} } ), '... no modprobe after a failed verify');
   }
 };

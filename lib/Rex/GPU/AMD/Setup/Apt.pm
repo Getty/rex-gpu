@@ -80,9 +80,19 @@ packages, directly: never L<Rex::Commands::Pkg>.
 =method verify_packages
 
 Each of the plan's packages must be L</package_installed>, C<ii> or C<hi>
-in C<dpkg -l>; dies otherwise. A failed DKMS build makes C<amdgpu-dkms>'s
-post-install exit non-zero, which leaves it half-configured -- C<iF> (C<hF>
-when held), not C<ii> or C<hi>.
+in C<dpkg -l>; dies otherwise, naming the first one that is not. A failed
+DKMS build makes C<amdgpu-dkms>'s post-install exit non-zero, which leaves
+it half-configured -- C<iF> (C<hF> when held), not C<ii> or C<hi> -- and the
+message for C<amdgpu-dkms> points at the build log. With C<amdgpu-dkms> in
+the plan and L</package_held> saying it is on hold, the message names the
+hold as the cause, whichever package is missing -- C<apt-get install -y>
+does not change a held package, and where it would have to (a held
+C<amdgpu-dkms> not installed, or held at another version than the
+candidate) it aborts the whole install -- and C<apt-mark unhold
+amdgpu-dkms> as the way out, before the build log for C<amdgpu-dkms>
+itself. The hold is asked only then, once
+a package is missing: a host where every package went in runs no extra
+command.
 
 =cut
 
@@ -154,14 +164,24 @@ sub install_packages {
   return;
 }
 
+# k101: a held amdgpu-dkms (hold ok not-installed, or held at another version
+# than the candidate) makes apt-get install -y abort the whole install, so
+# whichever package of a dkms plan is checked first is the one missing: the
+# hold is named for any of them, in post_install's words (k95). Asked only
+# once a package is missing, and only for a plan with amdgpu-dkms (not inbox,
+# ROCm or the helpers).
 sub verify_packages {
   my ( $self, $plan ) = @_;
   for my $package (@{ $plan->{packages} }) {
     next if $self->package_installed($package);
-    die "$package not installed after apt-get install -- check the apt output"
-      .( $package eq 'amdgpu-dkms'
-         ? '; a failed DKMS build leaves it half-configured (/var/lib/dkms/amdgpu/*/build/make.log)'
-         : '' )."\n";
+    my $build = 'a failed DKMS build leaves it half-configured (/var/lib/dkms/amdgpu/*/build/make.log)';
+    my $note = $package eq 'amdgpu-dkms' ? "; $build" : '';
+    if (( grep { $_ eq 'amdgpu-dkms' } @{ $plan->{packages} } ) && $self->package_held('amdgpu-dkms')) {
+      $note = '; amdgpu-dkms is on hold, and apt-get install -y does not change a held package (where '
+        .'it would have to, it aborts the install). Run apt-mark unhold amdgpu-dkms and install_driver '
+        .'again'.( length $note ? "; if it is still not installed then, $build" : '' );
+    }
+    die "$package not installed after apt-get install -- check the apt output$note\n";
   }
   return;
 }
