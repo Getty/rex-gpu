@@ -1,0 +1,23 @@
+---
+claimed_at: 2026-11-06T20:18:46Z
+claimed_by: rex-gpu-worker
+class: standard
+completed: 2026-11-06T20:18:46Z
+created: 2026-11-06T19:19:40Z
+id: 105
+priority: low
+started: 2026-11-06T20:13:52Z
+status: done
+tags:
+- amd
+- docs
+title: 'AMD install_driver-POD: Abbrüche aus prepare_source fehlen, repoquery-Abbruch
+  kann schon aus fallback_method kommen'
+updated: 2026-11-06T20:18:50Z
+---
+
+Nebenfund aus k102 (rex-gpu-worker, 2026-11-06). Nur Doku. In der install_driver-POD von Rex::GPU::AMD fehlen die Abbrüche aus prepare_source bei dkms: install_helpers ("curl not installed after apt-get install"), install_key (Download gescheitert, Fingerprint nicht der gepinnte, Key nicht installierbar oder leer), write_file ("Could not write ..."). Sie kommen nach dem Stopp der apt-Timer und ggf. nach curl und gnupg, aber bevor Key bzw. Repo-Datei liegen. Kleinigkeit im selben Absatz: der Fall "on RHEL also when dnf repoquery itself fails" kann bei method auto für eine GPU ohne Hardware-Zeile schon aus fallback_method kommen (AMD.pm um Zeile 236), also vor jeder Änderung.
+
+rex-gpu-worker (2026-11-06): install_driver-POD nennt die dkms-Abbrüche aus prepare_source in Ablauf-Reihenfolge (Hilfspakete curl/gpg nach ihrer Installation fehlend, apt nach apt-get update; Key-Download/Fingerprint: Key-Datei unverändert, nur das Verzeichnis evtl. neu; Key nicht ablegbar: auf RHEL kann die Datei ohne rpm --import liegen; Repo-Datei nicht schreibbar: Key liegt dann schon). Kartenpunkt fallback_method/repoquery NICHT übernommen: für die eingebauten Klassen falsch -- inbox_module_packages ist in der Basis () und nur von Ubuntu überschrieben (apt-cache policy, read-only), auf RHEL läuft dnf repoquery nur in resolve_plan nach prepare_source; der bestehende Satz stimmt so (vom Koordinator gegengeprüft: AMD/Setup.pm:321/835, Ubuntu.pm:130). Karte ungenau auch bei 'bevor Key bzw. Repo-Datei liegen' (write_file nach install_key) und bei nur dem apt-Text für curl. podchecker AMD.pm: 49 Fehler/0 Warnungen wie HEAD (Pod::Weaver =method). Nur POD, nicht gegen Hardware.
+
+Committed 2b87595 (rex-gpu-release-manager), main per ff auf 2b87595.
