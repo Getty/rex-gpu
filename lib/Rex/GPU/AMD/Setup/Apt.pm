@@ -212,7 +212,8 @@ sub place_key {
 
   my $how = $setup->install_rocm($rocm, \@targets);   # 'present' or 'installed'
 
-Host-read-only first: L</rocm_repo_dir> (dies without one), C<amd64>,
+Host-read-only first: L<Rex::GPU::AMD::Setup/rocm_repo_dir>
+(dies without one), C<amd64>,
 C<dpkg-query> of C<rocm-core> (in any state but C<not-installed> and
 C<config-files>, as L</package_on_disk> counts -- held, unpacked and
 half-configured too: dies; AMD requires removing the old ROCm line first,
