@@ -119,7 +119,9 @@ via `update-initramfs`/`dracut`), then reboot-and-verify or `modprobe nvidia`.
 ## Never Rex::Pkg for the driver/toolkit — the load-bearing invariant
 
 Driver and toolkit installs call `run "apt-get/dnf/zypper install -y …", auto_die => 0`
-directly, then verify with `dpkg -l | grep '^ii'` / `rpm -q`. **Not `pkg`.**
+directly, then verify with `dpkg -l PKG | grep -q '^[hi]i'` / `rpm -q`. **Not `pkg`.**
+Held (`hi`) counts as installed; half-configured (`iF`/`hF`, a failed DKMS postinst) and
+unpacked (`iU`) do not.
 `Rex::Pkg::{Apt,Dnf}` dies on any non-zero exit, and DKMS module builds, grub updates and
 initramfs regeneration routinely exit non-zero on success. `pkg` is fine only for
 inert helpers (`pciutils`, `curl`, `gnupg`, `epel-release`). Route a real driver package

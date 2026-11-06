@@ -44,7 +44,8 @@ dpkg lock, a cold host where nouveau has not been unloaded yet.
 
 - **The install-verify seam is the security-relevant line.** `install_driver` /
   `install_container_toolkit` deliberately bypass `pkg` and verify with
-  `dpkg -l | grep '^ii'` / `rpm -q`. If you touch either half — the `run "... install"` or
+  `dpkg -l PKG | grep -q '^[hi]i'` / `rpm -q` (held `hi` counts; half-configured `iF`/`hF`
+  and unpacked `iU` do not). If you touch either half — the `run "... install"` or
   the verification — say what a partial install (driver `.deb` unpacked, DKMS build failed)
   now reports. Silently swallowing a real failure is worse than a false alarm here.
 
