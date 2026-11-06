@@ -43,7 +43,7 @@ use lib "$Bin/lib";
 # -----------------------------------------------------------------------------
 
 use Test::RexGPU::Golden qw(
-  record_host golden_is host_names host_profile gpu_fixture mutating_lines working_driver
+  record_host golden_is host_names host_profile gpu_fixture mutating_lines working_driver dpkg_l
 );
 use Rex::GPU::NVIDIA;
 
@@ -157,7 +157,7 @@ golden_is(
 # postinst): dies after the install, before nouveau is touched.
 golden_is(
   driver_on(host_profile('debian-12', responses => [
-    [ q{dpkg -l nvidia-driver 2>/dev/null | grep -q '^ii'} => '', 1 ]
+    dpkg_l('nvidia-driver' => 'iF')
   ]), gpu_fixture('ada')),
   'driver/debian-12--ada--not-installed'
 );

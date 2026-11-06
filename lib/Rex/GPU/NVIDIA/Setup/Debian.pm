@@ -241,9 +241,9 @@ sub prepare_source {
   $self->add_nvidia_cuda_apt_repo($repo);
 
 Installs the C<cuda-keyring> package of C<$repo> (signing key plus the
-sources.list.d entry) with C<apt-get>, and dies unless it is C<ii>
-afterwards -- without it the driver install could only fail with a misleading
-"unable to locate package".
+sources.list.d entry) with C<apt-get>, and dies unless it is C<ii> or C<hi>
+(held) afterwards, not half configured -- without it the driver install could
+only fail with a misleading "unable to locate package".
 
 =cut
 
@@ -256,7 +256,8 @@ sub add_nvidia_cuda_apt_repo {
     . $repo->{keyring_url}
     . q{ && DEBIAN_FRONTEND=noninteractive }.$self->apt_get.q{ install -y "$t/cuda-keyring.deb"; rm -rf "$t"},
     auto_die => 0);
-  my $check = $self->run_cmd("dpkg -l cuda-keyring 2>/dev/null | grep -q '^ii'", auto_die => 0);
+  # k94: a held (hi) cuda-keyring counts, as in Apt's verify_packages
+  my $check = $self->run_cmd("dpkg -l cuda-keyring 2>/dev/null | grep -q '^[hi]i'", auto_die => 0);
   die "cuda-keyring not installed — cannot add NVIDIA's CUDA repo ($repo->{keyring_url})\n"
     if $? != 0;
 }

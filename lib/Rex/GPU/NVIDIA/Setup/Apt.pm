@@ -162,16 +162,20 @@ sub install_packages {
 
 =method verify_packages
 
-Dies unless every package in C<< $plan->{verify} >> is C<ii> in C<dpkg -l>.
-A DKMS build that fails in postinst leaves the package half-configured (not
-C<ii>), so a partial install dies here.
+Dies unless every package in C<< $plan->{verify} >> is installed and
+configured in C<dpkg -l>, held (C<hi>) or not (C<ii>). A DKMS build that
+fails in postinst leaves the package half-configured -- C<iF> (C<hF> when
+held), not C<ii> or C<hi> -- so a partial install dies here.
 
 =cut
 
+# k94: hi (apt-mark hold, installed and configured) counts, as on the AMD
+# apt layer (k89) and in NVIDIA's _toolkit_present; half-installed or
+# half-configured states (iU, iF, hF, iH, ...) do not.
 sub verify_packages {
   my ( $self, $plan ) = @_;
   for my $driver_pkg (@{ $plan->{verify} }) {
-    my $check = $self->run_cmd("dpkg -l $driver_pkg 2>/dev/null | grep -q '^ii'", auto_die => 0);
+    my $check = $self->run_cmd("dpkg -l $driver_pkg 2>/dev/null | grep -q '^[hi]i'", auto_die => 0);
     die "$driver_pkg not installed after apt-get install — check apt output\n"
       if $? != 0;
   }
@@ -201,8 +205,9 @@ version aborts on the driver check.
 
 =method verify_versioned_package
 
-C<dpkg -l ... ^ii>, then the installed upstream version (C<dpkg-query>) must
-be C<$version>.
+L</verify_packages> (C<ii> or C<hi> in C<dpkg -l>), then the installed
+upstream version (C<dpkg-query>) must be C<$version>: a package held at
+another version dies here.
 
 =cut
 
@@ -310,8 +315,8 @@ sub _apt_candidate_present {
 B<Experimental>, like L<Rex::GPU::NVIDIA::Setup>. The apt/dpkg half shared by
 L<Rex::GPU::NVIDIA::Setup::Debian> and L<Rex::GPU::NVIDIA::Setup::Ubuntu>:
 the lock timeout on every C<apt-get>, stopping the apt timers, C<apt-get
-update>, C<apt-get install> run directly and C<dpkg -l ... ^ii> as the only
-evidence of an install.
+update>, C<apt-get install> run directly and C<dpkg -l> -- C<ii> or C<hi>,
+never half configured -- as the only evidence of an install.
 
 =head1 SEE ALSO
 

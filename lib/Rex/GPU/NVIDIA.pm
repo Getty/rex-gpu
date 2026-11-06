@@ -723,7 +723,8 @@ to 120 seconds for the zypp lock (L<Rex::GPU::NVIDIA::Setup::SUSE/zypper>).
 
 The package is installed with C<apt-get>/C<dnf>/C<zypper> directly, never
 through L<Rex::Commands::Pkg/pkg>, and the result is checked with C<dpkg -l>
-(C<ii>) or C<rpm -q> on every distro, openSUSE included.
+(C<ii> or C<hi>, not half configured) or C<rpm -q> on every distro, openSUSE
+included.
 
 Dies if the OS is not supported or if installation fails, and, before
 anything is asked of the host, on an option other than C<binaries_suffice>
@@ -1181,7 +1182,7 @@ sub _install_toolkit_debian {
 
   # The driver path's apt layer (karr #37): the apt timers stopped before the
   # first apt-get, DPkg::Lock::Timeout on every one, install run directly and
-  # dpkg -l ^ii as the only evidence. After the first-deploy reboot
+  # dpkg -l ii/hi as the only evidence. After the first-deploy reboot
   # apt-daily/cloud-init hold the dpkg lock; Rex::Pkg (pkg) has no lock
   # timeout and stopping the timers does not release a lock cloud-init holds,
   # so curl/gnupg go through apt-get too. --no-upgrade keeps pkg's

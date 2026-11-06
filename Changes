@@ -48,6 +48,11 @@ Revision history for Rex-GPU
   - AMD support is experimental: only detection, verify_amd, the no-op
     paths and the refusals ran, read-only, on one Ryzen AI Max+ 395 host.
     No AMD install, modprobe, reboot or install_rocm has run on hardware.
+  - On Debian and Ubuntu a held (apt-mark hold) driver, Fabric Manager,
+    NVLink fabric, container toolkit or helper package and a held
+    cuda-keyring count as installed, as on the AMD apt layer; a half
+    installed or half configured one does not. A Fabric Manager held at
+    another version than the driver still dies at the version check.
 
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which

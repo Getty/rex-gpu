@@ -62,6 +62,7 @@ our @EXPORT_OK = qw(
   mutating_lines
   transcript
   working_driver
+  dpkg_l
 );
 
 my $GOLDEN_DIR = path(__FILE__)->absolute->parent(4)->child('golden');
@@ -79,8 +80,12 @@ my @COMMON = (
   # no CUDA library in the linker cache (karr #42); a test with a working
   # driver scripts it present
   [ qr{^/sbin/ldconfig -p }                => '', 1 ],
-  [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^ii'$} => '', 0 ],
-  # the AMD apt layer counts a held package (hi) as installed too (k89)
+  # the apt layers count a held package (hi) as installed (AMD k89, NVIDIA
+  # k94). There is deliberately no default for the old `grep -q '^ii'` form
+  # any more: no lib/ code emits it, and a rule kept for it would only make a
+  # regression back to it look like any other probe. Unscripted it still
+  # answers success (see _respond), but it is no longer in READ_ONLY, so it
+  # shows as a mutating line and as a golden diff; dpkg_l scripts it by state.
   [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 0 ],
   [ q{rpm -q --qf '%{VERSION}' nvidia-driver 2>&1} => '580.95.05', 0 ],
   [ qr{^rpm -q (?:--whatprovides )?(\S+) 2>&1$} => 'installed', 0 ],
@@ -462,6 +467,27 @@ sub _opt_tag {
   return '('.join(',', map { $_.'='.( $o{$_} // 'undef' ) } sort keys %o).')';
 }
 
+# dpkg_l(PKG => 'hi', ...) => Golden responses for the two forms of the check
+# the apt layers have used, `dpkg -l PKG | grep -q '^ii'` (before k89 for AMD,
+# before k94 for NVIDIA) and `... grep -q '^[hi]i'`, for a package in the given
+# first-two-columns state of `dpkg -l` ('ii' installed, 'hi' installed and
+# held, 'iF' half-configured, 'hF' held and half-configured, 'iU' unpacked,
+# 'ri' ...): the host answers each grep as the real one would, so a code
+# version using either form sees the same host. Hand-written; the grep itself
+# is not run, its answer is what the status column would give it.
+# Put before the profile's other responses (host_profile(responses => [...])).
+sub dpkg_l {
+  my ( %state ) = @_;
+  my @r;
+  for my $pkg (sort keys %state) {
+    my $s = $state{$pkg};
+    push @r,
+      [ qr{^dpkg -l \Q$pkg\E 2>/dev/null \| grep -q '\^ii'$} => '', $s =~ /\Aii\z/ ? 0 : 1 ],
+      [ qr{^dpkg -l \Q$pkg\E 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', $s =~ /\A[hi]i\z/ ? 0 : 1 ];
+  }
+  return @r;
+}
+
 #### Classification ###########################################################
 
 # Transcript lines that change the host. Everything else is a read-only probe.
@@ -474,7 +500,7 @@ my @READ_ONLY = (
   qr{${RUN}cat \S+ 2>/dev/null$},
   qr{${RUN}ls -1 \S+ 2>/dev/null$},
   qr{${RUN}(?:LC_ALL=C )?apt-cache (?:search|policy) },
-  qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^(?:ii|\[hi\]i)'$},
+  qr{${RUN}dpkg -l \S+ 2>/dev/null \| grep -q '\^\[hi\]i'$},
   qr{${RUN}nvidia-ctk --version 2>&1$},
   # karr #74: install_container_toolkit(binaries_suffice => 1)'s `command -v`
   # probes -- read-only on every OS, run before the package manager is asked

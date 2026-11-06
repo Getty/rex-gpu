@@ -18,7 +18,7 @@ use Test::More;
 #     fixtures; a real card may emit a name format the regexes do not expect).
 #   * install_driver on each distro family — Debian, Ubuntu, RHEL/Rocky/Alma,
 #     openSUSE — including the per-family package lists and version branches.
-#   * the Rex::Pkg-bypass verify seam (dpkg -l '^ii' / rpm -q) against a
+#   * the Rex::Pkg-bypass verify seam (dpkg -l '^[hi]i' / rpm -q) against a
 #     partial/failed DKMS build.
 #   * the nouveau blacklist + initramfs regeneration (Setup post_install:
 #     update-initramfs / dracut).

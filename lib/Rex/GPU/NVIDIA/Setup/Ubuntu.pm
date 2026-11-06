@@ -136,8 +136,9 @@ update>.
 
 =back
 
-A host that has C<cuda-keyring> installed already has the repository (with
-NVIDIA's own pin): nothing is added there, only C<apt-get update>. Dies,
+A host that has C<cuda-keyring> installed (C<ii> or C<hi> in C<dpkg -l>,
+not half configured) already has the repository (with NVIDIA's own pin):
+nothing is added there, only C<apt-get update>. Dies,
 before anything is added, when the key cannot be fetched; the driver and
 Fabric Manager stay installed.
 
@@ -191,7 +192,8 @@ sub prepare_nvlink_fabric_source {
   my $repo = $self->_nvlsm_repo
     or die 'No NVIDIA CUDA repository for nvlsm on this Ubuntu host; the driver and '
       ."Fabric Manager are installed, nvlsm is not\n";
-  $self->run_cmd("dpkg -l cuda-keyring 2>/dev/null | grep -q '^ii'", auto_die => 0);
+  # k94: a held (hi) cuda-keyring has the same files, so it counts too
+  $self->run_cmd("dpkg -l cuda-keyring 2>/dev/null | grep -q '^[hi]i'", auto_die => 0);
   if ($? == 0) {
     Rex::Logger::info('  cuda-keyring is installed: NVIDIA\'s CUDA repository is already '
       .'configured (with its own apt pin), nothing is added');
