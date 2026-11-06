@@ -53,6 +53,10 @@ Revision history for Rex-GPU
     cuda-keyring count as installed, as on the AMD apt layer; a half
     installed or half configured one does not. A Fabric Manager held at
     another version than the driver still dies at the version check.
+  - On Debian and Ubuntu, install_driver (dkms) names a hold on amdgpu-dkms
+    as the cause when no amdgpu module is built for the running kernel after
+    the install, and apt-mark unhold amdgpu-dkms as the way out; new method
+    package_held in the AMD setup package layer (no host command on RHEL).
 
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which

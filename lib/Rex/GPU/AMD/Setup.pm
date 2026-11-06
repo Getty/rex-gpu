@@ -408,7 +408,12 @@ C<inbox>: C<modinfo -n amdgpu> must now find a module for the running
 kernel. C<dkms>: C<dkms status> must show C<amdgpu> installed for the
 running kernel B<and> C<modinfo -n amdgpu> resolve the DKMS module -- an
 RPM whose C<%post> build failed is still installed for C<rpm -q>, so the
-package check alone proves nothing. Dies otherwise.
+package check alone proves nothing. Dies otherwise. When no module is built
+and L</package_held> says C<amdgpu-dkms> is on hold (apt: C<apt-mark
+hold>), the message names the hold -- C<apt-get install -y> does not change
+a held package, and aborts the install where it would have to -- and
+C<apt-mark unhold amdgpu-dkms> as the way out, before the build log; asked
+only then, so a host where the module is there runs no extra command.
 
 =cut
 
@@ -417,9 +422,18 @@ sub post_install {
   my $kernel = $self->kernel;
   my $source = $self->amd->module_source(kernel => $kernel) // '';
   if ($plan->{method} eq 'dkms') {
-    die "install_driver: amdgpu-dkms is installed, but dkms reports no amdgpu module built and "
-      ."installed for kernel $kernel; see /var/lib/dkms/amdgpu/*/build/make.log\n"
-      unless $self->dkms_built;
+    unless ($self->dkms_built) {
+      # k95: apt-get install -y leaves a held amdgpu-dkms as it is (or aborts
+      # the whole install), so the hold goes first in the message
+      die "install_driver: amdgpu-dkms is installed, but dkms reports no amdgpu module built and "
+        ."installed for kernel $kernel; amdgpu-dkms is on hold, and apt-get install -y does not "
+        ."change a held package (where it would have to, it aborts the install). Run apt-mark "
+        ."unhold amdgpu-dkms and install_driver again; if the module is still missing then, see "
+        ."/var/lib/dkms/amdgpu/*/build/make.log\n"
+        if $self->package_held('amdgpu-dkms');
+      die "install_driver: amdgpu-dkms is installed, but dkms reports no amdgpu module built and "
+        ."installed for kernel $kernel; see /var/lib/dkms/amdgpu/*/build/make.log\n";
+    }
     die "install_driver: amdgpu-dkms is built for kernel $kernel, but modinfo still resolves "
       ."amdgpu to ".( length $source ? "the $source module" : 'no module' )."\n"
       unless $source eq 'dkms';
@@ -569,6 +583,10 @@ C<x86_64> (C<amd64> in L<Rex::GPU::AMD::Setup::Apt>).
 
   $setup->package_installed($package);
 
+=method package_held
+
+  $setup->package_held($package);
+
 =method install_helpers
 
 =method install_packages
@@ -578,10 +596,12 @@ C<x86_64> (C<amd64> in L<Rex::GPU::AMD::Setup::Apt>).
 The packaging layer, implemented by L<Rex::GPU::AMD::Setup::Apt> and
 L<Rex::GPU::AMD::Setup::RHEL>: refresh the package index, does a package
 have an installation candidate -- already installed, or installable from
-the host's package sources (here: assumed yes) --, is it installed,
-install C<curl> and C<gpg> when missing, install the plan's packages
-(directly, never through L<Rex::Commands::Pkg>) and verify every one of
-them installed (dies otherwise).
+the host's package sources (here: assumed yes) --, is it installed, is it
+on hold (the package manager does not change it; here: no, without a host
+command, and so on RHEL; only L</post_install> asks), install C<curl> and
+C<gpg> when missing, install the plan's packages (directly, never through
+L<Rex::Commands::Pkg>) and verify every one of them installed (dies
+otherwise).
 
 =cut
 
@@ -589,6 +609,7 @@ sub supported_arch   { 'x86_64' }
 sub refresh_index    { }
 sub has_candidate    { 1 }
 sub package_installed { 0 }
+sub package_held     { 0 }
 sub install_helpers  { }
 sub install_packages { die ref($_[0])." has no install_packages\n" }
 sub verify_packages  { die ref($_[0])." has no verify_packages\n" }

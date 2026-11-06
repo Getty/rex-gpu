@@ -59,6 +59,12 @@ any state but C<not-installed> and C<config-files> -- unlike
 L</package_installed>, held, unpacked, half-configured and half-installed
 count too. Read-only.
 
+=method package_held
+
+C<dpkg-query -W> of PKG: true when dpkg's selection for it -- the first
+word of C<${Status}> -- is C<hold> (C<apt-mark hold>), in any state,
+installed or not. Read-only.
+
 =method install_helpers
 
 C<curl> and C<gpg>, only if C<command -v> does not find them: after an
@@ -116,6 +122,13 @@ sub package_on_disk {
   my $out = $self->run_cmd(q{dpkg-query -W -f='${Status}\n' }.$package.' 2>/dev/null') // '';
   return ( grep { /\A\S+ \S+ (\S+)\s*\z/ && $1 ne 'not-installed' && $1 ne 'config-files' }
     split /\r?\n/, $out ) ? 1 : 0;
+}
+
+# k95: WANT of "WANT EFLAG STATUS" (hold ok installed, hold ok not-installed)
+sub package_held {
+  my ( $self, $package ) = @_;
+  my $s = $self->_dpkg_status($package)->{$package};
+  return $s && $s->{status} =~ /\Ahold / ? 1 : 0;
 }
 
 sub install_helpers {
