@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-06T20:09:59Z
+id: 110
+priority: low
+status: backlog
+tags:
+- amd
+- messages
+- behavior
+title: 'AMD unter gpu_setup: ''Nothing was installed'' / ''No driver package was installed''
+  stimmen auf einem gemischten Host nicht'
+updated: 2026-11-06T20:09:59Z
+---
+
+Nebenfund aus k104 (rex-gpu-worker, 2026-11-06). Unter gpu_setup auf einem Host mit CUDA-fähiger NVIDIA-GPU enden einige AMD-Abbrüche nach apt-get update weiter mit 'Nothing was installed' (resolve_plan/_unresolved_note für inbox, AMD/Setup.pm ~Z. 400) bzw. sagen 'No driver package was installed' (has_candidate in AMD/Setup/RHEL.pm ~Z. 179; bei dkms mitten in der Meldung von _unresolved_note). Im gpu_setup-Zusammenhang kann dann schon ein NVIDIA-Treiberpaket installiert sein (und pciutils). k104 hat nur den Schluss-Satz 'Nothing was changed on the host' umgeschrieben. Idee: dieselbe Umschreibung in gpu_setup ('for the AMD GPU'), oder den Satz auf AMD-Pakete einschränken. Meldungstext, also Verhalten: Changes, Tests, Goldens. Entscheidung Maintainer. Nicht gegen Hardware geprüft.
