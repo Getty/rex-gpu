@@ -178,6 +178,15 @@ These messages end with C<Nothing was changed on the host>; called from
 L<Rex::GPU/gpu_setup>, whose earlier steps may have changed the host
 (C<pciutils>, the NVIDIA steps), they end with C<Nothing was changed for
 the AMD GPU> (C<GPUs> for several) instead.
+For C<dkms> it dies before any driver package is installed, but after the
+apt timers are stopped (apt), in L<Rex::GPU::AMD::Setup/prepare_source>,
+which puts AMD's repository in place: when a missing C<curl> or C<gpg> is
+not installed after its install (apt: after an C<apt-get update>; the
+other one may be installed by then); after that, when AMD's signing key
+cannot be downloaded or is not the pinned one (the key file is left as it
+was; only its directory is created if it was missing), or cannot be put in
+place (on RHEL the key file may then be there, not C<rpm --import>ed); and,
+with the key in place, when the repository file cannot be written.
 Dies before any driver package is installed, but after the apt timers are
 stopped and C<apt-get update> ran (apt) and, for C<dkms>, with C<curl> and
 C<gpg> installed where they were missing and AMD's signing key and
