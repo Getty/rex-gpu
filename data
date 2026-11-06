@@ -1,0 +1,25 @@
+---
+claimed_at: 2026-11-06T19:36:04Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T19:36:04Z
+created: 2026-11-06T18:58:04Z
+id: 101
+priority: low
+started: 2026-11-06T19:21:21Z
+status: done
+tags:
+- amd
+- dkms
+- apt
+- message
+title: 'AMD dkms: ein gehaltenes, nicht installiertes amdgpu-dkms (hold ok not-installed)
+  stirbt erst in verify_packages, ohne den Hold zu nennen'
+updated: 2026-11-06T19:36:04Z
+---
+
+Nebenfund aus k95 (rex-gpu-worker, 2026-11-06). k95 nennt einen Hold in post_install, wenn amdgpu-dkms installiert ist, aber kein Modul gebaut wurde. Nicht erfasst: (1) amdgpu-dkms mit Want hold, aber nicht installiert (hold ok not-installed): prepare_source schreibt Key und Repo, apt-get install -y bricht die ganze Transaktion ab (Held packages were changed, Exit 100, ignoriert), verify_packages stirbt am ersten fehlenden Paket mit dem make.log-Hinweis, post_install wird nicht erreicht. (2) amdgpu-dkms gehalten auf einer anderen Version als dem Kandidaten und ein Header- oder modules-extra-Paket fehlt: gleiches Muster, verify_packages nennt das fehlende Paket, nicht den Hold. Vorschlag worker: plan_dkms lehnt Hold und nicht auf der Platte vor jeder Änderung ab (Nothing was changed on the host); apt-get -y ohne --allow-change-held-packages installiert nie ein gehaltenes Paket, also kein Fehlalarm. Kosten: ein dpkg-query in jedem apt-dkms-Plan, jedes apt-dkms-Golden bekommt eine Zeile. Offen außerdem: ist amdgpu-dkms auf der Kandidatenversion gehalten, ist der Hold nicht die Ursache, die k95-Meldung nennt ihn trotzdem zuerst (make.log bleibt als Rückfall); genauer wäre ein Vergleich Installed/Candidate per apt-cache policy. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
+
+verify_packages (apt) nennt einen Hold auf amdgpu-dkms in einem dkms-Plan, sobald ein Paket fehlt, mit apt-mark unhold als Ausweg; ein lesendes dpkg-query nur auf dem Fehlerpfad, Erfolgspfad ohne neue Host-Zeile; ein Fehler-Golden bekommt eine Zeile. Tests t/17-amd-dkms-held.t und t/17-amd-install-driver.t, rot gegen das alte lib (12 bzw. 2 Tests), grün mit dem neuen; prove Files=47 Tests=1942 PASS. Ersetzter Claim: ein gehaltenes hF nennt jetzt zuerst den Hold. Offen: Hold auf der Kandidatenversion bei fehlendem Header nennt den Hold trotzdem. Nicht gegen Hardware geprüft.
+
+Commit 9e7a93f (main per ff), mit Changes-Eintrag. Neue Funde als k108 und k109 im Backlog.
