@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-06T19:20:02Z
+id: 107
+priority: low
+status: backlog
+tags:
+- nvidia
+- hardware
+- debian
+title: 'Generationszeile Turing/Ampere/Ada/Hopper ohne min_branch: Debian 11 non-free
+  wählt 470 auch für Ada und Hopper'
+updated: 2026-11-06T19:20:02Z
+---
+
+Nebenfund aus der k100-Analyse (rex-gpu-worker, read-only, 2026-11-06). Lane hardware-curator. Die Zeile Turing/Ampere/Ada/Hopper (0x1df7 bis 0x28ff) in Requirement.pm um Zeile 343 hat kein min_branch. Debian 11 non-free (Branch 470) besteht damit auch für Ada oder Hopper, die 470 nach Wissen des Workers nicht treibt. Zu prüfen gegen NVIDIAs Support-Listen: brauchen Ada und Hopper eine Untergrenze, und muss die Zeile dafür geteilt werden? Eine Branch-Prüfung nach dem Install (k100) fängt das nicht, weil sie gegen dieselbe Anforderung prüft. Nicht gegen Hardware geprüft.
