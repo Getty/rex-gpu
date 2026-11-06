@@ -1,0 +1,17 @@
+---
+class: standard
+created: 2026-11-06T19:35:40Z
+id: 108
+priority: low
+status: backlog
+tags:
+- amd
+- dkms
+- apt
+- message
+title: 'AMD apt dkms: ein Hold auf ein anderes Paket als amdgpu-dkms bleibt ungenannt,
+  und der Hold auf der Kandidatenversion wird zu Unrecht genannt'
+updated: 2026-11-06T19:35:40Z
+---
+
+Nebenfund aus k101 (rex-gpu-worker, 2026-11-06). (1) Auch ein Hold auf ein anderes Paket bricht apt-get install -y ab und wird nicht genannt: etwa amdgpu-dkms-firmware (amdgpu-dkms hängt nach Wissen des Workers davon ab, für 31.60 nicht geprüft) oder ein gehaltenes, nicht installiertes Header-Paket. (2) Ist amdgpu-dkms auf der Kandidatenversion gehalten und fehlt ein Header, nennt verify_packages den Hold trotzdem, obwohl er nicht die Ursache ist; genauer wäre ein Vergleich Installed/Candidate per apt-cache policy (ein weiterer Befehl auf dem Fehlerpfad). (3) Der Hold-Wortlaut steht jetzt in post_install (Basis) und in verify_packages (apt); ein gemeinsamer Helfer hielte beide gleich. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
