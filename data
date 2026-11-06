@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-06T19:19:51Z
+id: 106
+priority: low
+status: backlog
+tags:
+- nvidia
+- rhel
+- behavior
+title: 'RHEL NVIDIA: cuda-open-dkms ohne Branch-Prüfung nach dem Install, ein geschluckter
+  Stream-Enable lässt einen älteren Branch bestehen'
+updated: 2026-11-06T19:19:51Z
+---
+
+Nebenfund aus der k100-Analyse (rex-gpu-worker, read-only, 2026-11-06). Dieselbe Lücke wie k100, auf RHEL: die Anforderung ist branch_at_least 580, nach dem Install prüft nichts den installierten Branch. Bei stream_optional wird ein gescheitertes dnf module enable mit "|| true" geschluckt (RHEL.pm um Zeile 368-370). Ein früher aktivierter älterer Stream installiert dann seinen Branch, und rpm -q nvidia-driver besteht. Dieselbe Fehlerklasse wie k26 (pin_branch) und k100: am besten mit dem Ort lösen, den k100 bekommt. Nicht gegen Hardware geprüft.
