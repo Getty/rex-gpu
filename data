@@ -1,0 +1,24 @@
+---
+claimed_at: 2026-11-06T19:17:59Z
+claimed_by: ocp-k94-k97
+class: standard
+completed: 2026-11-06T19:17:59Z
+created: 2026-11-06T19:03:43Z
+id: 102
+priority: low
+started: 2026-11-06T19:07:17Z
+status: done
+tags:
+- pod
+- readme
+- drift
+title: 'Reboot-Wartezeit und Abbruch-Reichweite: README und install_driver-POD sagen
+  noch 5 Minuten bzw. before any change'
+updated: 2026-11-06T19:17:59Z
+---
+
+Nebenfund aus k98 (rex-gpu-worker, 2026-11-06); k98 hat nur die gpu_setup-POD in lib/Rex/GPU.pm korrigiert. Gleiche Aussagen anderswo: (1) README.md um Z. 82, Absatz 'gpu_setup passes ...': 'Anything else, nomodeset or an amdgpu blacklist dies before any change' -- über gpu_setup ist auf einem gemischten Host der NVIDIA-Teil dann schon gelaufen. (2) lib/Rex/GPU/NVIDIA.pm install_driver, Item reboot (um Z. 67-73): 'waits up to 5 minutes, polling every 5 seconds', host zählt als zurück bei echo ok -- es fehlen die 20 s vorab und die neue boot_id (seit k78); Codekommentar um Z. 1784 sagt ebenfalls 'up to 5 minutes'. (3) lib/Rex/GPU/AMD.pm install_driver um Z. 149-150: 'up to about 5 minutes', tatsächlich mindestens 5 min 20 s (reboot_and_wait-POD selbst ist genau). Nur Doku; README ist Hauptagent-Lane, POD/Kommentar worker.
+
+Doku fertig: README Zeile 82, install_driver-POD in NVIDIA.pm und AMD.pm, Kommentar in _reboot_and_wait. Wartezeit 20 s, dann bis zu 60 Versuche im Abstand von 5 s, neue boot_id, sonst die. AMD: Abbruch erst nach Detection und NVIDIA-Schritten unter gpu_setup; bei dkms koennen curl, gpg, Key und Repo-Datei schon liegen. podcheck 21 von 21 sauber, prove gruen, keine Goldens bewegt.
+
+Commit f6c0cf5 (main per ff). Nur Doku, kein Changes-Eintrag.
