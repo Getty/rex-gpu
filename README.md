@@ -94,7 +94,7 @@ if (@amd) {   # gpus => [] dies; omitting gpus means every AMD GPU of the host
 }
 ```
 
-Tested on one AMD host only (Ubuntu 24.04, Ryzen AI Max+ 395 class APU `1002:1586`, gfx1151, inbox `amdgpu` already working), and only read-only: detection, `verify_amd`, the no-op paths, the refusals and `gpu_setup` with and without `amd_integrated`. The inbox install, the `amdgpu-dkms` install, `modprobe`, the reboot path and `install_rocm` have not run on any AMD hardware.
+Tested on one AMD host only (Ubuntu 24.04, Ryzen AI Max+ PRO 495 class APU `1002:1586`, gfx1151, inbox `amdgpu` already working), and only read-only: detection, `verify_amd`, the no-op paths, the refusals and `gpu_setup` with and without `amd_integrated`. The inbox install, the `amdgpu-dkms` install, `modprobe`, the reboot path and `install_rocm` have not run on any AMD hardware.
 
 ### MIG (A100 / H100 / B200)
 

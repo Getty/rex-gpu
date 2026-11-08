@@ -63,7 +63,7 @@ use Rex::Logger;
 #   [libdrm]            gitlab.freedesktop.org/mesa/drm main @ 3b5e41a44cd1
 #                       (2026-10-27), data/amdgpu.ids: (device ID, revision) ->
 #                       marketing name
-#   [synapse-kfd]       live read on synapse.ai.citilan.de, 2026-10-31: PCI 1002:1586,
+#   [synapse-kfd]       live read on a Strix Halo test host, 2026-10-31: PCI 1002:1586,
 #                       class 0380, rev da; KFD gfx_target_version 110501 (gfx1151);
 #                       Ryzen AI Max+ PRO 495 / Radeon 8065S
 #   pci.ids 2026.10.30  names and codenames only; it never decides a row.

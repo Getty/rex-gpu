@@ -53,7 +53,7 @@ Revision history for Rex-GPU
     compute undef and gets no driver. A placeholder name "Device" becomes
     "AMD GPU [1002:XXXX]". The lspci read command string changed.
   - AMD support is experimental: only detection, verify_amd, the no-op
-    paths and the refusals ran, read-only, on one Ryzen AI Max+ 395 host.
+    paths and the refusals ran, read-only, on one Ryzen AI Max+ PRO 495 host.
     No AMD install, modprobe, reboot or install_rocm has run on hardware.
   - On Debian and Ubuntu a held (apt-mark hold) driver, Fabric Manager,
     NVLink fabric, container toolkit or helper package and a held
