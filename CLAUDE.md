@@ -25,7 +25,7 @@ hazards are in `.claude/rules/rex-gpu-rules.md`.
 
 The agents carry their skills via `briefing.skills` (see `.claude/agents/`); the main agent
 delegates rather than loading them. Skill sources live under `.claude/skills/` —
-`rex-gpu-core` is owned here, the rest are hardlinks (`manage-skills sync` after a clone).
+`rex-gpu-core` is owned here, the rest are installed by skilletor from `.claude/skilletor.json`.
 
 ## Build and test
 
