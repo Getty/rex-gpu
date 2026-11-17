@@ -70,6 +70,7 @@ Revision history for Rex-GPU
     leaves apt-get install -y's whole install undone -- with apt-mark
     unhold amdgpu-dkms as the way out; dpkg is asked only on that failure
     path.
+  - Recommends Rex::LibSSH 0.006.
 
 0.005     2026-10-21 20:21:08Z
   - detect (lspci and sysfs) now lists AMD Instinct accelerators, which
