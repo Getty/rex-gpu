@@ -319,11 +319,15 @@ subtest 'unresolved name at class 0300 — every Blackwell ID => compute' => sub
     'upper-case device id matches too');
 
   # Range edges: the Blackwell block is 2900-2FFF; 28ff just below is the end
-  # of the Turing..Hopper row (compute since karr #54), 3000 just above and
-  # the neighbours of the Blackwell Ultra IDs are in no row at all.
+  # of the Ada block (compute since karr #54, its own block since k107),
+  # 3000 just above and the neighbours of the Blackwell Ultra IDs are in no
+  # row at all. The Turing/Ampere | Hopper | Turing/Ampere | Ada edges
+  # (k107) are compute on both sides.
   is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'Device', '2900'), 1, '2900 (block start) => compute');
   is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'Device', '2fff'), 1, '2fff (block end) => compute');
-  is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'Device', '28ff'), 1, '28ff (Turing..Hopper row end) => compute');
+  is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'Device', '28ff'), 1, '28ff (Ada block end) => compute');
+  is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'Device', $_), 1, $_.' (Turing..Ada block edge) => compute')
+    for qw( 22ff 2300 23ff 2400 25ff 2600 );
   {
     no warnings 'redefine';
     local *Rex::Logger::info = sub { };
@@ -528,7 +532,7 @@ subtest 'resolved names: RTX laptop parts are compute by name' => sub {
   is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'GB202M [GeForce RTX 5090 Laptop GPU]', '2c18'), 1,
     'resolved "RTX 5090 Laptop GPU" => compute (range and name agree)');
   is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'AD103M / AD104M [GeForce RTX 4090 Laptop GPU]', '2717'), 1,
-    'Ada "RTX 4090 Laptop GPU" => compute (Turing..Hopper row since karr #54, RTX name rule before)');
+    'Ada "RTX 4090 Laptop GPU" => compute (generation row since karr #54, RTX name rule before)');
   is(Rex::GPU::Detect->_is_nvidia_compute('0300', 'GB202 [GeForce RTX 5090]', '2b85'), 1,
     'resolved RTX 5090 => compute');
   no warnings 'redefine';

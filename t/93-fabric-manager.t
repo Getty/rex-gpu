@@ -214,11 +214,15 @@ golden_is(hgx_on(host_profile('rocky-10', responses => [ @RHEL_FM ])), 'driver/r
 }
 
 # No source with a Fabric Manager: dies in plan, read-only probes only.
-for my $case ([ 'debian-12', release => '11.11' ], [ 'leap-15.6' ], [ 'leap-16.0' ]) {
-  my ( $os, @over ) = @$case;
+# Debian 11 dies one step earlier since k107: its non-free 470 is older
+# than the H100's floor (525), so no source fits the GPU itself.
+my $NO_FM = qr/no NVIDIA Fabric Manager package for the NVSwitch on this host.*No driver package was installed and no package source was added/;
+for my $case ([ $NO_FM, 'leap-15.6' ], [ $NO_FM, 'leap-16.0' ],
+              [ qr/debian-nonfree: branch 470 is older than 525;.*No driver package was installed and no package source was added/,
+                'debian-12', release => '11.11' ]) {
+  my ( $re, $os, @over ) = @$case;
   my $rec = hgx_on(host_profile($os, @over));
-  like($rec->{error}, qr/no NVIDIA Fabric Manager package for the NVSwitch on this host.*No driver package was installed and no package source was added/,
-    "$os @over HGX H100: dies naming the missing Fabric Manager");
+  like($rec->{error}, $re, "$os @over HGX H100: dies naming what is missing");
   is_deeply([ mutating_lines(@{ $rec->{lines} }) ], [], '... only read-only probes');
 }
 

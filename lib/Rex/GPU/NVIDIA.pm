@@ -284,10 +284,20 @@ source and why it was rejected. What the requirement picks:
 
 =over
 
-=item * B<No constraint> (Turing, Ampere, Ada, Hopper except GH200, and
-every GPU the table does not know; no GPU): the first source -- Ubuntu the newest
-C<-server>, Debian C<non-free> C<nvidia-driver>, RHEL C<open-dkms>,
-openSUSE open C<G06>/C<G07>.
+=item * B<No constraint> (Turing and Ampere except the IDs NVIDIA listed
+first after branch 470, and every GPU the table does not know; no GPU): the
+first source -- Ubuntu the newest C<-server>, Debian C<non-free>
+C<nvidia-driver>, RHEL C<open-dkms>, openSUSE open C<G06>/C<G07>.
+
+=item * B<A branch floor only> (Ada and Hopper except GH200: 520 or newer;
+single Turing, Ampere, Ada and Hopper IDs NVIDIA listed first in a later
+branch: 510 to 580, see L<Rex::GPU::NVIDIA::Requirement/generations>): the
+same first source where its branch reaches the floor -- always on Ubuntu,
+RHEL and openSUSE, on Debian 12 (non-free 535) and 13 (550) for most. On
+Debian 12/13 an ID floored above the non-free branch (on 12 e.g. RTX 4070
+SUPER, H200) gets NVIDIA's CUDA repository, as Blackwell does; Debian 11
+(470) and a Debian release without a known branch die before any driver
+package is installed.
 
 =item * B<Blackwell> and B<Grace Hopper GH200> (open kernel module only;
 Blackwell branch 570 or newer, GB10 and Blackwell Ultra 580 or newer, GH200
@@ -1907,7 +1917,11 @@ below.
 =over
 
 =item * B<Turing, Ampere, Ada, Hopper> (GH200 excepted) and unknown IDs: the
-default per-distro selection.
+default per-distro selection. Ada, Hopper and the few Turing/Ampere IDs
+NVIDIA listed first after branch 470 need a branch at least that new: on
+Debian 11 (C<non-free> 470) they die before any driver package is installed,
+and on Debian 12/13 an ID newer than the C<non-free> branch takes the open
+module set from NVIDIA's CUDA repository instead.
 
 =item * B<Blackwell> (B200/GB200/B300, GeForce RTX 50xx, RTX PRO Blackwell,
 GB10), on any CPU architecture: it has no proprietary kernel module. Ubuntu

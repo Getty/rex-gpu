@@ -6,13 +6,16 @@ do not "simplify" one away without a ticket.
 ## GPU generations — `Rex::GPU::NVIDIA::Requirement`
 
 `generations` (overridable) maps the PCI device ID to `{kernel_module open|proprietary|either,
-min_branch, max_branch, compute}`. Rows cover 0000–2FFF gap-free plus 3182 / 31C2–31C3; narrower rows (2E12, 2342, 2348) sit ahead of the block they are in.
+min_branch, max_branch, compute}`. Rows cover 0000–2FFF gap-free plus 3182 / 31C2–31C3; narrower rows (2E12, 2342, 2348, the 88 single-ID floors of k107) sit ahead of the block they are in.
 
 | Device IDs | Generation | Module | Branch | `compute` |
 |---|---|---|---|---|
 | < 1340 | Kepler or older | — | ≤ 470 (rejected) | 0 |
 | 1340–1DF6 | Maxwell / Pascal / Volta | proprietary | ≤ 580 | 1 |
-| 1DF7–28FF | Turing .. Hopper | either | unbounded | 1 |
+| 1DF7–22FF, 2400–25FF | Turing / Ampere | either | unbounded (floors below 470 not researched) | 1 |
+| 2300–23FF | Hopper (2331 H100 PCIe first in 520.56.06) | either | ≥ 520 | 1 |
+| 2600–28FF | Ada (2684 RTX 4090 first in 520.56.06) | either | ≥ 520 | 1 |
+| 88 single IDs in those blocks | first listed after the block floor (k107: e.g. H200 2335 ≥ 550, RTX 4070 SUPER 2783 ≥ 550, H20 NVL16 230E ≥ 580, RTX A1000 25B0 ≥ 550) | either | ≥ 510 … 580 | 1 |
 | 2342 | GH200 120GB/480GB (maintainer decision k72; driver README still lists Hopper as proprietary-supported) | open | ≥ 535 | 1 |
 | 2348 | GH200 144G HBM3e (same) | open | ≥ 565 | 1 |
 | 2900–2FFF | Blackwell (B200 2901/2909, GB200 2941, RTX 50xx, RTX PRO) | open | ≥ 570 | 1 |
@@ -20,6 +23,16 @@ min_branch, max_branch, compute}`. Rows cover 0000–2FFF gap-free plus 3182 / 3
 | 3182, 31C2–31C3 | B300 / GB300 | open | ≥ 580 | 1 |
 
 Unknown ID ⇒ `either`, no bounds, `compute` undef → name rules.
+
+**Floors from `supportedchips` (k107, checked 2026-11-26):** an ID's `min_branch` is the
+branch of the first README that lists it (143 x86_64 + 137 aarch64 READMEs, 470.42.01 to
+620.73.04, identical floors). It is a floor, never a ceiling: IDs drop out of single
+releases and return (T4 `1EB8` absent 495.29.05–570.211.01, 2685 RTX 4090 D in 535.154.05
+only, then from 550.40.07; 2336 listed only in 525.85.05). Whole branches only: Debian's
+non-free is 470 (11), 535.261.03 (12), 550.163.01 (13), each listing every ID of its floor
+branch. Effect: Ada/Hopper die on Debian 11 and on Debian releases without a known branch;
+on Debian 12 (and 13 for 2689/233B/230E) IDs floored above the non-free branch take
+NVIDIA's CUDA repo.
 
 **Detection order in `_is_nvidia_compute`** (k45/k54/k55): Kepler-or-older row (`compute 0`)
 first — skipped with warning "needs branch 470 … skipped", a skip not a die, so a K80 next

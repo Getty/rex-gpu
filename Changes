@@ -70,6 +70,17 @@ Revision history for Rex-GPU
     leaves apt-get install -y's whole install undone -- with apt-mark
     unhold amdgpu-dkms as the way out; dpkg is asked only on that failure
     path.
+  - Ada and Hopper GPUs (GH200 aside) need driver branch 520 or newer, and
+    88 single Turing, Ampere, Ada and Hopper device IDs the branch whose
+    NVIDIA supportedchips list first names them (510 to 580; among them
+    A800, RTX A1000/A400, late RTX 3050/3060 variants, L40S, L20, RTX 40xx
+    SUPER, H20, H200, H200 NVL, H20 NVL16). On Debian 11 (non-free 470) and
+    on a Debian release without a known non-free branch (sid; override
+    nonfree_branch) such a GPU now dies before any driver package is
+    installed, instead of getting a non-free driver that does not list it.
+    On Debian 12, and on 13 for 10de:2689, H200 NVL and H20 NVL16, one
+    floored above the non-free branch now gets NVIDIA's CUDA repository
+    with the open kernel module. Ubuntu, RHEL and openSUSE choose as before.
   - Recommends Rex::LibSSH 0.006.
 
 0.005     2026-10-21 20:21:08Z

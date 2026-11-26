@@ -116,7 +116,15 @@ Debian release it dies before any driver package is installed. A pre-Turing GPU
 (Maxwell/Pascal/Volta, e.g. the V100, a GeForce GT 1030 or GTX 980) gets the
 proprietary 580-branch driver on Ubuntu, RHEL and openSUSE, Debian's
 C<non-free> driver on Debian 12 and 13. A host whose GPUs are all Turing to
-Hopper gets the same driver as before.
+Hopper gets the same driver as before where that driver's branch is new
+enough: Ada and Hopper need 520 or newer, and a single Turing to Hopper ID
+that NVIDIA listed first in a later branch needs that one (up to 580; see
+L<Rex::GPU::NVIDIA::Requirement/generations>). On Debian 11 (C<non-free>
+470) and a Debian release without a known C<non-free> branch, a host with
+one of them dies before any driver package is installed; on Debian 12 and
+13 an ID newer than the C<non-free> branch (535 and 550; on 12 e.g. the RTX
+4070 SUPER or the H200) gets NVIDIA's CUDA-repository open-module driver, as
+Blackwell does.
 
 Which GPUs count as CUDA-capable is decided by generation, not by marketing
 name (see L<Rex::GPU::Detect/NVIDIA compute classification>): every Maxwell

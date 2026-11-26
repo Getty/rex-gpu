@@ -60,7 +60,8 @@ Decided by generation (PCI device ID), whatever the marketing name or PCI class:
 
 | Generation | Compute | Driver |
 |---|---|---|
-| Turing, Ampere, Ada, Hopper (except GH200) | yes | the distro's default (Ubuntu newest `-server`, Debian `non-free`, RHEL CUDA-repo open DKMS, openSUSE open `G06`/`G07`) |
+| Turing, Ampere | yes | the distro's default (Ubuntu newest `-server`, Debian `non-free`, RHEL CUDA-repo open DKMS, openSUSE open `G06`/`G07`) |
+| Ada, Hopper (except GH200), and the Turing/Ampere models NVIDIA added after driver branch 470 (A800, RTX A1000/A400, late RTX 3050/3060 variants, …) | yes | the same default, from the first driver branch that lists the model (Ada and Hopper 520): Debian 11 (`non-free` 470) dies before any driver package is installed; on Debian 12/13 a model newer than the `non-free` branch (on 12 e.g. RTX 40xx SUPER and H200) gets NVIDIA's CUDA repository |
 | Blackwell, Blackwell Ultra (B200/GB200/B300, RTX 50xx, RTX PRO Blackwell, GB10), Grace Hopper GH200 | yes | open kernel module only: Ubuntu `-server-open`, Debian 12/13 NVIDIA's CUDA repository (other Debian releases die before any driver package is installed) |
 | Maxwell, Pascal, Volta (V100, P100, GTX 9xx/10xx, GT 1030, MX1xx–MX3xx) | yes | proprietary 580 branch, their last: Ubuntu `nvidia-driver-580-server`, RHEL pinned 580 kmod, openSUSE `G06` proprietary, Debian `non-free` |
 | Kepler and older (K80/K40/K20, GT 710, GTX 7xx) | no | none — last branch 470 is no longer packaged; skipped with a warning at any PCI class, a newer GPU on the same host still gets its driver |
