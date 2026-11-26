@@ -1,0 +1,18 @@
+---
+class: standard
+created: 2026-11-26T04:56:24Z
+id: 112
+priority: low
+status: backlog
+tags:
+- amd
+- dkms
+- rhel
+- message
+title: 'AMD RHEL dkms: filtert dnf4 versionlock auch repoquery? Dann stirbt resolve_plan
+  mit irreführendem ''kein Kandidat / Kernel upgraden''; ein Lock auf der Kandidatenversion
+  wird zu Unrecht genannt'
+updated: 2026-11-26T04:56:24Z
+---
+
+Nebenfund aus k109 (rex-gpu-worker, 2026-11-26), ungeprüft. (1) Falls das versionlock-Plugin von dnf4 auch dnf repoquery filtert, findet resolve_plan für ein gesperrtes kernel-devel/amdgpu-dkms keinen Kandidaten und stirbt mit dem Rat, den Kernel zu aktualisieren -- der Lock wird dort nicht genannt, weil package_held nur auf dem Install-Fehlerpfad gefragt wird. (2) k109 nennt einen Lock auf amdgpu-dkms unabhängig davon, welche Version er festhält; steht er auf der Kandidatenversion selbst, ist er nicht die Ursache (Gegenstück zu k108 Punkt 2 auf apt). Zu prüfen auf einem RHEL 9 mit python3-dnf-plugin-versionlock: dnf versionlock add kernel-devel, dann dnf repoquery kernel-devel-$(uname -r). Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
