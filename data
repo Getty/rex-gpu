@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-26T05:01:12Z
+id: 113
+priority: low
+status: backlog
+tags:
+- nvidia
+- debian
+- behavior
+title: 'Debian non-free: verify_driver_branch prüft das Kernelmodul der Quelle, nicht
+  das installierte -- nvidia-driver über nvidia-open-kernel-VER bleibt auf Volta unerkannt'
+updated: 2026-11-26T05:01:12Z
+---
+
+Nebenfund aus k100 (rex-gpu-worker, 2026-11-26). verify_driver_branch prüft why_not mit dem kernel_module, das die Quelle deklariert, nicht mit dem, was auf dem Host liegt. Debians nvidia-driver hängt ab von nvidia-kernel-dkms (= Version) | nvidia-kernel-VER | nvidia-open-kernel-VER (geprüft für bookworm 535.309.01-0+deb12u1 und trixie 550.163.01-2). Ist die Abhängigkeit über das offene Modul erfüllt, läuft auf einer Volta (offenes Modul nicht unterstützt) die Prüfung durch. Idee: das installierte Kernelmodul-Paket lesen (dpkg-query auf nvidia-kernel-dkms / nvidia-open-kernel-*) und dessen Modulart prüfen. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
