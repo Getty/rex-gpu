@@ -535,6 +535,10 @@ my @READ_ONLY = (
   # k84: Rex::GPU::AMD::Setup::RHEL->has_candidate's lookup of a package no
   # enabled repository may carry -- reads the repo metadata, installs nothing
   qr{${RUN}dnf -q repoquery --available \S+ 2>&1$},
+  # k109: Rex::GPU::AMD::Setup::RHEL->package_held's read of dnf's lock
+  # list, asked only on a dkms failure path -- lists locks, writes nothing
+  # (without the versionlock plugin it fails, and nothing is installed for it)
+  qr{${RUN}dnf -q versionlock list 2>/dev/null$},
   # karr #56: the HGX B200/B300 Fabric State read
   qr{${RUN}nvidia-smi -q 2>&1$},
   # k1: Rex::GPU::AMD's driver state read -- ONE command, shell builtins that

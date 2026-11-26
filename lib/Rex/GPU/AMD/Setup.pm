@@ -409,11 +409,10 @@ kernel. C<dkms>: C<dkms status> must show C<amdgpu> installed for the
 running kernel B<and> C<modinfo -n amdgpu> resolve the DKMS module -- an
 RPM whose C<%post> build failed is still installed for C<rpm -q>, so the
 package check alone proves nothing. Dies otherwise. When no module is built
-and L</package_held> says C<amdgpu-dkms> is on hold (apt: C<apt-mark
-hold>), the message names the hold -- C<apt-get install -y> does not change
-a held package, and aborts the install where it would have to -- and
-C<apt-mark unhold amdgpu-dkms> as the way out, before the build log; asked
-only then, so a host where the module is there runs no extra command.
+and L</hold_note> finds a hold in the way of the install (apt: C<apt-mark
+hold>, RHEL: C<dnf versionlock>), the message names it and the way out
+before the build log; asked only then, so a host where the module is there
+runs no extra command.
 
 =cut
 
@@ -423,16 +422,12 @@ sub post_install {
   my $source = $self->amd->module_source(kernel => $kernel) // '';
   if ($plan->{method} eq 'dkms') {
     unless ($self->dkms_built) {
-      # k95: apt-get install -y leaves a held amdgpu-dkms as it is (or aborts
-      # the whole install), so the hold goes first in the message
+      # k95: the package manager leaves a held amdgpu-dkms as it is (apt:
+      # or aborts the whole install), so the hold goes first in the message
+      my $hold = $self->hold_note($plan);
       die "install_driver: amdgpu-dkms is installed, but dkms reports no amdgpu module built and "
-        ."installed for kernel $kernel; amdgpu-dkms is on hold, and apt-get install -y does not "
-        ."change a held package (where it would have to, it aborts the install). Run apt-mark "
-        ."unhold amdgpu-dkms and install_driver again; if the module is still missing then, see "
-        ."/var/lib/dkms/amdgpu/*/build/make.log\n"
-        if $self->package_held('amdgpu-dkms');
-      die "install_driver: amdgpu-dkms is installed, but dkms reports no amdgpu module built and "
-        ."installed for kernel $kernel; see /var/lib/dkms/amdgpu/*/build/make.log\n";
+        ."installed for kernel $kernel; ".( length $hold ? "$hold; if the module is still missing then, " : '' )
+        ."see /var/lib/dkms/amdgpu/*/build/make.log\n";
     }
     die "install_driver: amdgpu-dkms is built for kernel $kernel, but modinfo still resolves "
       ."amdgpu to ".( length $source ? "the $source module" : 'no module' )."\n"
@@ -603,11 +598,52 @@ package database.
   $setup->package_held($package);
 
 True if C<$package> is on hold, so that the package manager does not
-change it (apt: C<apt-mark hold>). Here: always false, without a host
-command, and so in L<Rex::GPU::AMD::Setup::RHEL>;
-L<Rex::GPU::AMD::Setup::Apt/package_held> reads dpkg's selection. Asked
-only on a failure path: by L</post_install>, and by
-L<Rex::GPU::AMD::Setup::Apt/verify_packages> once a package is missing.
+change it (apt: C<apt-mark hold>, RHEL: C<dnf versionlock>). Here: always
+false, without a host command; L<Rex::GPU::AMD::Setup::Apt/package_held>
+reads dpkg's selection, L<Rex::GPU::AMD::Setup::RHEL/package_held> dnf's
+lock list. Asked by L</blocking_holds> here; the packaging layers answer
+that one themselves, with one command for all packages.
+
+=method dkms_dependencies
+
+Packages C<amdgpu-dkms> depends on without a version, whose hold
+L</blocking_holds> asks next to the plan's packages: C<amdgpu-dkms-firmware>
+(a dependency of C<amdgpu-dkms> 31.60 in AMD's Ubuntu 24.04 and RHEL 9
+repositories). A hold on one of them is in the way only while it is not
+installed: any installed version satisfies the dependency.
+
+=method blocking_holds
+
+  my @held = $setup->blocking_holds($plan);
+
+The packages of the plan -- its C<packages>, then the
+L</dkms_dependencies> it does not list -- that are on hold in a way that
+stops the install, by name. Here: those L</package_held> says are held, one
+question per package (none: no host command).
+L<Rex::GPU::AMD::Setup::Apt/blocking_holds> and
+L<Rex::GPU::AMD::Setup::RHEL/blocking_holds> leave out a hold the install
+did not have to get past.
+
+=method hold_note
+
+  my $note = $setup->hold_note($plan);   # '' when no hold is in the way
+
+For a C<dkms> plan with L</blocking_holds>: L</hold_advice> for them, the
+words L</post_install> and the packaging layers' C<verify_packages> put
+into their message. C<''> for any other plan (C<inbox>, ROCm, the helpers),
+without a host command. Asked only on those failure paths, once the module
+or a package is missing.
+
+=method hold_advice
+
+  my $text = $setup->hold_advice(@held);
+
+The sentence that names the held packages, what the package manager does
+with them and the way out, ending in C<... and install_driver again>
+without a full stop. Here a generic one;
+L<Rex::GPU::AMD::Setup::Apt/hold_advice> (C<apt-mark unhold>) and
+L<Rex::GPU::AMD::Setup::RHEL/hold_advice> (C<dnf versionlock delete>) name
+their package manager's.
 
 =method install_helpers
 
@@ -646,6 +682,42 @@ sub package_held     { 0 }
 sub install_helpers  { }
 sub install_packages { die ref($_[0])." has no install_packages\n" }
 sub verify_packages  { die ref($_[0])." has no verify_packages\n" }
+
+# k108: amdgpu-dkms 31.60 Depends (noble Packages) and Requires (el9
+# primary.xml) amdgpu-dkms-firmware, without a version; read 2026-11-26.
+sub dkms_dependencies { qw( amdgpu-dkms-firmware ) }
+
+sub blocking_holds {
+  my ( $self, $plan ) = @_;
+  return grep { $self->package_held($_) } $self->_hold_packages($plan);
+}
+
+# k108: one wording for post_install and every verify_packages; only a dkms
+# plan is asked (amdgpu-dkms in it), as since k95/k101.
+sub hold_note {
+  my ( $self, $plan ) = @_;
+  return '' unless ( $plan->{method} // '' ) eq 'dkms';
+  my @held = $self->blocking_holds($plan) or return '';
+  return $self->hold_advice(@held);
+}
+
+sub hold_advice {
+  my ( $self, @held ) = @_;
+  return $self->_and_list(@held).( @held > 1 ? ' are' : ' is' ).' on hold, and the package manager '
+    .'does not change a held package. Release the hold and run install_driver again';
+}
+
+# The plan's packages, then the dkms_dependencies it does not list itself.
+sub _hold_packages {
+  my ( $self, $plan ) = @_;
+  my %seen;
+  return grep { !$seen{$_}++ } @{ $plan->{packages} || [] }, $self->dkms_dependencies;
+}
+
+sub _and_list {
+  my ( $self, @items ) = @_;
+  return @items > 1 ? join(', ', @items[0 .. $#items - 1]).' and '.$items[-1] : $items[0];
+}
 
 #### Per-OS data ##############################################################
 

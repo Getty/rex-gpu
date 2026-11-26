@@ -150,12 +150,46 @@ install -y curl gnupg2>, verified.
 C<dnf install -y> of the plan's packages, directly: never
 L<Rex::Commands::Pkg>.
 
+=method package_held
+
+True when C<dnf -q versionlock list> has an entry for the package's name
+(a kernel package spec C<NAME-KERNEL> of the running kernel counts as
+C<NAME>): dnf 4's C<NAME-EPOCH:VERSION-RELEASE.*>, also as an exclude
+(C<!...>) or as a bare C<NAME>, or dnf 5's C<Package name: NAME>. Whatever
+version the entry names. Without the versionlock plugin (dnf 4:
+C<python3-dnf-plugin-versionlock>, not installed by default), or when the
+command fails for another reason (exit status not C<0>), nothing is held:
+it never dies and installs nothing. Read-only.
+
+=method blocking_holds
+
+  my @held = $setup->blocking_holds($plan);
+
+The names among the plan's C<packages> and
+L<Rex::GPU::AMD::Setup/dkms_dependencies> that a lock is on (as
+L</package_held> counts it) and that it can have kept out of the install:
+C<amdgpu-dkms> as the plan asks for it (no version: the lock may keep it
+below the newest), installed or not; every other one -- the running
+kernel's C<kernel-headers>, C<kernel-devel>, C<kernel-devel-matched>, a
+dependency required without a version -- only while C<rpm -q> does not
+find it. One C<dnf -q versionlock list> (none of it when that lists no
+lock or fails), then C<rpm -q> only for such a locked package. Read-only.
+
+=method hold_advice
+
+C<... is version-locked (dnf versionlock), and dnf install leaves a locked
+package at its locked version (where the install needs another one, it
+fails). Run dnf versionlock delete ... and install_driver again>.
+
 =method verify_packages
 
 Each of the plan's packages must be installed for C<rpm -q>; dies
 otherwise. For C<amdgpu-dkms> that is not enough (a failed C<%post> build
 leaves it installed): L<Rex::GPU::AMD::Setup/post_install> checks C<dkms
-status>.
+status>. For a C<dkms> plan the message names the locks
+L</blocking_holds> finds (L<Rex::GPU::AMD::Setup/hold_note>) as the cause,
+with C<dnf versionlock delete> of them as the way out; asked only once a
+package is missing.
 
 =method place_key
 
@@ -211,10 +245,81 @@ sub install_packages {
 sub verify_packages {
   my ( $self, $plan ) = @_;
   for my $package (@{ $plan->{packages} }) {
-    die "$package not installed after dnf install -- check the dnf output\n"
-      unless $self->package_installed($package);
+    next if $self->package_installed($package);
+    my $hold = $self->hold_note($plan);
+    die "$package not installed after dnf install -- check the dnf output"
+      .( length $hold ? "; $hold" : '' )."\n";
   }
   return;
+}
+
+# k109: the counterpart of the apt hold. A lock (dnf 4 versionlock plugin,
+# dnf 5 built in) leaves an installed package at its locked version and
+# keeps every other version out, so `dnf install` of a version it excludes
+# fails as a whole (strict) -- or does nothing for a package installed at
+# the locked version. Asked only on a failure path; a dnf without the
+# plugin, or a list that cannot be read, is no lock (k109: nothing dies,
+# nothing is installed for it).
+sub package_held {
+  my ( $self, $package ) = @_;
+  return $self->_locked($self->_package_name($package), $self->_versionlock_entries) ? 1 : 0;
+}
+
+sub blocking_holds {
+  my ( $self, $plan ) = @_;
+  my @entries = $self->_versionlock_entries or return;
+  my %asked = map { $_ => 1 } @{ $plan->{packages} || [] };
+  my @held;
+  for my $package ($self->_hold_packages($plan)) {
+    my $name = $self->_package_name($package);
+    next unless $self->_locked($name, @entries);
+    # a spec with the kernel's version is one build, a dependency is required
+    # without a version: installed, the lock kept nothing out
+    push @held, $name
+      if ( $asked{$package} && $package eq $name ) || !$self->package_installed($package);
+  }
+  return @held;
+}
+
+sub hold_advice {
+  my ( $self, @held ) = @_;
+  return $self->_and_list(@held).( @held > 1 ? ' are' : ' is' ).' version-locked (dnf versionlock), '
+    .'and dnf install leaves a locked package at its locked version (where the install needs another '
+    .'one, it fails). Run dnf versionlock delete '.join(' ', @held).' and install_driver again';
+}
+
+# dnf 4 (python3-dnf-plugin-versionlock) prints the lock list's entries as
+# they were added, NAME-EPOCH:VERSION-RELEASE.*, "!" in front for an
+# exclude; dnf 5 prints "Package name: NAME" per entry, then its
+# conditions ("evr = ..."). Lines with a space or a "#" (conditions,
+# comments, dnf's own messages) are no entry. Exit status not 0 (no plugin,
+# an unreadable list): no entries.
+sub _versionlock_entries {
+  my ( $self ) = @_;
+  my $out = $self->run_cmd('dnf -q versionlock list 2>/dev/null') // '';
+  return if $? != 0;
+  my @entries;
+  for my $line (split /\r?\n/, $out) {
+    $line =~ s/\A\s+|\s+\z//g;
+    if ($line =~ /\APackage name:\s*(\S+)\z/) { push @entries, $1 }
+    elsif (length $line && $line !~ /[\s#]/) { push @entries, $line =~ s/\A!//r }
+  }
+  return @entries;
+}
+
+# An entry is for NAME when it is NAME, or NAME, a dash and an epoch or a
+# version (a digit, or a glob): kernel-devel-0:5.14.0-570.12.1.el9_6.* is
+# kernel-devel's, kernel-devel-matched-0:... is not.
+sub _locked {
+  my ( $self, $name, @entries ) = @_;
+  return scalar grep { $_ eq $name || /\A\Q$name\E-(?:\d+:)?[\d*]/ } @entries;
+}
+
+# The package name of a spec: kernel-devel-$(uname -r) is kernel-devel.
+sub _package_name {
+  my ( $self, $package ) = @_;
+  my $kernel = $self->kernel;
+  return $package =~ s/-\Q$kernel\E\z//r;
 }
 
 sub place_key {

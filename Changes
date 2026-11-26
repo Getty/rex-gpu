@@ -60,16 +60,18 @@ Revision history for Rex-GPU
     cuda-keyring count as installed, as on the AMD apt layer; a half
     installed or half configured one does not. A Fabric Manager held at
     another version than the driver still dies at the version check.
-  - On Debian and Ubuntu, install_driver (dkms) names a hold on amdgpu-dkms
-    as the cause when no amdgpu module is built for the running kernel after
-    the install, and apt-mark unhold amdgpu-dkms as the way out; new method
-    package_held in the AMD setup package layer (no host command on RHEL).
-  - On Debian and Ubuntu, install_driver (dkms) also names a hold on
-    amdgpu-dkms when a package is still missing after the install -- a
-    held amdgpu-dkms that is not installed, or held at another version,
-    leaves apt-get install -y's whole install undone -- with apt-mark
-    unhold amdgpu-dkms as the way out; dpkg is asked only on that failure
-    path.
+  - install_driver (dkms) names a package manager hold or lock in the way of
+    the install as the cause when no amdgpu module is built or a package is
+    still missing afterwards, with the way out. Debian and Ubuntu (apt-mark
+    hold; apt-get install -y leaves a held package alone and aborts the
+    install where it would have to change it): a held package of the
+    install that is missing or not at its candidate version, or a held
+    amdgpu-dkms-firmware that is missing; unhold is the way out. RHEL
+    family (dnf versionlock): a lock on amdgpu-dkms, or on a kernel header
+    package or amdgpu-dkms-firmware that is missing; versionlock delete is
+    the way out, and without the versionlock plugin no lock is named. The
+    hold is looked up only on that failure path; new methods blocking_holds,
+    hold_note and hold_advice in the AMD setup package layer.
   - Ada and Hopper GPUs (GH200 aside) need driver branch 520 or newer, and
     88 single Turing, Ampere, Ada and Hopper device IDs the branch whose
     NVIDIA supportedchips list first names them (510 to 580; among them

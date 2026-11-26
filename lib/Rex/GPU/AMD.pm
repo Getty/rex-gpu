@@ -200,11 +200,19 @@ C<dnf repoquery> itself fails (metadata that cannot be downloaded).
 Dies after the install when a package is not installed afterwards (a failed
 DKMS build leaves C<amdgpu-dkms> half-configured, so C<dpkg -l> does not show
 it C<ii>; an RPM whose C<%post> build failed is caught by the C<dkms status>
-check). For C<dkms> on Debian and Ubuntu with C<amdgpu-dkms> on hold
-(C<apt-mark hold>), that message and the one for no module built name the
-hold as the cause -- C<apt-get install -y> does not change a held package,
-and aborts the whole install where it would have to -- and C<apt-mark
-unhold amdgpu-dkms> as the way out.
+check). For C<dkms> that message and the one for no module built name a
+hold in the way of the install as the cause, with the way out
+(L<Rex::GPU::AMD::Setup/hold_note>). On Debian and Ubuntu (C<apt-mark
+hold>; C<apt-get install -y> does not change a held package, and aborts the
+whole install where it would have to; way out C<apt-mark unhold>): a held
+package of the install that is not installed or not at its candidate
+version (C<apt-cache policy>), or a held C<amdgpu-dkms-firmware> that is not
+installed; a hold at the candidate is not named. On RHEL (C<dnf
+versionlock>; way out C<dnf versionlock delete>): a lock on C<amdgpu-dkms>,
+or on a kernel header package or C<amdgpu-dkms-firmware> that is not
+installed; without the versionlock plugin, or when its list cannot be read,
+no lock is named. Asked only then: an install that went through runs no
+extra command.
 
 =cut
 

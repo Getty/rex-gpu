@@ -38,4 +38,5 @@ run: rpm -q kernel-headers-5.14.0-570.12.1.el9_6.x86_64 2>&1
 run: rpm -q kernel-devel-5.14.0-570.12.1.el9_6.x86_64 2>&1
 run: rpm -q kernel-devel-matched-5.14.0-570.12.1.el9_6.x86_64 2>&1
 run: rpm -q amdgpu-dkms 2>&1
+run: dnf -q versionlock list 2>/dev/null
 DIE: amdgpu-dkms not installed after dnf install -- check the dnf output

@@ -65,6 +65,30 @@ C<dpkg-query -W> of PKG: true when dpkg's selection for it -- the first
 word of C<${Status}> -- is C<hold> (C<apt-mark hold>), in any state,
 installed or not. Read-only.
 
+=method blocking_holds
+
+  my @held = $setup->blocking_holds($plan);
+
+The held packages (as L</package_held> counts them) among the plan's
+C<packages> and L<Rex::GPU::AMD::Setup/dkms_dependencies> that
+C<apt-get install -y> would have had to change: one of the plan's packages
+that is not installed (dpkg has it in no state but C<not-installed> or
+C<config-files>), or is installed at another version than its candidate --
+apt aborts the whole install then; a dependency that is not installed --
+apt does not install a held one. A held package at its candidate, and a
+held dependency in any installed version, were no obstacle and are left
+out. One C<dpkg-query -W> for all of them; only when one of the plan's
+packages is held and installed, one C<LC_ALL=C apt-cache policy> of those
+for C<Installed> and C<Candidate>. Without an answer from it for a package
+(the command failed, no such lines), that package counts as in the way.
+Read-only.
+
+=method hold_advice
+
+C<... is on hold, and apt-get install -y does not change a held package
+(where it would have to, it aborts the install). Run apt-mark unhold ...
+and install_driver again>.
+
 =method install_helpers
 
 C<curl> and C<gpg>, only if C<command -v> does not find them: after an
@@ -83,16 +107,14 @@ Each of the plan's packages must be L</package_installed>, C<ii> or C<hi>
 in C<dpkg -l>; dies otherwise, naming the first one that is not. A failed
 DKMS build makes C<amdgpu-dkms>'s post-install exit non-zero, which leaves
 it half-configured -- C<iF> (C<hF> when held), not C<ii> or C<hi> -- and the
-message for C<amdgpu-dkms> points at the build log. With C<amdgpu-dkms> in
-the plan and L</package_held> saying it is on hold, the message names the
-hold as the cause, whichever package is missing -- C<apt-get install -y>
-does not change a held package, and where it would have to (a held
-C<amdgpu-dkms> not installed, or held at another version than the
-candidate) it aborts the whole install -- and C<apt-mark unhold
-amdgpu-dkms> as the way out, before the build log for C<amdgpu-dkms>
-itself. The hold is asked only then, once
-a package is missing: a host where every package went in runs no extra
-command.
+message for C<amdgpu-dkms> points at the build log. For a C<dkms> plan the
+message names, whichever package is missing, the holds L</blocking_holds>
+finds in the way (L<Rex::GPU::AMD::Setup/hold_note>) as the cause --
+C<apt-get install -y> does not change a held package, and where it would
+have to it aborts the whole install -- and C<apt-mark unhold> of them as
+the way out, before the build log for C<amdgpu-dkms> itself. The holds are
+asked only then, once a package is missing: a host where every package
+went in runs no extra command.
 
 =cut
 
@@ -164,26 +186,72 @@ sub install_packages {
   return;
 }
 
-# k101: a held amdgpu-dkms (hold ok not-installed, or held at another version
-# than the candidate) makes apt-get install -y abort the whole install, so
-# whichever package of a dkms plan is checked first is the one missing: the
-# hold is named for any of them, in post_install's words (k95). Asked only
-# once a package is missing, and only for a plan with amdgpu-dkms (not inbox,
-# ROCm or the helpers).
+# k101: a hold in the way makes apt-get install -y abort the whole install,
+# so whichever package of a dkms plan is checked first is the one missing:
+# the holds are named for any of them, in post_install's words (k95,
+# hold_note). Asked only once a package is missing, and only for a dkms plan
+# (not inbox, ROCm or the helpers).
 sub verify_packages {
   my ( $self, $plan ) = @_;
   for my $package (@{ $plan->{packages} }) {
     next if $self->package_installed($package);
     my $build = 'a failed DKMS build leaves it half-configured (/var/lib/dkms/amdgpu/*/build/make.log)';
     my $note = $package eq 'amdgpu-dkms' ? "; $build" : '';
-    if (( grep { $_ eq 'amdgpu-dkms' } @{ $plan->{packages} } ) && $self->package_held('amdgpu-dkms')) {
-      $note = '; amdgpu-dkms is on hold, and apt-get install -y does not change a held package (where '
-        .'it would have to, it aborts the install). Run apt-mark unhold amdgpu-dkms and install_driver '
-        .'again'.( length $note ? "; if it is still not installed then, $build" : '' );
+    if (length( my $hold = $self->hold_note($plan) )) {
+      $note = "; $hold".( length $note ? "; if it is still not installed then, $build" : '' );
     }
     die "$package not installed after apt-get install -- check the apt output$note\n";
   }
   return;
+}
+
+# k108: a hold is in the way only where apt would have to change the package
+# (k101: held packages changed, or a held dependency it may not install), not
+# where it is at its candidate already. The policy is asked only for the
+# plan's held packages that are installed: a not installed one is always in
+# the way, a dependency only while not installed (no version required).
+sub blocking_holds {
+  my ( $self, $plan ) = @_;
+  my %asked = map { $_ => 1 } @{ $plan->{packages} || [] };
+  my @packages = $self->_hold_packages($plan);
+  my $status = $self->_dpkg_status(@packages);
+  my @held = grep { $status->{$_} && $status->{$_}{status} =~ /\Ahold / } @packages;
+  my @installed = grep { $asked{$_} && _on_disk($status->{$_}) } @held;
+  my $policy = @installed ? $self->_apt_policy(@installed) : {};
+  return grep {
+      !_on_disk($status->{$_}) ? 1
+    : !$asked{$_}              ? 0
+    : !$policy->{$_}           ? 1   # no answer: in the way, as before k108
+    : $policy->{$_}{installed} ne $policy->{$_}{candidate}
+  } @held;
+}
+
+sub hold_advice {
+  my ( $self, @held ) = @_;
+  return $self->_and_list(@held).( @held > 1 ? ' are' : ' is' ).' on hold, and apt-get install -y '
+    .'does not change a held package (where it would have to, it aborts the install). Run apt-mark '
+    .'unhold '.join(' ', @held).' and install_driver again';
+}
+
+# { package => { installed => ..., candidate => ... } } from one
+# `LC_ALL=C apt-cache policy` of @packages: a block per package, "NAME:" (a
+# foreign architecture "NAME:ARCH:", whose block is skipped), then its
+# "Installed:" and "Candidate:" lines. A package without both is left out.
+# Read-only.
+sub _apt_policy {
+  my ( $self, @packages ) = @_;
+  my $out = $self->run_cmd('LC_ALL=C apt-cache policy '.join(' ', @packages).' 2>/dev/null') // '';
+  my ( %policy, $package );
+  for my $line (split /\r?\n/, $out) {
+    if ($line =~ /\A([^\s:]+)(:[^\s:]+)?:\s*\z/) {
+      $package = !defined $2 && !$policy{$1} ? $1 : undef;
+      $policy{$package} = {} if defined $package;
+      next;
+    }
+    $policy{$package}{lc $1} = $2 if defined $package && $line =~ /\A\s+(Installed|Candidate):\s*(\S+)/;
+  }
+  return { map { $_ => $policy{$_} }
+    grep { defined $policy{$_}{installed} && defined $policy{$_}{candidate} } keys %policy };
 }
 
 =method dkms_suite
