@@ -1,7 +1,7 @@
 # ABSTRACT: AMD driver setup for Debian 12 and 13 (experimental)
 
 package Rex::GPU::AMD::Setup::Debian;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use namespace::autoclean;
 

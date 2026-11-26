@@ -1,7 +1,7 @@
 # ABSTRACT: AMD GPU hardware data: PCI device ID to gfx target, gfx target to ROCm support (experimental)
 
 package Rex::GPU::AMD::Hardware;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use v5.14.4;
 use warnings;
 

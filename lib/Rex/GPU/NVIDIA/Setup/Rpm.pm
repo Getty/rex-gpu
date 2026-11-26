@@ -1,7 +1,7 @@
 # ABSTRACT: rpm packaging layer of the NVIDIA driver setups (experimental)
 
 package Rex::GPU::NVIDIA::Setup::Rpm;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use Rex::Logger ();
 use namespace::autoclean;

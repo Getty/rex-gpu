@@ -1,7 +1,7 @@
 # ABSTRACT: AMD driver setup for Ubuntu 22.04, 24.04 and 26.04 (experimental)
 
 package Rex::GPU::AMD::Setup::Ubuntu;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use namespace::autoclean;
 

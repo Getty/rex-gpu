@@ -1,7 +1,7 @@
 # ABSTRACT: AMD driver setup for RHEL, Rocky Linux and AlmaLinux 8, 9 and 10 (experimental)
 
 package Rex::GPU::AMD::Setup::RHEL;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use Rex::Logger ();
 use namespace::autoclean;

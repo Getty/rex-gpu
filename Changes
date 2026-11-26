@@ -1,5 +1,7 @@
 Revision history for Rex-GPU
 
+{{$NEXT}}
+
 0.006     2026-11-26 18:33:58Z
   - New Rex::GPU::AMD (experimental): install_driver(gpus =>, method =>
     auto|inbox|dkms, reboot =>) makes the distribution kernel's amdgpu

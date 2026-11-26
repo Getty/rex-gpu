@@ -1,7 +1,7 @@
 # ABSTRACT: AMD GPU driver (amdgpu) and ROCm management (experimental)
 
 package Rex::GPU::AMD;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use v5.14.4;
 use warnings;
 

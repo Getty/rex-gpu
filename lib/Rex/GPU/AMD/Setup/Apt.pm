@@ -1,7 +1,7 @@
 # ABSTRACT: apt/dpkg packaging layer of the AMD driver setups, and the ROCm install (experimental)
 
 package Rex::GPU::AMD::Setup::Apt;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use Rex::Logger ();
 use namespace::autoclean;

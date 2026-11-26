@@ -1,7 +1,7 @@
 # ABSTRACT: Base class of the AMD driver setups: preflight, install flow, signing keys, repository files (experimental)
 
 package Rex::GPU::AMD::Setup;
-our $VERSION = '0.006';
+our $VERSION = '0.007';
 use Moo;
 use Rex::Logger ();
 use namespace::autoclean;
