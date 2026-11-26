@@ -1,0 +1,31 @@
+---
+claimed_at: 2026-11-26T05:19:16Z
+claimed_by: rex-gpu
+class: standard
+completed: 2026-11-26T05:19:16Z
+created: 2026-11-06T19:35:40Z
+id: 108
+priority: low
+started: 2026-11-26T04:28:55Z
+status: done
+tags:
+- amd
+- dkms
+- apt
+- message
+title: 'AMD apt dkms: ein Hold auf ein anderes Paket als amdgpu-dkms bleibt ungenannt,
+  und der Hold auf der Kandidatenversion wird zu Unrecht genannt'
+updated: 2026-11-26T05:19:16Z
+---
+
+Nebenfund aus k101 (rex-gpu-worker, 2026-11-06). (1) Auch ein Hold auf ein anderes Paket bricht apt-get install -y ab und wird nicht genannt: etwa amdgpu-dkms-firmware (amdgpu-dkms hängt nach Wissen des Workers davon ab, für 31.60 nicht geprüft) oder ein gehaltenes, nicht installiertes Header-Paket. (2) Ist amdgpu-dkms auf der Kandidatenversion gehalten und fehlt ein Header, nennt verify_packages den Hold trotzdem, obwohl er nicht die Ursache ist; genauer wäre ein Vergleich Installed/Candidate per apt-cache policy (ein weiterer Befehl auf dem Fehlerpfad). (3) Der Hold-Wortlaut steht jetzt in post_install (Basis) und in verify_packages (apt); ein gemeinsamer Helfer hielte beide gleich. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
+
+2026-11-26 04:28 Getty 2026-11-26: offene Karten fertigmachen, danach Release (hebt die Backlog-Entscheidung für 0.006 vom 2026-11-06 auf).
+
+2026-11-26 04:53 rex-gpu-worker: umgesetzt, Baum commit-fertig, nicht committet. (1) Apt.pm blocking_holds fragt dpkg-query für alle Plan-Pakete plus amdgpu-dkms-firmware (Depends ohne Version in amdgpu-dkms 31.60, noble Packages und el9 primary.xml, gelesen 2026-11-26; jammy/resolute/el8/el10 nicht geprüft). Ein gehaltenes, nicht installiertes Paket wird genannt; ein gehaltenes installiertes Nicht-Plan-Paket (Firmware) nicht. (2) Ein gehaltenes installiertes Plan-Paket wird nur genannt, wenn apt-cache policy Installed != Candidate zeigt; keine Antwort von policy -> genannt wie vor k108. (3) Ein Wortlaut für post_install und verify_packages: Setup.pm hold_note/hold_advice, Apt.pm überschreibt hold_advice (apt-mark unhold PKG...). Neue Host-Befehle nur auf dem Fehlerpfad: dpkg-query -W -f='${Package} ${Status} ${Version}\n' <Plan-Pakete> amdgpu-dkms-firmware 2>/dev/null (ersetzt die Ein-Paket-Abfrage); LC_ALL=C apt-cache policy <gehaltene installierte Plan-Pakete> 2>/dev/null nur wenn eins gehalten und auf der Platte ist. Golden ubuntu-24.04--dkms--mi300x--verify-failed: nur die dpkg-query-Zeile (Paketliste), DIE unverändert. Rot: t/17-amd-dkms-held.t 13/27 (Skriptantworten auf die alte Ein-Paket-Abfrage geschlüsselt; Held-installiert-Fälle brauchen eine apt-cache-policy-Antwort) und t/17-amd-install-driver.t Test 33 (Anspruch k101 hF -> Hold zuerst wird durch Entscheidung 2 ersetzt: hF auf der Kandidatenversion -> nur Build-Log). Beides Test-Writer. Nicht gegen Hardware geprüft.
+
+2026-11-26 05:04 rex-gpu-test-writer: Tests stehen, nicht committet. t/17-amd-dkms-held.t: k95/k101-Fälle umgestellt (Abfrage-Antwort auf die neue Sammelabfrage dpkg-query Plan-Pakete + amdgpu-dkms-firmware, Held-installiert-Fälle mit apt-cache-policy-Antwort; Ansprüche bleiben) und neu k108 Anspruch 1-11 (Hold unter Kandidat genannt, auf Kandidat nicht, not-installed ohne policy, Firmware/Header gehalten, zwei Holds ein Satz, policy leer/Exit 100 -> genannt, Erfolgspfad ohne Hold-Abfrage, gleicher Wortlaut post_install/verify_packages; Ubuntu 24.04, Debian 13/12). t/17-amd-install-driver.t: der k101-Anspruch 'hF nennt den Hold zuerst' ist ERSETZT (hF auf Kandidat -> nur Build-Log, hF unter Kandidat -> Hold zuerst); Golden-Regex der Hold-Abfrage nachgezogen. Gegen HEAD-lib rot: Ansprüche 1,2,4,5,6,8,9,11 und die umgestellten Held-Fälle; grün bleiben 3 und 7 und 10 (Schutz vor Übernennung bzw. neuem Befehl auf dem Erfolgspfad, k101-Verhalten ist unverändert). Nicht gegen Hardware geprüft; Hold-Verhalten von apt selbst nicht gezeigt.
+
+Hub-Review 2026-11-26: prove -lr t/ grün (50 Dateien, 1983 Tests), dzil build sauber, gewobenes POD ohne podchecker-Fehler. Nicht gegen Hardware geprüft. Weiter an rex-gpu-release-manager zum Commit.
+
+Committed b1e9d04
