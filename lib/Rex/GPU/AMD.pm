@@ -196,7 +196,11 @@ host's package sources: for C<dkms> the running kernel's headers (the
 message then says to upgrade the kernel and reboot: usually the mirror has
 moved on to a newer kernel than the running one) and C<amdgpu-dkms>; for
 C<inbox> the module package or every firmware package; on RHEL also when
-C<dnf repoquery> itself fails (metadata that cannot be downloaded).
+C<dnf repoquery> itself fails (metadata that cannot be downloaded). These
+messages say C<No driver package was installed> (C<dkms>, and the failed
+C<dnf repoquery>) or C<Nothing was installed> (C<inbox>); called from
+L<Rex::GPU/gpu_setup>, whose NVIDIA steps may have installed their driver,
+they say it C<for the AMD GPU> (C<GPUs> for several).
 Dies after the install when a package is not installed afterwards (a failed
 DKMS build leaves C<amdgpu-dkms> half-configured, so C<dpkg -l> does not show
 it C<ii>; an RPM whose C<%post> build failed is caught by the C<dkms status>

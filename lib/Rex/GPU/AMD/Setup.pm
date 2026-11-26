@@ -347,6 +347,7 @@ running build): upgrade the kernel, reboot into it, run again. With a
 repository in the plan (C<dkms>) every one of these messages says that no
 driver package was installed and that the repository file and its signing
 key are in place (a re-run accepts them); else C<Nothing was installed>.
+L<Rex::GPU/gpu_setup> adds C<for the AMD GPU> to either.
 L</has_candidate> may die by itself before that
 (L<Rex::GPU::AMD::Setup::RHEL/has_candidate>: dnf could not run).
 

@@ -14,7 +14,9 @@ Revision history for Rex-GPU
     (which installs pciutils where lspci is missing) and, on a host with a
     CUDA-capable NVIDIA GPU, all NVIDIA steps run before it and are not
     undone; there such a refusal ends "Nothing was changed for the AMD GPU"
-    ("GPUs" for several). Radeon GPUs (the Radeon table of AMD's ROCm 10.1
+    ("GPUs" for several); so do the dies after apt-get update, which end
+    "Nothing was installed for the AMD GPU" or say "No driver package was
+    installed for the AMD GPU". Radeon GPUs (the Radeon table of AMD's ROCm 10.1
     matrix, new field matrix in the Hardware rows) get either driver only
     where that table lists them: Ubuntu 26.04 GA kernel 7.0, 24.04 HWE 7.0,
     22.04 HWE 6.8, RHEL-family 10.2 and 9.8 with their kernel build, never

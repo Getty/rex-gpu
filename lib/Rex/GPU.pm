@@ -225,7 +225,12 @@ L<Rex::GPU::NVIDIA/verify_nvidia>. None of that is undone. So where the
 message of such a die ends with C<Nothing was changed on the host> (as it
 does from C<install_driver> called directly), C<gpu_setup> ends it with
 C<Nothing was changed for the AMD GPU> instead (C<GPUs> when it passed
-several), also for an C<amd> class of your own.
+several), also for an C<amd> class of your own. The same goes for the dies
+after C<apt-get update> (a package without a candidate, a failed C<dnf
+repoquery>): C<Nothing was installed> at the end becomes C<Nothing was
+installed for the AMD GPU>, and C<No driver package was installed> -- at
+the end or before a C<;> -- C<No driver package was installed for the AMD
+GPU> (C<GPUs> likewise).
 
   gpu_setup(
     containerd_config => 'rke2',  # containerd integration target
@@ -465,8 +470,11 @@ sub gpu_setup {
         local $Rex::GPU::AMD::GPU_SETUP = 1;
         # k104: "Nothing was changed on the host" is install_driver's own;
         # gpu_detect (pciutils) and the NVIDIA steps may have changed the host
-        # before it, so here it is said for the AMD GPUs. Any other die (an
-        # object, another last sentence) is passed on as it is.
+        # before it, so here it is said for the AMD GPUs. k110: so are
+        # "Nothing was installed" (last) and "No driver package was installed"
+        # (last, or before ";") of the dies after apt-get update -- the NVIDIA
+        # steps may have installed their driver. Any other die (an object,
+        # another sentence) is passed on as it is.
         eval {
           $class->_step($amd, 'Rex::GPU::AMD', 'install_driver',
             gpus   => \@install,
@@ -476,8 +484,11 @@ sub gpu_setup {
         } or do {
           my $error = $@;
           my $noun = @install > 1 ? 'GPUs' : 'GPU';
-          $error =~ s/ Nothing was changed on the host\n\z/ Nothing was changed for the AMD $noun\n/
-            unless ref $error;
+          unless (ref $error) {
+            $error =~ s/ Nothing was changed on the host\n\z/ Nothing was changed for the AMD $noun\n/;
+            $error =~ s/ Nothing was installed\n\z/ Nothing was installed for the AMD $noun\n/;
+            $error =~ s/ No driver package was installed(?=;|\n\z)/ No driver package was installed for the AMD $noun/;
+          }
           die $error;
         };
       }
