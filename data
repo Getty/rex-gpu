@@ -1,0 +1,16 @@
+---
+class: standard
+created: 2026-11-26T04:56:20Z
+id: 111
+priority: low
+status: backlog
+tags:
+- amd
+- apt
+- message
+title: 'AMD inbox/ROCm/Helfer-Pläne: gehaltene Pakete bleiben ungenannt (firmware-amd-graphics,
+  nicht installiertes dkms)'
+updated: 2026-11-26T04:56:20Z
+---
+
+Nebenfund aus k108 (rex-gpu-worker, 2026-11-26). k108 nennt Holds nur auf dem dkms-Fehlerpfad (blocking_holds über Plan-Pakete plus amdgpu-dkms-firmware). Die inbox-, ROCm- und Helfer-Pläne fragen nach keinem Hold: ein gehaltenes firmware-amd-graphics (Debian) oder ein gehaltenes, nicht installiertes dkms-Paket bricht apt-get install ab, und die Meldung nennt den Hold nicht. Idee: dieselbe blocking_holds/hold_note-Mechanik aus k108 auf diese Pläne ausdehnen, nur auf dem Fehlerpfad. Entscheidung Maintainer; bei Änderung Test. Nicht gegen Hardware geprüft.
