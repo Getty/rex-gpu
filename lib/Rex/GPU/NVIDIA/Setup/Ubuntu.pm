@@ -37,9 +37,10 @@ its exact branch, is looked up only after C<apt-get update>
 cannot use, dies before any driver package is installed. There is no
 hard-coded fallback package, and no other source is tried then.
 
-So a GPU without constraints (Turing to Hopper except GH200, no GPU) gets
-C<ubuntu-server>, Blackwell and GH200 C<ubuntu-server-open>, Maxwell/Pascal/Volta
-C<ubuntu-server-580>.
+So Turing to Hopper except GH200 -- without constraints or with only a
+branch floor (Ada and Hopper 520 or newer, single IDs up to 580), all within
+the "at least 580" -- and no GPU get C<ubuntu-server>, Blackwell and GH200
+C<ubuntu-server-open>, Maxwell/Pascal/Volta C<ubuntu-server-580>.
 
 Each names C<nvidia-fabricmanager-NNN> as its Fabric Manager (for a host
 with NVSwitches, see L<Rex::GPU::NVIDIA::Setup/nvswitches>): NNN is the

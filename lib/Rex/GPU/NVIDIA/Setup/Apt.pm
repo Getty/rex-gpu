@@ -190,8 +190,11 @@ package.
 =method installed_driver_version
 
 The upstream part (no epoch, no Debian revision) of C<dpkg-query -W
--f='${Version}'> for the source's C<fabric_manager_match> package:
-C<580.178.04-0ubuntu0.24.04.1> is C<580.178.04>.
+-f='${Version}'> for the package the source's C<fabric_manager_match> (or
+the key passed, see L<Rex::GPU::NVIDIA::Setup/installed_driver_version>)
+names: C<580.178.04-0ubuntu0.24.04.1> is C<580.178.04>, Debian 12's
+C<535.309.01-0+deb12u1> is C<535.309.01>. C<undef> when C<dpkg-query>
+fails or prints nothing.
 
 =method install_versioned_package
 
@@ -219,11 +222,8 @@ sub fabric_manager_unavailable {
 }
 
 sub installed_driver_version {
-  my ( $self, $source ) = @_;
-  my $pkg = $self->_with_branch($source->{fabric_manager_match}, $source);
-  die "The driver source names no package to read the driver version from "
-    ."(fabric_manager_match); the driver is installed, Fabric Manager is not\n"
-    unless defined $pkg;
+  my ( $self, $source, $key ) = @_;
+  my $pkg = $self->_driver_version_package($source, $key);
   return $self->_dpkg_upstream_version($self->_dpkg_version($pkg));
 }
 

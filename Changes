@@ -81,6 +81,15 @@ Revision history for Rex-GPU
     On Debian 12, and on 13 for 10de:2689, H200 NVL and H20 NVL16, one
     floored above the non-free branch now gets NVIDIA's CUDA repository
     with the open kernel module. Ubuntu, RHEL and openSUSE choose as before.
+  - gpu_setup and install_driver check the installed driver branch after the
+    install where the package name does not carry it: Debian (11 non-free
+    nvidia-driver; 12 and 13 also nvidia-kernel-open-dkms from the CUDA
+    repository) and the RHEL family's cuda-open-dkms. A branch that does not
+    fit the GPUs (a held, pinned or locked package, an older module stream)
+    dies with the driver packages installed, before Fabric Manager, the
+    nouveau blacklist, the initramfs and the reboot; an older branch that
+    still fits passes. New experimental Setup step verify_driver_branch and
+    source key driver_version_from.
   - Recommends Rex::LibSSH 0.006.
 
 0.005     2026-10-21 20:21:08Z

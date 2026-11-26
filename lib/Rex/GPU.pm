@@ -181,6 +181,19 @@ without a refreshed package index: by then no package source has been
 added and nothing has been installed, except C<pciutils> when
 L</gpu_detect> found no C<lspci> on the host.
 
+One die comes after the install instead: on Debian and the RHEL family's
+open driver, whose package names carry no branch, the branch that
+got installed is checked against what the GPUs need when that has a bound
+(a C<min_branch>/C<max_branch>: Ada, Hopper, Blackwell, GH200,
+Maxwell/Pascal/Volta and the Turing/Ampere IDs with a row of their own, or a
+C<requirement> with one). A branch that does not fit -- e.g. a
+C<nvidia-kernel-open-dkms> held at 550 on a Blackwell host -- makes
+C<gpu_setup> die with the driver packages and
+their package source B<installed>, before Fabric Manager, the nouveau
+blacklist, the initramfs and the reboot, and before the container toolkit
+(L<Rex::GPU::NVIDIA::Setup/verify_driver_branch>). A held older branch that
+still fits passes.
+
 After the last step L<Rex::GPU::NVIDIA/verify_nvidia> checks the result --
 kernel module, C<nvidia-smi -L>, container toolkit -- and logs a warning for
 anything missing (e.g. the module before the first reboot); it never dies.

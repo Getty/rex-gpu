@@ -120,10 +120,22 @@ C<nvidia-driver> must be a 580 (L</verify_packages>).
 =back
 
 C<nvidia-driver> is verified on both, plus the proprietary kmod on the
-second. On a host with NVSwitches both install C<nvidia-fabricmanager> of
+second. On C<cuda-open-dkms> it is also its C<driver_version_from>: where
+the GPUs need a branch bound (a C<min_branch>/C<max_branch> -- e.g. Ada,
+Hopper, Blackwell -- or a C<requirement> with one),
+L<Rex::GPU::NVIDIA::Setup/verify_driver_branch> reads its installed version
+(C<rpm -q --qf '%{VERSION}' nvidia-driver>) and dies, the packages
+installed, before Fabric Manager, the nouveau blacklist and C<dracut> when
+the branch does not fit -- e.g. a 550 from an older C<nvidia-driver>
+module stream that the optional C<open-dkms> enable could not switch, or
+from a version lock, for a Blackwell (570 or newer). C<cuda-580-dkms>
+checks its branch in L</verify_packages>. On a host with NVSwitches both
+install C<nvidia-fabricmanager> of
 the installed C<nvidia-driver>'s exact version
-(C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without constraints, Blackwell and GH200 get C<cuda-open-dkms>,
-Maxwell/Pascal/Volta C<cuda-580-dkms>.
+(C<dnf install -y nvidia-fabricmanager-VERSION>). So a GPU without
+constraints, one with only a branch floor (Ada and Hopper, 520 or newer;
+single Turing to Hopper IDs up to 580), Blackwell and GH200 get
+C<cuda-open-dkms>, Maxwell/Pascal/Volta C<cuda-580-dkms>.
 
 On an HGX B200/B300 (L<Rex::GPU::NVIDIA::Setup/nvlink_fabric_needed>)
 Fabric Manager is installed the same way, then C<nvlsm> from the same CUDA
@@ -199,6 +211,9 @@ sub sources {
       kernel_module   => 'open',
       branch_at_least => 580,
       verify          => [ 'nvidia-driver' ],
+      # k106: whatever branch an enabled stream or a lock gave it is checked
+      # after the install (verify_driver_branch); cuda-580-dkms has pin_branch
+      driver_version_from => 'nvidia-driver',
       %fm,
       %$open
     },
@@ -330,7 +345,8 @@ the driver branch the chosen source asks for:
 C<cuda-580-dkms> a failure B<dies> here, before any driver package is
 installed -- without the pin dnf would resolve the newest branch, which does
 not support the GPU; for C<cuda-open-dkms> (C<stream_optional>) it is
-ignored.
+ignored, and the branch that gets installed is checked after the install
+(see L</sources>).
 
 =item * C<versionlock>: C<python3-dnf-plugin-versionlock> (L</install_helpers>), then
 C<dnf versionlock add>; a failure dies the same way.
@@ -366,6 +382,8 @@ sub prepare_source {
   my $source = $plan->{source} or return;
   if (my $stream = $source->{module_stream}) {
     if ($source->{stream_optional}) {
+      # k106: a failure stays swallowed -- an older stream enabled earlier
+      # then installs its branch, which verify_driver_branch checks
       $self->run_cmd("dnf module enable nvidia-driver:$stream -y 2>/dev/null || true", auto_die => 0);
     }
     else {

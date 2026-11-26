@@ -88,6 +88,16 @@ my @COMMON = (
   # shows as a mutating line and as a golden diff; dpkg_l scripts it by state.
   [ qr{^dpkg -l \S+ 2>/dev/null \| grep -q '\^\[hi\]i'$} => '', 0 ],
   [ q{rpm -q --qf '%{VERSION}' nvidia-driver 2>&1} => '580.95.05', 0 ],
+  # k100: Setup->verify_driver_branch reads the installed version of the
+  # package a source names in driver_version_from, only where the GPUs' requirement
+  # has a branch bound. Hand-written stand-ins for what dpkg-query prints
+  # ("UPSTREAM-REVISION", no epoch here): the CUDA repository's open kernel
+  # module at a branch above every floor (a Blackwell needs 570), and Debian
+  # 12's non-free nvidia-driver, 535.309.01-0+deb12u1 (bookworm, the string
+  # read on packages.debian.org by the worker on 2026-11-26; NOT a capture
+  # from a host). The debian-13 profile answers its own (trixie's non-free).
+  [ q{dpkg-query -W -f='${Version}' nvidia-kernel-open-dkms 2>/dev/null} => '615.71.09-1', 0 ],
+  [ q{dpkg-query -W -f='${Version}' nvidia-driver 2>/dev/null} => '535.309.01-0+deb12u1', 0 ],
   [ qr{^rpm -q (?:--whatprovides )?(\S+) 2>&1$} => 'installed', 0 ],
   [ 'uname -m'                             => 'x86_64', 0 ],
   [ 'dpkg --print-architecture'            => 'amd64', 0 ]
@@ -118,6 +128,11 @@ my %HOST = (
   'debian-13' => {
     os => 'Debian', release => '13.1',
     responses => [
+      # k100: trixie's non-free nvidia-driver (packages.debian.org, read by the
+      # worker on 2026-11-26; hand-written here, not a capture). Debian 13
+      # gets its own because its branch (550) differs from bookworm's (535): a
+      # test that mixes them up is wrong on one of the two.
+      [ q{dpkg-query -W -f='${Version}' nvidia-driver 2>/dev/null} => '550.163.01-2', 0 ],
       [ 'uname -r' => '6.12.48+deb13-amd64', 0 ],
       # deb822 only (/etc/apt/sources.list.d/debian.sources): no sources.list
       [ 'cat /etc/apt/sources.list 2>/dev/null' => '', 1 ],

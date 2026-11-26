@@ -57,7 +57,28 @@ carries, at least 590. Unavailable on any other release or architecture.
 
 So a Blackwell or GH200 GPU (open module only: no Debian-packaged driver
 fits) gets the CUDA repository on Debian 12/13 and dies before the host is
-changed anywhere else; every other GPU gets C<non-free>.
+changed anywhere else. So does a GPU whose branch floor is above the
+release's C<non-free> branch (see
+L<Rex::GPU::NVIDIA::Requirement/generations>): on 12 (535) and 13 (550) a
+Turing to Hopper ID that NVIDIA listed first in a later branch gets the
+CUDA repository (on 12 e.g. the RTX 4070 SUPER or the H200), and on 11 (470)
+and a release L</nonfree_branch> does not know every Ada and Hopper (520 or
+newer) and every such ID dies before the host is changed. Every other GPU
+gets C<non-free>.
+
+Neither package name carries the branch, so both sources name the package
+whose version is the driver's in C<driver_version_from>: C<nvidia-driver>
+(it depends on the kernel module of exactly its own version) and
+C<nvidia-kernel-open-dkms>. Where the GPUs need a branch bound (a
+C<min_branch>/C<max_branch> -- e.g. Ada, Hopper, Blackwell,
+Maxwell/Pascal/Volta -- or a C<requirement> with one),
+L<Rex::GPU::NVIDIA::Setup/verify_driver_branch> reads its installed version
+with C<dpkg-query> after the install and dies, the packages installed,
+before Fabric Manager, the nouveau blacklist and the initramfs when the
+branch does not fit -- e.g. a C<nvidia-kernel-open-dkms> held at 550 for a
+Blackwell, or a C<nvidia-driver> 590 from a configured CUDA repository for a
+V100. A C<nvidia-driver> held at an older branch that still fits (535 for a
+V100) passes.
 
 A host with NVSwitches (L<Rex::GPU::NVIDIA::Setup/nvswitches>) needs NVIDIA
 Fabric Manager, which Debian does not package: C<non-free> is rejected for
@@ -136,6 +157,11 @@ sub sources {
       # (via libnvidia-encode1 -> libnvcuvid1), and already_installed needs it
       packages      => [ 'nvidia-driver', 'nvidia-smi', 'libcuda1' ],
       verify        => [ 'nvidia-driver', 'libcuda1' ],
+      # k100: nvidia-driver Depends on nvidia-kernel-dkms (= its own version)
+      # | nvidia-kernel-VERSION | nvidia-open-kernel-VERSION (bookworm
+      # 535.309.01-0+deb12u1, trixie 550.163.01-2; packages.debian.org and
+      # apt-cache show, 2026-11-26), so its version is the kernel module's
+      driver_version_from => 'nvidia-driver',
       nonfree       => 1
     },
     $self->_cuda_repo_source($major)
@@ -171,7 +197,9 @@ sub _cuda_repo_source {
     packages             => $packages,
     verify               => [ @$packages ],
     fabric_manager       => 'nvidia-fabricmanager',
-    fabric_manager_match => 'nvidia-kernel-open-dkms'
+    fabric_manager_match => 'nvidia-kernel-open-dkms',
+    # k100: the open kernel module itself; a held older one passes verify
+    driver_version_from  => 'nvidia-kernel-open-dkms'
   );
   my $release = $self->release // '';
   my $arch    = $self->arch // '';
@@ -554,7 +582,8 @@ sub is_debian_archive_keyring {
 
 B<Experimental>, like L<Rex::GPU::NVIDIA::Setup>. The NVIDIA driver install
 for Debian (and every C<is_debian> host that is not Ubuntu): C<nvidia-driver>
-from Debian C<non-free>, or where that cannot drive the GPUs (Blackwell) the
+from Debian C<non-free>, or where that cannot drive the GPUs (Blackwell, or
+a GPU that needs a newer branch than the release's C<non-free> one) the
 open-module set from NVIDIA's CUDA repository (L</sources>), on the apt
 layer L<Rex::GPU::NVIDIA::Setup::Apt>.
 

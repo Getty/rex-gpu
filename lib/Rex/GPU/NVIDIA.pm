@@ -340,6 +340,25 @@ A mixed host gets what the combination needs: an Ada next to a B200 gets
 the open driver (Ubuntu C<-server-open>), an Ada next to a V100 the
 proprietary 580 one (Ubuntu C<nvidia-driver-580-server>).
 
+Where the package name does not carry the branch -- Debian (C<nvidia-driver>
+from C<non-free>, on 12/13 C<nvidia-kernel-open-dkms> from the CUDA
+repository) and the RHEL family's open driver (C<nvidia-driver>) -- the
+branch that B<got> installed is checked too, for GPUs that need a branch
+bound (a C<min_branch>/C<max_branch> from their row in
+L<Rex::GPU::NVIDIA::Requirement/generations> or a C<requirement> option:
+Ada and Hopper 520 or newer, Blackwell 570 or newer, Maxwell/Pascal/Volta
+580 or older, a single ID with a row of its own that row's floor): its
+version is read with C<dpkg-query> / C<rpm -q> after the packages are
+verified (see L<Rex::GPU::NVIDIA::Setup/verify_driver_branch>). A branch
+that does not fit -- a package held at an older one, a version another
+repository, module stream or lock left there -- makes C<install_driver>
+B<die> with the driver packages B<installed>, before Fabric Manager, the
+nouveau blacklist, the initramfs and the reboot. An older branch that still
+fits passes and is not upgraded. Turing and Ampere GPUs without a row of
+their own, GPUs the table does not know and a host without GPUs read
+nothing more; neither do Ubuntu (its package names carry the branch) and
+openSUSE (it removes every NVIDIA package first).
+
   install_driver();              # install only, load module without reboot
   install_driver(reboot => 1);   # install, reboot, verify
   install_driver(gpus => [ grep { $_->{compute} } @{ $gpus->{nvidia} } ]);

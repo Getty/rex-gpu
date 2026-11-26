@@ -12,6 +12,7 @@ run: apt-get -o DPkg::Lock::Timeout=120 update -q
 run: DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 install -y linux-headers-7.0.14-20-pve nvidia-driver-cuda nvidia-kernel-open-dkms
 run: dpkg -l nvidia-driver-cuda 2>/dev/null | grep -q '^[hi]i'
 run: dpkg -l nvidia-kernel-open-dkms 2>/dev/null | grep -q '^[hi]i'
+run: dpkg-query -W -f='${Version}' nvidia-kernel-open-dkms 2>/dev/null
 file: /etc/modprobe.d/blacklist-nouveau.conf
   | blacklist nouveau
   | options nouveau modeset=0
