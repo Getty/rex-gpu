@@ -1,0 +1,28 @@
+---
+claimed_at: 2026-11-26T05:16:59Z
+claimed_by: rex-gpu
+class: standard
+completed: 2026-11-26T05:16:59Z
+created: 2026-11-06T19:20:02Z
+id: 107
+priority: low
+started: 2026-11-26T04:28:45Z
+status: done
+tags:
+- nvidia
+- hardware
+- debian
+title: 'Generationszeile Turing/Ampere/Ada/Hopper ohne min_branch: Debian 11 non-free
+  wählt 470 auch für Ada und Hopper'
+updated: 2026-11-26T05:16:59Z
+---
+
+Nebenfund aus der k100-Analyse (rex-gpu-worker, read-only, 2026-11-06). Lane hardware-curator. Die Zeile Turing/Ampere/Ada/Hopper (0x1df7 bis 0x28ff) in Requirement.pm um Zeile 343 hat kein min_branch. Debian 11 non-free (Branch 470) besteht damit auch für Ada oder Hopper, die 470 nach Wissen des Workers nicht treibt. Zu prüfen gegen NVIDIAs Support-Listen: brauchen Ada und Hopper eine Untergrenze, und muss die Zeile dafür geteilt werden? Eine Branch-Prüfung nach dem Install (k100) fängt das nicht, weil sie gegen dieselbe Anforderung prüft. Nicht gegen Hardware geprüft.
+
+2026-11-26 04:28 Getty 2026-11-26: offene Karten fertigmachen, danach Release (hebt die Backlog-Entscheidung für 0.006 vom 2026-11-06 auf).
+
+2026-11-26 05:04 Curator: belegt gegen NVIDIA supportedchips (143 x86_64- und 137 aarch64-READMEs, 470.42.01 bis 620.73.04, gleiche Untergrenzen) und die README-Tabellen von open-gpu-kernel-modules, geprüft 2026-11-26. 470.256.02 (Debian 11) und 515.105.01 listen kein Hopper und kein Ada; 520.56.06 listet zuerst 2331 (H100 PCIe) und 2684 (RTX 4090). Zeile geteilt: Hopper 2300-23FF und Ada 2600-28FF min_branch 520, Turing/Ampere 1DF7-22FF und 2400-25FF ohne Grenze (Untergrenzen unter 470 nicht untersucht), dazu 88 Einzel-IDs, die NVIDIA erst in einem späteren Branch listet (510 bis 580, z. B. H200 2335 550, RTX 4070 SUPER 2783 550, H20 NVL16 230E 580). Blockkanten: keine README listet eine ID in 2239-230D, 2349-2413, 25FC-2683, 28F9-2900. Abweichungen notiert: 2685 nur in 535.154.05, dann ab 550.40.07 (Zeile 550); 2336 nur in 525.85.05 (keine eigene Zeile). Keine Logikänderung nötig. Wirkung: Debian 11 und Debian ohne bekannten non-free-Branch (sid) sterben für Ada, Hopper und die Einzel-IDs im plan, vor jeder Host-Änderung (debian-nonfree: branch 470 is older than 525); Debian 12 (13 für 2689, 233B, 230E) nimmt für IDs über dem non-free-Branch das CUDA-Repo mit Open-Modul. Ubuntu, RHEL, SUSE unverändert. Tests: t/98, t/10, t/80, t/90, t/93, t/99-setup-select, Golden driver/ubuntu-24.04--ada--empty-search (nur Zeile 10: Generationsname und Anforderung in der Meldung). HEAD plus diese Dateien: prove -lr t/ grün (47 Dateien, 1948 Tests). Im geteilten Baum zusätzlich rot durch das Zusammenspiel mit k100: verify_driver_branch läuft jetzt auch für Ada 27b0 und H100 2330 (Untergrenze 525), der Golden-Harness beantwortet dpkg-query und rpm -q dafür nicht (t/41 1, t/93 10-11 und 14, t/96-golden-driver 14 Tests, t/96-distro-failures 11, t/96-proxmox 1, t/99-class-dispatch 3, t/99-setup 211 und 213); das muss der k100-Worker nachziehen. Docs: Changes, README, NVIDIA.pm-POD, hardware.md. Offen: POD in lib/Rex/GPU.pm (Turing to Hopper gets the same driver as before) stimmt nicht mehr, die Datei war für mich gesperrt. Nicht gegen Hardware geprüft.
+
+Hub-Review 2026-11-26: prove -lr t/ grün (50 Dateien, 1983 Tests), dzil build sauber, gewobenes POD ohne podchecker-Fehler. Nicht gegen Hardware geprüft. Weiter an rex-gpu-release-manager zum Commit.
+
+Committed 9660d33
