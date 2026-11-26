@@ -1,0 +1,33 @@
+---
+claimed_at: 2026-11-26T05:19:24Z
+claimed_by: rex-gpu
+class: standard
+completed: 2026-11-26T05:19:24Z
+created: 2026-11-06T19:35:45Z
+id: 109
+priority: low
+started: 2026-11-26T04:29:04Z
+status: done
+tags:
+- amd
+- dkms
+- rhel
+- message
+title: 'AMD RHEL dkms: ein dnf versionlock wird nicht erkannt, package_held ist dort
+  immer 0'
+updated: 2026-11-26T05:19:24Z
+---
+
+Nebenfund aus k101 (rex-gpu-worker, 2026-11-06). Seit k95 und k101 nennt der apt-Layer einen Hold auf amdgpu-dkms (apt-mark hold) in post_install und verify_packages. Auf RHEL gibt package_held immer 0 zurück, ohne Host-Befehl; ein dnf versionlock auf amdgpu-dkms oder kernel-devel wird nicht erkannt und nicht genannt. Ob ein Gegenstück lohnt (dnf versionlock list, Plugin nicht immer installiert), ist Maintainer-Entscheidung; bei Änderung Test. Nicht gegen Hardware geprüft.
+
+2026-11-26 04:28 Getty 2026-11-26: offene Karten fertigmachen, danach Release (hebt die Backlog-Entscheidung für 0.006 vom 2026-11-06 auf).
+
+2026-11-26 04:54 rex-gpu-worker: umgesetzt, Baum commit-fertig, nicht committet. RHEL.pm package_held liest jetzt die dnf-Sperrliste; blocking_holds nennt einen Lock auf ein Plan-Paket (amdgpu-dkms, kernel-devel, kernel-headers; kernel-devel-matched-K nur wenn nicht installiert) oder auf amdgpu-dkms-firmware, wenn nicht installiert; ein Lock auf kernel-devel zählt nicht für kernel-devel-matched. Wortlaut über den gemeinsamen hold_note (k108), RHEL-hold_advice: 'is version-locked (dnf versionlock) ... Run dnf versionlock delete PKG... and install_driver again'; genannt in post_install (dkms nicht gebaut) und verify_packages (Paket fehlt). Neuer Host-Befehl nur auf dem Fehlerpfad: dnf -q versionlock list 2>/dev/null; dazu rpm -q nur für ein gesperrtes versioniertes Paket oder die Firmware. Liest dnf4 (NAME-EPOCH:VERSION-RELEASE.*, ! für excludes) und dnf5 (Package name: NAME). Exit != 0 (Plugin fehlt, Metadaten nicht ladbar) -> kein Lock, nichts stirbt zusätzlich, nichts wird installiert. RHEL 8/9/10 haben dnf4; Plugin python3-dnf-plugin-versionlock ist nicht Standard. Golden rhel-9--dkms--mi300x--verify-failed: eine neue Zeile 'run: dnf -q versionlock list 2>/dev/null' vor dem unveränderten DIE. Harness: READ_ONLY in Golden.pm braucht qr{${RUN}dnf -q versionlock list 2>/dev/null$} (Test-Writer). Offen, nicht geprüft: ob dnf4 versionlock auch repoquery filtert (dann stirbt resolve_plan mit 'kein Kandidat / Kernel upgraden' statt den Lock zu nennen); ein Lock auf amdgpu-dkms wird genannt, egal welche Version er pinnt (möglich falsch-positiv bei Lock auf den Kandidaten). Nicht gegen Hardware geprüft.
+
+2026-11-26 05:04 rex-gpu-test-writer: Tests stehen, nicht committet. Harness: t/lib/Test/RexGPU/Golden.pm READ_ONLY um qr{${RUN}dnf -q versionlock list 2>/dev/null$} (eigener Schritt, ändert keinen bestehenden Golden). Neu t/17-amd-dkms-held-rhel.t, Ansprüche 1-9 (dnf4-Lock auf amdgpu-dkms in post_install und verify_packages, Lock auf kernel-devel bei gescheiterter Transaktion nur kernel-devel, Exit 1 -> alter Text/einmal abgefragt/nichts installiert, dnf5-Format, kernel-devel laufender Kernel installiert nicht genannt, kernel-devel-Lock zählt nicht für -matched, -matched selbst gesperrt genannt, Firmware gesperrt+fehlend genannt/installiert nicht). Gegen HEAD-lib rot: 1,2,3,4,5,7,8; grün bleiben 6 und 9 (Schutz vor Übernennung). Offen unverändert: dnf4-Zeilenformat und dnf5-Block 'Package name:' sind handgeschrieben, nicht von einem Host; ob versionlock repoquery filtert, nicht gezeigt; Lock auf den Kandidaten bleibt Falsch-Positiv. Nicht gegen Hardware geprüft.
+
+2026-11-26 05:09 rex-gpu-test-writer: Nachtrag, Erfolgspfad: t/17-amd-dkms-held-rhel.t Anspruch 10 -- RHEL 9, dkms, Modul gebaut, Lock auf amdgpu-dkms und Firmware nicht installiert: lebt, kein dnf versionlock, kein rpm -q der Firmware, rpm -q genau zweimal je Plan-Paket, ein dnf install. Gegen HEAD grün (Schutz vor neuem Befehl auf dem Erfolgspfad, kein Fehlschlag-Beweis). Nicht gegen Hardware geprüft.
+
+Hub-Review 2026-11-26: prove -lr t/ grün (50 Dateien, 1983 Tests), dzil build sauber, gewobenes POD ohne podchecker-Fehler. Nicht gegen Hardware geprüft. Weiter an rex-gpu-release-manager zum Commit.
+
+Committed b1e9d04
