@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-26T05:18:10Z
+claimed_by: rex-gpu
+class: standard
+completed: 2026-11-26T05:18:10Z
+created: 2026-11-06T19:19:51Z
+id: 106
+priority: low
+started: 2026-11-26T04:28:36Z
+status: done
+tags:
+- nvidia
+- rhel
+- behavior
+title: 'RHEL NVIDIA: cuda-open-dkms ohne Branch-Prüfung nach dem Install, ein geschluckter
+  Stream-Enable lässt einen älteren Branch bestehen'
+updated: 2026-11-26T05:18:10Z
+---
+
+Nebenfund aus der k100-Analyse (rex-gpu-worker, read-only, 2026-11-06). Dieselbe Lücke wie k100, auf RHEL: die Anforderung ist branch_at_least 580, nach dem Install prüft nichts den installierten Branch. Bei stream_optional wird ein gescheitertes dnf module enable mit "|| true" geschluckt (RHEL.pm um Zeile 368-370). Ein früher aktivierter älterer Stream installiert dann seinen Branch, und rpm -q nvidia-driver besteht. Dieselbe Fehlerklasse wie k26 (pin_branch) und k100: am besten mit dem Ort lösen, den k100 bekommt. Nicht gegen Hardware geprüft.
+
+2026-11-26 04:28 Getty 2026-11-26: offene Karten fertigmachen, danach Release (hebt die Backlog-Entscheidung für 0.006 vom 2026-11-06 auf).
+
+2026-11-26 04:57 rex-gpu-worker 2026-11-26: Im selben Schritt wie k100 verdrahtet (verify_driver_branch, Quell-Schlüssel driver_version_from), nicht committet, Changes nicht angefasst, nicht gegen Hardware geprüft. RHEL cuda-open-dkms: driver_version_from nvidia-driver. Neue Host-Zeile direkt nach rpm -q nvidia-driver 2>&1: rpm -q --qf '%{VERSION}' nvidia-driver 2>&1. Der Stream-Enable bleibt geschluckt (|| true, prepare_source), jetzt mit Kommentar und POD-Satz, dass der installierte Branch danach geprüft wird. cuda-580-dkms nicht verdrahtet: pin_branch (k26) prüft dort schon genau 580 in verify_packages, strenger und früher. Eine Migration von pin_branch auf den neuen Schritt ist möglich, nicht Scope. WICHTIG für den Test: geprüft wird gegen die Anforderung der GPUs (why_not), nicht gegen branch_at_least 580 der Quelle. Ein Blackwell 2b85 (min 570) mit 575 besteht, mit 565 stirbt er. "RHEL mit 575 stirbt" gilt nur für eine GPU mit Untergrenze über 575: B300 3182 (min 580; NVLink-Plattform, FM und nvlsm müssen gescriptet werden) oder requirement => { min_branch => 580 }. Soll stattdessen branch_at_least der Quelle zählen: Entscheidung Hub/Maintainer, gleiche Host-Zeile, anderer Vergleich. Offline-Szenarien (Scratch-Harness): rocky-9 B300 575 stirbt (Text nennt Fabric Manager), 580 besteht die Prüfung. rocky-9 Blackwell mit min 580: 575 stirbt ohne dracut und Blacklist, 580 läuft durch. rocky-10 "package nvidia-driver is not installed" mit Exit 1 -> die "Cannot read". rocky-9 Volta (cuda-580-dkms) liest nur wie bisher über pin_branch. GOLDENS: der Harness-Default für die rpm-Zeile existiert schon (580.95.05). Je eine Zeile in alma-9-lsb, rhel-9, rocky-9, rocky-10 und rocky-9-lsb --blackwell sowie rhel-9 und rocky-9 --hgx-b200 (dort gefolgt von der identischen FM-Lesung). Mit k107 im Baum zusätzlich die Ada-Goldens (alma-9-lsb, rhel-9, rocky-8, rocky-9, rocky-10, rocky-9-lsb) und rocky-9/rocky-10 --hgx-h100. Echter Knoten: RHEL 9 Blackwell mit früher aktiviertem älterem nvidia-driver-Stream oder dnf versionlock auf 550 -> gpu_setup muss vor dracut sterben.
+
+2026-11-26 05:09 rex-gpu-test-writer: Tests stehen, nicht committet, im selben Testfile wie k100: t/95-verify-driver-branch.t Anspruch 5 (rocky-9 Blackwell, cuda-open-dkms): requirement => { min_branch => 580 } mit 575.57.08 stirbt ohne dracut und Blacklist, mit 580.95.05 läuft durch; ohne Option 565 stirbt, 575 läuft durch (geprüft wird gegen die Anforderung der GPU, nicht branch_at_least der Quelle). Harness-Default für rpm -q --qf lag schon (580.95.05). 15 RHEL-Goldens je +1 Zeile (rpm -q --qf '%{VERSION}' nvidia-driver) regeneriert. Handgeschriebene rpm-Antworten, ein geschluckter Stream-Enable oder dnf versionlock werden nicht gezeigt, nur was der Schritt bei der gemeldeten Version tut. Nicht gegen Hardware geprüft.
+
+Hub-Review 2026-11-26: prove -lr t/ grün (50 Dateien, 1983 Tests), dzil build sauber, gewobenes POD ohne podchecker-Fehler. Nicht gegen Hardware geprüft. Weiter an rex-gpu-release-manager zum Commit.
+
+Committed ba73a52
