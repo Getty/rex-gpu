@@ -1,0 +1,30 @@
+---
+claimed_at: 2026-11-26T05:20:16Z
+claimed_by: rex-gpu
+class: standard
+completed: 2026-11-26T05:20:16Z
+created: 2026-11-06T20:09:59Z
+id: 110
+priority: low
+started: 2026-11-26T04:29:12Z
+status: done
+tags:
+- amd
+- messages
+- behavior
+title: 'AMD unter gpu_setup: ''Nothing was installed'' / ''No driver package was installed''
+  stimmen auf einem gemischten Host nicht'
+updated: 2026-11-26T05:20:16Z
+---
+
+Nebenfund aus k104 (rex-gpu-worker, 2026-11-06). Unter gpu_setup auf einem Host mit CUDA-fähiger NVIDIA-GPU enden einige AMD-Abbrüche nach apt-get update weiter mit 'Nothing was installed' (resolve_plan/_unresolved_note für inbox, AMD/Setup.pm ~Z. 400) bzw. sagen 'No driver package was installed' (has_candidate in AMD/Setup/RHEL.pm ~Z. 179; bei dkms mitten in der Meldung von _unresolved_note). Im gpu_setup-Zusammenhang kann dann schon ein NVIDIA-Treiberpaket installiert sein (und pciutils). k104 hat nur den Schluss-Satz 'Nothing was changed on the host' umgeschrieben. Idee: dieselbe Umschreibung in gpu_setup ('for the AMD GPU'), oder den Satz auf AMD-Pakete einschränken. Meldungstext, also Verhalten: Changes, Tests, Goldens. Entscheidung Maintainer. Nicht gegen Hardware geprüft.
+
+2026-11-26 04:29 Getty 2026-11-26: offene Karten fertigmachen, danach Release (hebt die Backlog-Entscheidung für 0.006 vom 2026-11-06 auf).
+
+2026-11-26 04:54 rex-gpu-worker: umgesetzt, Baum commit-fertig, nicht committet. lib/Rex/GPU.pm, AMD-Zweig in gpu_setup (k104-Umschreibung, nur unter $Rex::GPU::AMD::GPU_SETUP, nur Text-Fehler): 'Nothing was installed' am Ende -> 'Nothing was installed for the AMD GPU'; 'No driver package was installed' am Ende oder vor ';' -> '... for the AMD GPU' (GPUs bei mehreren, Nomen aus @install wie k104). Trifft die dkms- und inbox-Dies nach apt-get update (kein Kandidat) und das RHEL-has_candidate-Die (dnf repoquery fehlgeschlagen). Rex::GPU::AMD::install_driver allein behält den Wortlaut. POD in GPU.pm (AMD-Absatz), AMD.pm und Setup.pm resolve_plan nachgezogen. Keine neuen Host-Befehle, kein Golden bewegt (die AMD-Goldens laufen über install_driver allein). Rex::Rancher (gpu => 1) sieht den neuen Text; dort matcht nichts auf diese Texte (gegrept 2026-11-26), also kein Folgeticket nötig. Test-Writer: gemischter NVIDIA+AMD-Host unter gpu_setup, AMD ohne Kandidat (dkms, inbox) und RHEL repoquery exit 1 -> erwartete Texte wie oben. Nicht gegen Hardware geprüft.
+
+2026-11-26 05:04 rex-gpu-test-writer: Tests stehen, nicht committet. Neu t/22-amd-gpu-setup-no-candidate.t (Muster t/21): echtes gpu_setup + echtes AMD install_driver auf gemischtem Host, NVIDIA-Schritte als Recorder. dkms ohne Kandidat -> '... No driver package was installed for the AMD GPU; the amdgpu repository ...'; inbox (APU, HWE 7.0, amd_integrated) -> 'Nothing was installed for the AMD GPU'; RHEL repoquery Exit 1 -> '... No driver package was installed for the AMD GPU'; zwei GPUs -> 'GPUs' (dkms vor dem ';', RHEL am Ende); das alleinstehende install_driver behält in denselben Fällen den alten Wortlaut. Gegen HEAD-lib alle 4 Subtests rot. Nicht gezeigt: echtes apt/dnf, Rancher-Seite (nur vom Worker gegrept).
+
+Hub-Review 2026-11-26: prove -lr t/ grün (50 Dateien, 1983 Tests), dzil build sauber, gewobenes POD ohne podchecker-Fehler. Nicht gegen Hardware geprüft. Weiter an rex-gpu-release-manager zum Commit.
+
+Committed d75e1e4
